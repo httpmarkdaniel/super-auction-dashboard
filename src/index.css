@@ -1,0 +1,38 @@
+@import "./theme.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-plane text-ink font-sans;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--series-1) 20%, transparent);
+  }
+}
+
+@layer utilities {
+  .eyebrow {
+    @apply text-[11px] tracking-[0.08em] uppercase text-muted font-semibold;
+  }
+  .card {
+    @apply bg-surface1 border border-[var(--border)] rounded-xl shadow-card;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-live 1.8s ease-in-out infinite;
+}

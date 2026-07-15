@@ -1,0 +1,45 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,jsx}"],
+  darkMode: "media",
+  theme: {
+    extend: {
+      colors: {
+        surface1: "var(--surface-1)",
+        surface2: "var(--surface-2)",
+        plane: "var(--page-plane)",
+        ink: "var(--text-primary)",
+        ink2: "var(--text-secondary)",
+        muted: "var(--text-muted)",
+        gridline: "var(--gridline)",
+        baseline: "var(--baseline)",
+        series1: "var(--series-1)",
+        series2: "var(--series-2)",
+        series3: "var(--series-3)",
+        series4: "var(--series-4)",
+        series5: "var(--series-5)",
+        series6: "var(--series-6)",
+        series7: "var(--series-7)",
+        series8: "var(--series-8)",
+        divPos: "var(--diverging-pos)",
+        divNeg: "var(--diverging-neg)",
+        divMid: "var(--diverging-mid)",
+        brandOrange: "var(--accent-orange)",
+        brandOrangeSoft: "var(--accent-orange-soft)",
+        brandNavyDeep: "var(--brand-navy-deep)",
+        good: "var(--status-good)",
+        warning: "var(--status-warning)",
+        serious: "var(--status-serious)",
+        critical: "var(--status-critical)",
+      },
+      fontFamily: {
+        sans: ['"Inter"', '"Helvetica Neue"', "Arial", "sans-serif"],
+        head: ['"Bebas Neue"', '"Arial Black"', "sans-serif"],
+      },
+      boxShadow: {
+        card: "0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.03)",
+      },
+    },
+  },
+  plugins: [],
+};
