@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
 import { STORE_OPTIONS } from "../mockData";
 import SearchBar from "./SearchBar";
 
 function StoreDropdown({ value, onChange }) {
   return (
-    <div className="flex items-center gap-2 bg-white border-2 border-white rounded-xl pl-3.5 pr-2.5 py-2 shrink-0">
+    <div className="flex items-center gap-2 bg-white rounded-xl px-5 h-11 shadow-card shrink-0">
       <span className="text-[11px] tracking-[0.08em] uppercase text-brandOrange font-bold">Store</span>
       <select
         value={value}
@@ -21,28 +20,25 @@ function StoreDropdown({ value, onChange }) {
   );
 }
 
-export default function Topbar({ title, store, onStoreChange, searchPool }) {
-  const [minutesAgo, setMinutesAgo] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setMinutesAgo((m) => m + 1), 60000);
-    return () => clearInterval(t);
-  }, []);
-
+export default function Topbar({ store, onStoreChange, searchPool, onCtaClick }) {
   return (
-    <div className="flex items-center justify-between flex-wrap gap-3 bg-brandOrange px-8 md:px-10 py-5 w-full">
-      <div className="shrink-0">
-        <div className="font-head uppercase text-[34px] leading-none tracking-wide text-white">
-          HMR Auctions Live Pulse
-        </div>
-        <h1 className="text-[12px] uppercase tracking-[0.14em] font-semibold text-white/80 mt-1">{title}</h1>
+    <div className="flex items-center gap-6 bg-brandOrange px-8 md:px-10 py-6 w-full">
+      <div className="font-head uppercase text-[64px] leading-[0.95] tracking-wide text-white shrink-0 pr-8">
+        <div>HMR Auctions</div>
+        <div>Live Pulse</div>
       </div>
-      <div className="flex items-center gap-3 flex-1 justify-end flex-wrap">
+
+      <div className="flex-1 flex items-center justify-end gap-3 min-w-0">
         <SearchBar pool={searchPool} />
-        <StoreDropdown value={store} onChange={onStoreChange} />
-        <div className="flex items-center gap-2 text-[12.5px] text-white/90 shrink-0">
-          <span className="w-1.5 h-1.5 rounded-full bg-white pulse-dot" />
-          {minutesAgo === 0 ? "Updated just now" : `Updated ${minutesAgo}m ago`}
+        <div className="flex flex-col gap-2 shrink-0">
+          <button
+            onClick={onCtaClick}
+            className="pulse-ring flex items-center gap-2 bg-white text-brandOrange font-bold uppercase tracking-[0.03em] text-[13.5px] px-5 h-11 rounded-xl shadow-card hover:bg-white/90 transition-colors"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-brandOrange pulse-dot" />
+            Click Upcoming Auction Event Now!
+          </button>
+          <StoreDropdown value={store} onChange={onStoreChange} />
         </div>
       </div>
     </div>

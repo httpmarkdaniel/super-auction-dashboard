@@ -2,7 +2,7 @@ import { formatPeso } from "../../utils/format";
 
 // Horizontal ranked bar list — one hue (magnitude comparison, not identity),
 // direct-labeled so the bar and the number never disagree.
-export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, showRank = true }) {
+export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, showRank = true, showAvg = false }) {
   const max = Math.max(...rows.map((r) => r[valueKey]), 1);
 
   return (
@@ -28,8 +28,11 @@ export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel
               style={{ width: `${(r[valueKey] / max) * 100}%` }}
             />
           </div>
-          <div className="w-[96px] text-right text-[13px] tabular text-ink shrink-0">
-            {formatPeso(r[valueKey])}
+          <div className="w-[96px] text-right shrink-0">
+            <div className="text-[13px] tabular text-ink">{formatPeso(r[valueKey])}</div>
+            {showAvg && metaKey && r[metaKey] > 0 && (
+              <div className="text-[11px] tabular text-muted">{formatPeso(Math.round(r[valueKey] / r[metaKey]))} avg</div>
+            )}
           </div>
         </div>
       ))}

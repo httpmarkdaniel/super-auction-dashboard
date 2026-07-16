@@ -29,7 +29,7 @@ export default function SearchBar({ pool }) {
 
   return (
     <div className="relative w-full max-w-[320px]">
-      <div className="flex items-center gap-2 bg-surface1 border border-[var(--border)] rounded-xl px-3 py-2 focus-within:border-series1">
+      <div className="flex items-center gap-2 bg-surface1 border-2 border-[var(--border)] rounded-xl px-3 h-11 focus-within:border-series1">
         <span className="text-muted text-[14px]">⌕</span>
         <input
           type="text"

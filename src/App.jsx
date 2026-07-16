@@ -85,7 +85,7 @@ function OverviewTab({ store, overview }) {
 
 const TITLES = {
   Overview: "Overview",
-  "Live Auction": "Live Auction",
+  "Online Bidding": "Online Bidding",
   Trends: "Yearly Trends",
   "Auction Types": "Sale Channels",
   Stores: "Store Performance",
@@ -117,15 +117,25 @@ export default function App() {
   );
 
   return (
-    <div className="flex min-h-screen bg-plane">
+    <div className="flex h-screen overflow-hidden bg-plane">
       <Sidebar active={tab} onChange={setTab} />
       <main className="flex-1 flex flex-col min-w-0">
-        <Topbar title={TITLES[tab] || tab} store={store} onStoreChange={setStore} searchPool={searchPool} />
+        <Topbar
+          store={store}
+          onStoreChange={setStore}
+          searchPool={searchPool}
+          onCtaClick={() => setTab("Online Bidding")}
+        />
 
-        <div className="px-8 py-6 md:px-10 md:py-8 max-w-[1400px]">
+        <h1 className="flex items-center gap-2.5 text-[13px] uppercase tracking-[0.14em] font-bold text-brandOrange px-8 md:px-10 pt-5">
+          <span className="w-12 h-[3px] bg-brandOrange" />
+          {TITLES[tab] || tab}
+        </h1>
+
+        <div className="flex-1 overflow-y-auto px-8 py-6 md:px-10 md:py-8 max-w-[1400px]">
           {tab === "Overview" && <OverviewTab store={store} overview={overview} />}
           {CATEGORY_TABS.includes(tab) && <CategoryView category={tab} store={store} />}
-          {tab === "Live Auction" && <LiveAuctionView store={store} />}
+          {tab === "Online Bidding" && <LiveAuctionView store={store} />}
           {tab === "Trends" && <TrendsView store={store} />}
           {tab === "Auction Types" && <AuctionTypeView store={store} />}
           {tab === "Stores" && <StoreView store={store} />}

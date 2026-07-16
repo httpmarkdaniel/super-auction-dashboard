@@ -35,7 +35,7 @@ function NavGroup({ label, children }) {
 
 export default function Sidebar({ active, onChange }) {
   return (
-    <aside className="w-[220px] shrink-0 h-screen sticky top-0 bg-brandNavyDeep px-3 py-5 flex flex-col overflow-y-auto">
+    <aside className="w-[220px] shrink-0 h-screen sticky top-0 bg-brandNavyDeep px-3 py-5 flex flex-col">
       <div className="px-3 mb-4">
         <div className="bg-white rounded-xl px-3 py-3.5 w-full flex items-center justify-center">
           <img src={logo} alt="HMR Auctions" className="w-full h-auto max-w-[160px] object-contain" />
@@ -44,7 +44,7 @@ export default function Sidebar({ active, onChange }) {
 
       <NavGroup label="Dashboard">
         <NavItem label="Overview" active={active === "Overview"} onClick={() => onChange("Overview")} />
-        <NavItem label="Live Auction" active={active === "Live Auction"} onClick={() => onChange("Live Auction")} />
+        <NavItem label="Online Bidding" active={active === "Online Bidding"} onClick={() => onChange("Online Bidding")} />
       </NavGroup>
 
       <NavGroup label="Categories">

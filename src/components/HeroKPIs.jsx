@@ -3,7 +3,7 @@ import { formatPeso } from "../utils/format";
 
 export default function HeroKPIs({ data: heroKPIs }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
       <StatTile
         eyebrow="Total Bid Amount · Today"
         value={formatPeso(heroKPIs.totalBidAmount)}
