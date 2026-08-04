@@ -161,7 +161,7 @@ export default async function handler(req, res) {
           countIf(status IN ('Unpaid', 'Outstanding')) AS pending_payment_count,
           sumIf(bid_amount, status IN ('Unpaid', 'Outstanding')) AS pending_payment_value,
           countIf(status IN ('Paid', 'Released')) AS vendor_paid_count,
-          sum(commission) AS total_commission
+          sum(bid_amount * commission / 100) AS total_commission
         FROM mart_auction_vendor_analysis
         ${vendorWhere}
         FORMAT JSON
