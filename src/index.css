@@ -14,10 +14,18 @@
 
 @layer utilities {
   .eyebrow {
-    @apply text-[11px] tracking-[0.08em] uppercase text-muted font-semibold;
+    @apply text-[11px] tracking-[0.08em] uppercase text-ink font-semibold;
   }
+  /* BOPIS card language: flat white, thin border, soft shadow, no colored
+     top rule — one shared look for cards, tiles, and floating overlays. */
   .card {
-    @apply bg-surface1 border border-[var(--border)] rounded-xl shadow-card;
+    @apply bg-surface1 border border-gridline rounded-lg shadow-card;
+  }
+  .tile {
+    @apply bg-surface1 border border-gridline rounded-lg;
+  }
+  .floating {
+    @apply bg-surface1 border border-gridline rounded-lg shadow-card;
   }
   .tabular {
     font-variant-numeric: tabular-nums;
@@ -50,4 +58,22 @@
 }
 .pulse-ring {
   animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  animation: marquee-scroll 380s linear infinite;
+}
+.marquee-track-reverse {
+  animation: marquee-scroll 380s linear infinite reverse;
+}
+.marquee-viewport:hover .marquee-track {
+  animation-play-state: paused;
 }

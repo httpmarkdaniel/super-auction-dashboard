@@ -28,22 +28,25 @@ export default function SearchBar({ pool }) {
   const showPanel = focused && query.trim().length > 0;
 
   return (
-    <div className="relative w-full max-w-[320px]">
-      <div className="flex items-center gap-2 bg-surface1 border-2 border-[var(--border)] rounded-xl px-3 h-11 focus-within:border-series1">
-        <span className="text-muted text-[14px]">⌕</span>
+    <div className="relative w-full max-w-[360px]">
+      <div className="flex items-center gap-2 bg-surface1 border border-gridline rounded-lg px-3 h-9 focus-within:border-navy">
+        <span className="text-muted text-[13px]">⌕</span>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 120)}
-          placeholder="Search lot #, auction #, vendor…"
-          className="flex-1 min-w-0 text-[13.5px] text-ink bg-transparent outline-none placeholder:text-muted"
+          placeholder="Search orders, lots, vendors…"
+          className="flex-1 min-w-0 text-[13px] text-ink bg-transparent outline-none placeholder:text-muted"
         />
+        <span className="hidden sm:inline-flex items-center text-[10px] text-muted border border-gridline rounded px-1.5 py-0.5 shrink-0">
+          Ctrl K
+        </span>
       </div>
 
       {showPanel && (
-        <div className="absolute left-0 right-0 mt-1.5 card py-1.5 z-20 max-h-[320px] overflow-y-auto">
+        <div className="absolute left-0 right-0 mt-1.5 floating py-1.5 z-20 max-h-[320px] overflow-y-auto">
           {matches.length === 0 ? (
             <div className="px-3.5 py-2.5 text-[13px] text-muted">No lots or auctions match "{query}"</div>
           ) : (
@@ -52,7 +55,7 @@ export default function SearchBar({ pool }) {
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[r.status] || "bg-muted"}`} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] tabular text-ink truncate">{r.lotNumber}</div>
-                  <div className="text-[11.5px] text-ink2 truncate">
+                  <div className="text-[11.5px] text-ink truncate">
                     {r.primary} · {r.secondary}
                   </div>
                 </div>

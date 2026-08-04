@@ -3,27 +3,28 @@ import RankedBar from "./primitives/RankedBar";
 import StatTile from "./primitives/StatTile";
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
-import { getAuctionTypesForStore } from "../mockData";
 import { formatPeso } from "../utils/format";
 import { scopePossessive } from "../insights";
 
-export default function AuctionTypeView({ store }) {
-  const breakdown = getAuctionTypesForStore(store);
+export default function AuctionTypeView({ store, data: breakdown, rangeLabel = "Today", isLive }) {
   const sorted = [...breakdown].sort((a, b) => b.bidAmount - a.bidAmount);
   const top = sorted[0];
   const total = sorted.reduce((s, t) => s + t.bidAmount, 0) || 1;
-  const topShare = Math.round((top.bidAmount / total) * 100);
+  const topShare = top ? Math.round((top.bidAmount / total) * 100) : 0;
 
-  const headline = `${top.type} leads ${scopePossessive(store)} sale channels at ${formatPeso(
-    top.bidAmount
-  )} (${topShare}% of bid value), clearing ${
-    top.sellThroughRate
-  }% of its lots. (Mock data — pending real per-channel figures.)`;
+  const headline = top
+    ? `${top.type} leads ${scopePossessive(store)} sale channels at ${formatPeso(
+        top.bidAmount
+      )} (${topShare}% of bid value), clearing ${top.sellThroughRate}% of its lots.`
+    : `No sale-channel activity recorded ${scopePossessive(store)} for this period.`;
 
   return (
     <div>
       <div className="mb-8">
-        <StoryHeader eyebrow={`${store} · Sale Channels · Today's Story`} headline={headline} />
+        <StoryHeader
+          eyebrow={`${store} · Sale Channels · ${rangeLabel}${isLive ? " · Live" : ""}`}
+          headline={headline}
+        />
       </div>
 
       <StorySection title="Bid amount by sale channel" insight="Ranked by gross bid value across channels." last>

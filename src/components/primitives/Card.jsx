@@ -5,7 +5,7 @@ export default function Card({ title, subtitle, action, className = "", children
         <div className="flex items-start justify-between mb-1">
           <div>
             {title && <div className="eyebrow">{title}</div>}
-            {subtitle && <div className="text-[12px] text-ink2 mt-0.5">{subtitle}</div>}
+            {subtitle && <div className="text-[12px] text-ink mt-0.5">{subtitle}</div>}
           </div>
           {action}
         </div>

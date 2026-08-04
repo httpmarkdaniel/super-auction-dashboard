@@ -1,10 +1,10 @@
 import Card from "./primitives/Card";
 import RankedBar from "./primitives/RankedBar";
 
-export default function CategoryStrip({ data: categoryBreakdown }) {
+export default function CategoryStrip({ data: categoryBreakdown, rangeLabel = "Today" }) {
   const sorted = [...categoryBreakdown].sort((a, b) => b.bidAmount - a.bidAmount);
   return (
-    <Card title="By Category · Today">
+    <Card title={`By Category · ${rangeLabel}`}>
       <RankedBar rows={sorted} labelKey="category" valueKey="bidAmount" showRank={false} />
     </Card>
   );

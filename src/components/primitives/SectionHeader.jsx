@@ -4,10 +4,10 @@ export default function SectionHeader({ title, insight }) {
   return (
     <div className="mb-3">
       <div className="flex items-center gap-2.5">
-        <span className="w-1.5 h-4 rounded-sm bg-brandOrange shrink-0" />
-        <h2 className="text-[15px] font-semibold text-series1 tracking-tight">{title}</h2>
+        <span className="w-1.5 h-5 rounded-sm bg-navy shrink-0" />
+        <h2 className="font-bold text-[22px] leading-none uppercase tracking-wide text-series1">{title}</h2>
       </div>
-      {insight && <p className="text-[13px] text-ink2 mt-1 ml-4">{insight}</p>}
+      {insight && <p className="text-[13px] text-ink mt-1 ml-4">{insight}</p>}
     </div>
   );
 }

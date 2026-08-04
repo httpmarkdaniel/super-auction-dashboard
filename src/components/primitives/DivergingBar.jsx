@@ -25,9 +25,9 @@ export default function DivergingBar({ segments }) {
             <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${ROLE_DOT[s.role]}`} />
             <span className="text-[13px] text-ink flex-1">{s.label}</span>
             {s.count !== undefined && (
-              <span className="text-[12px] tabular text-ink2">{s.count} lots</span>
+              <span className="text-[12px] tabular text-series1">{s.count} lots</span>
             )}
-            <span className="text-[13px] tabular text-ink w-[64px] text-right">{s.pct}%</span>
+            <span className="text-[13px] tabular text-series1 w-[64px] text-right">{s.pct}%</span>
           </div>
         ))}
       </div>

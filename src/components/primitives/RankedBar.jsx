@@ -5,12 +5,16 @@ import { formatPeso } from "../../utils/format";
 export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, showRank = true, showAvg = false }) {
   const max = Math.max(...rows.map((r) => r[valueKey]), 1);
 
+  if (rows.length === 0) {
+    return <div className="text-center text-muted text-[12.5px] py-6">No data for this period.</div>;
+  }
+
   return (
     <div className="space-y-3">
       {rows.map((r, i) => (
         <div key={r[labelKey]} className="flex items-center gap-3">
           {showRank && (
-            <div className={`w-4 text-center text-[12px] shrink-0 tabular font-bold ${i === 0 ? "text-brandOrange" : "text-muted"}`}>
+            <div className={`w-4 text-center text-[12px] shrink-0 tabular font-bold ${i === 0 ? "text-navy" : "text-muted"}`}>
               {i + 1}
             </div>
           )}
@@ -29,9 +33,9 @@ export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel
             />
           </div>
           <div className="w-[96px] text-right shrink-0">
-            <div className="text-[13px] tabular text-ink">{formatPeso(r[valueKey])}</div>
+            <div className="text-[13px] tabular text-series1">{formatPeso(r[valueKey])}</div>
             {showAvg && metaKey && r[metaKey] > 0 && (
-              <div className="text-[11px] tabular text-muted">{formatPeso(Math.round(r[valueKey] / r[metaKey]))} avg</div>
+              <div className="text-[11px] tabular text-series1">{formatPeso(Math.round(r[valueKey] / r[metaKey]))} avg</div>
             )}
           </div>
         </div>

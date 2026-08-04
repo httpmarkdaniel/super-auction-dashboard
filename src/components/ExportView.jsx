@@ -14,12 +14,13 @@ const sections = [
   "Operations Detail",
 ];
 
-export default function ExportView({ store, overview }) {
+export default function ExportView({ store, overview, rangeLabel = "Today" }) {
   const [checked, setChecked] = useState(Object.fromEntries(sections.map((s) => [s, true])));
   const toggle = (s) => setChecked((c) => ({ ...c, [s]: !c[s] }));
   const selectedCount = Object.values(checked).filter(Boolean).length;
 
-  const headline = `This report captures ${scopePossessive(store)} snapshot as of today: ${formatPeso(
+  const asOf = rangeLabel === "Today" ? "as of today" : `for ${rangeLabel.toLowerCase()}`;
+  const headline = `This report captures ${scopePossessive(store)} snapshot ${asOf}: ${formatPeso(
     overview.heroKPIs.totalBidAmount
   )} in bids at ${overview.heroKPIs.sellThroughRate}% sell-through. ${selectedCount} of ${
     sections.length
@@ -49,7 +50,7 @@ export default function ExportView({ store, overview }) {
 
           <button
             onClick={() => window.print()}
-            className="w-full bg-brandOrange hover:opacity-90 text-white text-[13.5px] font-medium rounded-lg py-2.5 transition-opacity"
+            className="w-full bg-navy hover:opacity-90 text-white text-[13.5px] font-medium rounded-lg py-2.5 transition-opacity"
           >
             Generate PDF
           </button>

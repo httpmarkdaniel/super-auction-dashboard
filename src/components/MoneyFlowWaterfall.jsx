@@ -31,9 +31,9 @@ function CustomTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   return (
-    <div className="card px-3.5 py-2.5 text-[13px]">
+    <div className="floating px-3.5 py-2.5 text-[13px]">
       <div className="text-ink font-medium mb-0.5">{d.stage}</div>
-      <div className="tabular text-ink2">
+      <div className="tabular text-series1">
         {d.type === "deduction" ? "− " : ""}
         {formatPeso(Math.abs(d.value))}
       </div>
@@ -41,14 +41,14 @@ function CustomTooltip({ active, payload }) {
   );
 }
 
-export default function MoneyFlowWaterfall({ data: moneyFlow }) {
+export default function MoneyFlowWaterfall({ data: moneyFlow, rangeLabel = "Today" }) {
   const palette = usePalette();
   const data = buildWaterfallData(moneyFlow);
   const colorFor = (type) =>
     type === "total" ? palette.series1 : type === "result" ? palette.good : palette.divNeg;
 
   return (
-    <Card title="Money Flow · Today" subtitle="Bid amount → deductions → vendor payable">
+    <Card title={`Money Flow · ${rangeLabel}`} subtitle="Bid amount → deductions → vendor payable">
       <div className="h-[280px] mt-2">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 24, right: 8, left: -8, bottom: 4 }}>

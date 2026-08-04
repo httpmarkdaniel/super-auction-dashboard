@@ -1,18 +1,22 @@
-/* Design tokens — validated palette (dataviz skill reference instance).
-   Swap these values to re-brand; nothing else in the app should hardcode a hex. */
+/* Design tokens — matched to the BOPIS Operations Console (shared UI mandate
+   across internal dashboards). Values pulled from live computed styles at
+   bopis-five.vercel.app on 2026-07-22; swap here to re-brand. */
 :root {
-  --surface-1: #fcfcfb;
+  --surface-1: #ffffff;
   --surface-2: #ffffff;
-  --page-plane: #f9f9f7;
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --gridline: #e1e0d9;
-  --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
+  --page-plane: #f4f6fa;
+  --text-primary: #111827;
+  --text-secondary: #5b6573;
+  --text-muted: #94a0ae;
+  --gridline: #e7eaf0;
+  --baseline: #d7dce3;
+  --border: #e7eaf0;
 
-  /* HMR brand: navy blue + orange, pulled from hmr.ph's own stylesheet */
-  --series-1: #1a3a6b; /* HMR navy */
+  /* BOPIS navy — primary accent, active nav, primary buttons */
+  --navy: #22304f;
+  --navy-soft: #edf0f7;
+
+  --series-1: #22304f; /* navy */
   --series-2: #1baf7a; /* aqua */
   --series-3: #eda100; /* yellow */
   --series-4: #008300; /* green */
@@ -21,19 +25,17 @@
   --series-7: #e87ba4; /* magenta */
   --series-8: #eb6834; /* orange */
 
-  --accent-orange: #fd7936; /* HMR brand orange */
-  --accent-orange-soft: #fdba74;
-  --brand-navy-deep: #0a214a; /* HMR's actual header-bar navy */
+  --brand-navy-deep: #22304f;
 
   --seq-100: #c8d9f5;
   --seq-250: #6b93c9;
   --seq-400: #2f5590;
-  --seq-450: #1a3a6b;
-  --seq-500: #15305a;
-  --seq-600: #0f2444;
-  --seq-700: #0a1a30;
+  --seq-450: #22304f;
+  --seq-500: #1c283f;
+  --seq-600: #151f30;
+  --seq-700: #0f1622;
 
-  --diverging-pos: #1a3a6b;
+  --diverging-pos: #22304f;
   --diverging-neg: #e34948;
   --diverging-mid: #f0efec;
 
@@ -41,21 +43,34 @@
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+
+  /* BOPIS status-badge tones (bg/text pairs) */
+  --tone-red-bg: #faeaea;
+  --tone-red-text: #c42b2b;
+  --tone-amber-bg: #faf1df;
+  --tone-amber-text: #b07514;
+  --tone-green-bg: #e6f4ea;
+  --tone-green-text: #1e7b34;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.05);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --surface-1: #1a1a19;
-    --surface-2: #212120;
-    --page-plane: #0d0d0d;
-    --text-primary: #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --gridline: #2c2c2a;
-    --baseline: #383835;
-    --border: rgba(255, 255, 255, 0.1);
+  :root:not([data-theme="light"]) {
+    --surface-1: #1a1d24;
+    --surface-2: #20242c;
+    --page-plane: #14161b;
+    --text-primary: #f2f4f7;
+    --text-secondary: #a3adba;
+    --text-muted: #8892a3;
+    --gridline: #2b303a;
+    --baseline: #383e49;
+    --border: #2b303a;
 
-    --series-1: #4a7cc7; /* HMR navy, lightened for dark surfaces */
+    --navy: #7e93c2;
+    --navy-soft: #232a3a;
+
+    --series-1: #7e93c2;
     --series-2: #199e70;
     --series-3: #c98500;
     --series-4: #008300;
@@ -64,11 +79,9 @@
     --series-7: #d55181;
     --series-8: #d95926;
 
-    --accent-orange: #fd8f52;
-    --accent-orange-soft: #fdba74;
-    --brand-navy-deep: #060f24;
+    --brand-navy-deep: #2b3a5c;
 
-    --diverging-pos: #4a7cc7;
+    --diverging-pos: #7e93c2;
     --diverging-neg: #e66767;
     --diverging-mid: #383835;
 
@@ -76,5 +89,54 @@
     --status-warning: #fab219;
     --status-serious: #ec835a;
     --status-critical: #d03b3b;
+
+    --tone-red-bg: #3a2222;
+    --tone-red-text: #f18a8a;
+    --tone-amber-bg: #3a3020;
+    --tone-amber-text: #f0c26a;
+    --tone-green-bg: #1e3324;
+    --tone-green-text: #7cd99a;
+
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.25);
   }
+}
+
+/* Manual toggle override — wins regardless of OS preference */
+:root[data-theme="dark"] {
+  --surface-1: #1a1d24;
+  --surface-2: #20242c;
+  --page-plane: #14161b;
+  --text-primary: #f2f4f7;
+  --text-secondary: #a3adba;
+  --text-muted: #8892a3;
+  --gridline: #2b303a;
+  --baseline: #383e49;
+  --border: #2b303a;
+
+  --navy: #7e93c2;
+  --navy-soft: #232a3a;
+
+  --series-1: #7e93c2;
+  --series-2: #199e70;
+  --series-3: #c98500;
+  --series-4: #008300;
+  --series-5: #9085e9;
+  --series-6: #e66767;
+  --series-7: #d55181;
+  --series-8: #d95926;
+
+  --brand-navy-deep: #2b3a5c;
+
+  --diverging-pos: #7e93c2;
+  --diverging-neg: #e66767;
+  --diverging-mid: #383835;
+
+  --tone-red-bg: #3a2222;
+  --tone-red-text: #f18a8a;
+  --tone-amber-bg: #3a3020;
+  --tone-amber-text: #f0c26a;
+  --tone-green-bg: #1e3324;
+  --tone-green-text: #7cd99a;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.25);
 }

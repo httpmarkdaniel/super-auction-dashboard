@@ -1,30 +1,91 @@
-import { useState, useEffect } from "react";
-import { getLiveLotsForStore, CATEGORY_NAMES } from "../mockData";
+import { useState } from "react";
+import { useLiveBidding, useLotDetail } from "../useLiveBidding";
 import { formatPeso } from "../utils/format";
 import { buildLiveAuctionStoryline } from "../insights";
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 
 function formatCountdown(sec) {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  if (sec == null) return "—";
+  const totalMin = Math.floor(sec / 60);
+  if (totalMin >= 60) {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `${h}h ${m}m`;
+  }
+  return `${totalMin}m ${Math.floor(sec % 60)}s`;
+}
+
+function formatBidTime(ts) {
+  return new Date(ts).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+
+// Per-lot bidding-war feed, most recent first — fetched on demand (see
+// useLotDetail) rather than eagerly for every lot, to stay well under
+// cms.hmr.ph's 60 requests/min limit.
+function BidHistory({ bids }) {
+  if (!bids || bids.length === 0) {
+    return <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">No bids yet.</div>;
+  }
+  return (
+    <div className="mt-3 pt-3 border-t border-gridline">
+      <div className="text-[10.5px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">Recent Bids</div>
+      <div className="space-y-1">
+        {bids.slice(0, 6).map((b, i) => (
+          <div key={`${b.bidderNumber}-${b.timestamp}-${i}`} className="flex items-center justify-between gap-2 text-[12px]">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {i === 0 && <span className="w-1.5 h-1.5 rounded-full bg-good pulse-dot shrink-0" />}
+              <span className="text-ink truncate">
+                {b.bidderNumber != null ? `Bidder #${b.bidderNumber}` : "Floor bid"}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="tabular text-ink">{formatPeso(b.amount)}</span>
+              <span className="tabular text-muted text-[11px] w-[68px] text-right">{formatBidTime(b.timestamp)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Bidders({ bidders }) {
+  if (!bidders || bidders.length === 0) {
+    return <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">No named bidders yet.</div>;
+  }
+  return (
+    <div className="mt-3 pt-3 border-t border-gridline">
+      <div className="text-[10.5px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">
+        Bidders ({bidders.length})
+      </div>
+      <div className="space-y-1 max-h-[150px] overflow-y-auto pr-1">
+        {bidders.map((b) => (
+          <div key={b.bidderNumber} className="flex items-center justify-between gap-2 text-[12px]">
+            <span className="text-ink truncate">{b.name || `Bidder #${b.bidderNumber}`}</span>
+            <span className="tabular text-muted text-[11px]">#{b.bidderNumber}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function LotCard({ lot }) {
-  const closingSoon = lot.closesInSec <= 60;
+  const [expanded, setExpanded] = useState(false);
+  const detail = useLotDetail(lot.postingId, expanded);
+  const closingSoon = lot.closesInSec != null && lot.closesInSec <= 60;
+
   return (
-    <div className="card px-5 py-4">
+    <div className="tile px-5 py-4">
       <div className="flex items-start justify-between mb-2">
         <div>
-          <div className="text-[12px] tabular text-ink2 mb-0.5">
-            {lot.lotNumber} · {lot.store}
-          </div>
+          <div className="text-[12px] tabular text-ink mb-0.5">Lot {lot.lotNumber}</div>
           <div className="text-[14px] text-ink font-medium">{lot.item}</div>
         </div>
         <span
           className={`text-[11px] font-semibold px-2 py-0.5 rounded shrink-0 ${
-            closingSoon ? "text-critical bg-critical/10" : "text-good bg-good/10"
+            closingSoon ? "text-toneRedText bg-critical/10" : "text-toneGreenText bg-good/10"
           }`}
         >
           {closingSoon ? "Closing Soon" : "Active"}
@@ -32,39 +93,65 @@ function LotCard({ lot }) {
       </div>
       <div className="flex items-end justify-between mt-3">
         <div>
-          <div className="text-[11px] text-ink2 mb-0.5">Current Bid</div>
-          <div className="text-[22px] leading-none text-series1 font-semibold">{formatPeso(lot.currentBid)}</div>
+          <div className="text-[11px] text-ink mb-0.5">
+            {lot.currentBid != null ? "Current Bid" : lot.startingBid != null ? "Starting Bid" : "Current Bid"}
+          </div>
+          <div className="text-[22px] leading-none text-series1 font-semibold">
+            {lot.currentBid != null
+              ? formatPeso(lot.currentBid)
+              : lot.startingBid != null
+              ? formatPeso(lot.startingBid)
+              : "No bids yet"}
+          </div>
         </div>
         <div className="text-right">
-          <div className="text-[11px] text-ink2 mb-0.5">{lot.bidders} bidders</div>
-          <div className={`tabular text-[15px] ${closingSoon ? "text-critical font-semibold" : "text-ink"}`}>
+          <div className="text-[11px] text-ink mb-0.5">Closes in</div>
+          <div className={`tabular text-[15px] ${closingSoon ? "text-toneRedText font-semibold" : "text-series1"}`}>
             {formatCountdown(lot.closesInSec)}
           </div>
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mt-3 text-[11.5px] font-semibold text-series1 hover:underline"
+      >
+        {expanded ? "Hide bid history & bidders" : "View bid history & bidders"}
+      </button>
+
+      {expanded && (
+        <>
+          {detail.loading && <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">Loading…</div>}
+          {!detail.loading && (
+            <>
+              {detail.biddersError ? (
+                <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-toneRedText">
+                  Couldn't load bidders: {detail.biddersError}
+                </div>
+              ) : (
+                <Bidders bidders={detail.bidders} />
+              )}
+              {detail.bidsError ? (
+                <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-toneRedText">
+                  Couldn't load bid history: {detail.bidsError}
+                </div>
+              ) : (
+                <BidHistory bids={detail.bids} />
+              )}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 export default function LiveAuctionView({ store }) {
-  const [lots, setLots] = useState(() => getLiveLotsForStore(store));
-
-  useEffect(() => {
-    setLots(getLiveLotsForStore(store));
-  }, [store]);
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      setLots((prev) => prev.map((l) => ({ ...l, closesInSec: Math.max(0, l.closesInSec - 1) })));
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const story = buildLiveAuctionStoryline(lots);
-  const grouped = CATEGORY_NAMES.map((category) => ({
-    category,
-    lots: lots.filter((l) => l.category === category),
-  })).filter((g) => g.lots.length > 0);
+  const { auctions, loading, error } = useLiveBidding(store);
+  const allLots = auctions.flatMap((a) => a.lots.map((l) => ({ ...l, store: a.store })));
+  const story = buildLiveAuctionStoryline(allLots);
+  const auctionsWithLots = auctions.filter((a) => a.lots.length > 0);
 
   return (
     <div>
@@ -75,26 +162,34 @@ export default function LiveAuctionView({ store }) {
       <StorySection title="Lots to watch" insight={story.hotLotInsight} last>
         <div className="flex items-center gap-2 mb-6">
           <span className="w-2 h-2 rounded-full bg-critical pulse-dot" />
-          <span className="text-[13px] font-medium text-critical">{lots.length} lots live now at {store}</span>
+          <span className="text-[13px] font-medium text-toneRedText">{allLots.length} lots live now at {store}</span>
         </div>
 
-        {grouped.map(({ category, lots: categoryLots }) => (
-          <div key={category} className="mb-6 last:mb-0">
+        {error && <div className="text-center text-toneRedText text-[13px] py-4">Couldn't load live bidding: {error}</div>}
+
+        {!error && loading && auctions.length === 0 && (
+          <div className="text-center text-ink text-[13px] py-12">Loading live auctions…</div>
+        )}
+
+        {auctionsWithLots.map((a) => (
+          <div key={a.auctionNumber} className="mb-6 last:mb-0">
             <div className="flex items-center gap-2 mb-3">
-              <span className="w-1.5 h-4 rounded-sm bg-brandOrange shrink-0" />
-              <h3 className="text-[13.5px] font-semibold text-series1">{category}</h3>
-              <span className="text-[12px] text-muted">({categoryLots.length})</span>
+              <span className="w-1.5 h-4 rounded-sm bg-navy shrink-0" />
+              <h3 className="text-[13.5px] font-semibold text-series1">
+                {a.auctionNumber} · {a.store}
+              </h3>
+              <span className="text-[12px] text-muted">({a.lots.length} lots)</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {categoryLots.map((lot) => (
-                <LotCard key={lot.lotNumber} lot={lot} />
+              {a.lots.map((lot) => (
+                <LotCard key={lot.key} lot={lot} />
               ))}
             </div>
           </div>
         ))}
 
-        {lots.length === 0 && (
-          <div className="text-center text-ink2 text-[13px] py-12">No live lots at {store} right now.</div>
+        {!loading && !error && allLots.length === 0 && (
+          <div className="text-center text-ink text-[13px] py-12">No live lots at {store} right now.</div>
         )}
       </StorySection>
     </div>

@@ -1,8 +1,8 @@
 const CONFIG = {
-  STABLE: { color: "text-ink2", dot: "bg-muted" },
-  DECLINING: { color: "text-critical", dot: "bg-critical" },
-  IMPROVING: { color: "text-good", dot: "bg-good" },
-  VOLATILE: { color: "text-warning", dot: "bg-warning" },
+  STABLE: { color: "text-ink", dot: "bg-muted" },
+  DECLINING: { color: "text-toneRedText", dot: "bg-critical" },
+  IMPROVING: { color: "text-toneGreenText", dot: "bg-good" },
+  VOLATILE: { color: "text-toneAmberText", dot: "bg-warning" },
 };
 
 // Status color used correctly: these are literal states (declining/improving/…),
