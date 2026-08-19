@@ -27,7 +27,7 @@ export default function AuctionTypeView({ store, data: breakdown, rangeLabel = "
         />
       </div>
 
-      <StorySection title="Bid amount by sale channel" insight="Ranked by gross bid value across channels." last>
+      <StorySection title="Bid Amount by Sale Channel" insight="Ranked by gross bid value across channels." last>
         <div className="space-y-4">
           <Card title="Bid Amount by Sale Channel">
             <RankedBar rows={sorted} labelKey="type" valueKey="bidAmount" showRank={false} />

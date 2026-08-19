@@ -10,7 +10,7 @@ const CONFIG = {
 export default function TrendBadge({ trend }) {
   const c = CONFIG[trend] || CONFIG.STABLE;
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wide ${c.color}`}>
+    <span className={`inline-flex items-center gap-1.5 text-[13.5px] font-semibold tracking-wide ${c.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
       {trend}
     </span>

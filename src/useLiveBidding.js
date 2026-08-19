@@ -1,3 +1,27 @@
+// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
+import { useState } from "react";
+import { MOCK_LIVE_AUCTIONS, MOCK_LOT_DETAIL, MOCK_MARQUEE } from "./mockApiData";
+
+export function useLiveBidding(store) {
+  const [state] = useState({ auctions: MOCK_LIVE_AUCTIONS, loading: false, error: null });
+  return state;
+}
+
+export function useLotDetail(postingId, enabled) {
+  const [state] = useState(MOCK_LOT_DETAIL);
+  return state;
+}
+
+export function useLiveBidCorrection(auctions, refreshNonce = 0) {
+  return 0;
+}
+
+export function useMarqueeSummary(refreshNonce = 0) {
+  const [state] = useState({ ...MOCK_MARQUEE, loading: false, error: null });
+  return state;
+}
+
+/* Original live implementation:
 import { useEffect, useRef, useState } from "react";
 import { ALL_STORES } from "./mockData";
 
@@ -168,7 +192,7 @@ export function useLotDetail(postingId, enabled) {
 // every auction has resolved (or failed — a failed one just contributes 0,
 // keeping the base ClickHouse figure for that auction rather than blocking
 // the others).
-export function useLiveBidCorrection(auctions) {
+export function useLiveBidCorrection(auctions, refreshNonce = 0) {
   const [delta, setDelta] = useState(0);
   const key = (auctions || []).map((a) => a.auction_number).join(",");
 
@@ -199,8 +223,102 @@ export function useLiveBidCorrection(auctions) {
     return () => {
       cancelled = true;
     };
+    // key alone would miss re-runs on refresh — the auction_number set barely
+    // ever changes within a day, but current_bid does, every refresh cycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, refreshNonce]);
 
   return delta;
 }
+
+// Topbar marquee poll — deliberately ClickHouse-only (no cms.hmr.ph calls)
+// so the always-on ticker never competes with the Online Bidding tab for
+// cms.hmr.ph's 60 req/min cap. "Sold today" is fixed to the calendar day
+// regardless of the Topbar's own date-range picker, since a live-status
+// ticker showing "Last 30 Days" would be misleading. Always company-wide
+// (no store param) per how this ticker is scoped.
+const SUMMARY_POLL_MS = 30000;
+const ENDING_SOON_THRESHOLD_SEC = 3600;
+
+function isSameCalendarDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+export function useMarqueeSummary(refreshNonce = 0) {
+  const [state, setState] = useState({
+    baseSoldToday: 0,
+    todaysAuctions: [],
+    endingTodayCount: 0,
+    endingSoon: [],
+    loading: true,
+    error: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+
+    async function tick() {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const [overview, liveRes] = await Promise.all([
+          fetchJson("/api/overview", { from: today, to: today }),
+          fetchJson("/api/live-auctions", {}),
+        ]);
+
+        const now = new Date();
+        const live = (liveRes.auctions || []).map((a) => {
+          const ending = parseChDateTime(a.ending_time);
+          return {
+            auctionNumber: a.auction_number,
+            store: a.store_name,
+            ending,
+            closesInSec: ending ? Math.max(0, (ending - now) / 1000) : null,
+          };
+        });
+
+        const endingTodayCount = live.filter((a) => a.ending && isSameCalendarDay(a.ending, now)).length;
+        const endingSoon = live
+          .filter((a) => a.closesInSec != null && a.closesInSec <= ENDING_SOON_THRESHOLD_SEC)
+          .sort((a, b) => a.closesInSec - b.closesInSec);
+
+        if (!cancelled) {
+          setState({
+            baseSoldToday: Number(overview.total_bid_amount) || 0,
+            todaysAuctions: overview.auctions || [],
+            endingTodayCount,
+            endingSoon,
+            loading: false,
+            error: null,
+          });
+        }
+      } catch (err) {
+        if (!cancelled) setState((s) => ({ ...s, loading: false, error: err.message }));
+      }
+      if (!cancelled) timer = setTimeout(tick, SUMMARY_POLL_MS);
+    }
+
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [refreshNonce]);
+
+  // Same staleness problem as the main Overview page: ClickHouse's own
+  // total_bid_amount snapshot can sit at 0 for an auction that already has
+  // real bids in cms.hmr.ph (confirmed directly — auction 5411MS showed
+  // ₱4,000+ in live current_bid values while ClickHouse still reported 0),
+  // so "sold today" needs the same client-side correction useLiveOverview's
+  // consumer already applies, not just the raw ClickHouse figure.
+  const correctionDelta = useLiveBidCorrection(state.todaysAuctions, refreshNonce);
+
+  return {
+    soldToday: state.baseSoldToday + correctionDelta,
+    endingTodayCount: state.endingTodayCount,
+    endingSoon: state.endingSoon,
+    loading: state.loading,
+    error: state.error,
+  };
+}
+*/

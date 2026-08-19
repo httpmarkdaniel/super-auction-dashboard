@@ -1,9 +1,9 @@
 // MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
 import { useState } from "react";
-import { MOCK_TRENDS } from "./mockApiData";
+import { MOCK_PAYABLES } from "./mockApiData";
 
-export function useTrends(store, refreshNonce = 0) {
-  const [state] = useState({ data: MOCK_TRENDS, loading: false, error: null });
+export function useVendorPayables(store, refreshNonce = 0) {
+  const [state] = useState({ data: MOCK_PAYABLES, loading: false, error: null });
   return state;
 }
 
@@ -11,21 +11,21 @@ export function useTrends(store, refreshNonce = 0) {
 import { useEffect, useState } from "react";
 import { ALL_STORES } from "./mockData";
 
-// Real year-over-year metrics from ClickHouse (folded into /api/stores via
-// ?mode=trends rather than its own route, to stay under Vercel's
-// 12-function cap).
-export function useTrends(store, refreshNonce = 0) {
+// Vendor payables is a running balance (a stock, not a per-period flow), so
+// this deliberately ignores the date-range picker — same reasoning as
+// api/payables.js itself. Store filter still applies.
+export function useVendorPayables(store, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
   useEffect(() => {
     let cancelled = false;
     setState({ data: null, loading: true, error: null });
-    const params = new URLSearchParams({ mode: "trends", ...(store !== ALL_STORES ? { store } : {}) })
+    const params = new URLSearchParams(store !== ALL_STORES ? { store } : {})
       .toString()
       .replace(/\+/g, "%20");
-    fetch(`/api/stores?${params}`)
+    fetch(`/api/payables${params ? `?${params}` : ""}`)
       .then((res) => {
-        if (!res.ok) throw new Error(`stores trends returned ${res.status}`);
+        if (!res.ok) throw new Error(`payables returned ${res.status}`);
         return res.json();
       })
       .then((data) => {

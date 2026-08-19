@@ -5,9 +5,9 @@ export default function SectionHeader({ title, insight }) {
     <div className="mb-3">
       <div className="flex items-center gap-2.5">
         <span className="w-1.5 h-5 rounded-sm bg-navy shrink-0" />
-        <h2 className="font-bold text-[22px] leading-none uppercase tracking-wide text-series1">{title}</h2>
+        <h2 className="font-display text-[27px] leading-none uppercase tracking-wide text-series1">{title}</h2>
       </div>
-      {insight && <p className="text-[13px] text-ink mt-1 ml-4">{insight}</p>}
+      {insight && <p className="text-[15.5px] text-ink mt-1 ml-4">{insight}</p>}
     </div>
   );
 }

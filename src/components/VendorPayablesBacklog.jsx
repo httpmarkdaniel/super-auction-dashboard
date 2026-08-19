@@ -13,7 +13,7 @@ export default function VendorPayablesBacklog({ data: vendorPayablesBacklog }) {
 
   return (
     <Card title="Unremitted Vendor Payables" subtitle="Accumulated backlog" className="h-full">
-      <div className="font-bold text-[30px] leading-none text-series1 mb-4">
+      <div className="font-bold text-[36.5px] leading-none text-series1 mb-4">
         {formatPeso(vendorPayablesBacklog.totalBacklog)}
       </div>
       <StatusBar rows={rows} />

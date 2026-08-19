@@ -56,14 +56,14 @@ export default function PriorityActions({ overview }) {
       <div className="space-y-1">
         {items.map((item, i) => (
           <div key={item.label} className="flex items-center gap-3 py-2 border-b border-gridline last:border-0">
-            <span className="w-5 h-5 rounded-full bg-navySoft text-navy text-[11px] font-bold flex items-center justify-center shrink-0">
+            <span className="w-5 h-5 rounded-full bg-navySoft text-navy text-[13.5px] font-bold flex items-center justify-center shrink-0">
               {i + 1}
             </span>
-            <span className="flex-1 min-w-0 text-[13px] text-ink truncate">{item.label}</span>
-            <span className="text-[13px] font-semibold text-ink tabular shrink-0">
+            <span className="flex-1 min-w-0 text-[15.5px] text-ink truncate">{item.label}</span>
+            <span className="text-[15.5px] font-semibold text-ink tabular shrink-0">
               {item.valueLabel ?? formatPeso(item.value)}
             </span>
-            <span className={`text-[10.5px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${PILL_TONE[item.priority === "Critical" ? "critical" : "warning"]}`}>
+            <span className={`text-[13px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${PILL_TONE[item.priority === "Critical" ? "critical" : "warning"]}`}>
               {item.priority}
             </span>
           </div>

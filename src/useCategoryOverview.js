@@ -1,3 +1,18 @@
+// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
+import { useState } from "react";
+import { MOCK_OVERVIEW, MOCK_LEADERBOARDS, MOCK_PAYABLES, MOCK_LOTS } from "./mockApiData";
+
+export function useCategoryOverview(category, store, dateRangeKey, refreshNonce = 0) {
+  const [state] = useState({
+    data: { overview: MOCK_OVERVIEW, leaderboards: MOCK_LEADERBOARDS, payables: MOCK_PAYABLES, lots: MOCK_LOTS },
+    loading: false,
+    error: null,
+  });
+
+  return state;
+}
+
+/* Original live implementation:
 import { useEffect, useState } from "react";
 import { ALL_STORES } from "./mockData";
 import { resolveDateRange } from "./utils/dateRange";
@@ -45,3 +60,4 @@ export function useCategoryOverview(category, store, dateRangeKey, refreshNonce 
 
   return state;
 }
+*/

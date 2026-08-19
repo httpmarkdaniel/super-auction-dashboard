@@ -14,7 +14,7 @@ function formatValue(v, unit) {
 function CustomTooltip({ active, payload, label, unit }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="floating px-3 py-2 text-[12.5px]">
+    <div className="floating px-3 py-2 text-[15px]">
       <div className="text-ink mb-0.5">{label}</div>
       <div className="tabular text-series1">{formatValue(payload[0].value, unit)}</div>
     </div>
@@ -31,7 +31,7 @@ export default function TrendChart({ years, values, label, unit, trend }) {
       title={label}
       action={<TrendBadge trend={trend} />}
     >
-      <div className="font-bold text-[24px] leading-none text-ink mb-2">{formatValue(latest, unit)}</div>
+      <div className="font-bold text-[29px] leading-none text-ink mb-2">{formatValue(latest, unit)}</div>
       <div className="h-[90px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>

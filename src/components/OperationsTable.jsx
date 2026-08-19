@@ -16,6 +16,7 @@ const SORTERS = {
   category: (r) => r.category,
   soldPrice: (r) => r.soldPrice,
   totalBidAmount: (r) => r.totalBidAmount ?? 0,
+  reservedPrice: (r) => r.reservedPrice ?? 0,
   buyersPremium: (r) => r.buyersPremium ?? 0,
   serviceFee: (r) => r.serviceFee ?? 0,
   serviceIncome: (r) => (r.buyersPremium ?? 0) + (r.serviceFee ?? 0),
@@ -32,15 +33,20 @@ function SortHeader({ label, sortKey, sort, onSort, align = "left" }) {
     >
       <span className={`inline-flex items-center gap-1 ${active ? "text-ink" : ""}`}>
         {label}
-        {active && <span className="text-[10px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+        {active && <span className="text-[12.5px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
       </span>
     </th>
   );
 }
 
-export default function OperationsTable({ data: operationsDetail }) {
+export default function OperationsTable({
+  data: operationsDetail,
+  title = "Order Workbench · Lot Detail",
+  initialTab = "All",
+  embedded = false,
+}) {
   const [open, setOpen] = useState(true);
-  const [tab, setTab] = useState("All");
+  const [tab, setTab] = useState(initialTab);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "lotNumber", dir: "asc" });
 
@@ -77,50 +83,54 @@ export default function OperationsTable({ data: operationsDetail }) {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   }
 
-  return (
-    <div className="card overflow-hidden">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-6 py-4 text-left">
-        <div className="eyebrow">Order Workbench · Lot Detail</div>
-        <span className="text-ink text-[13px]">{open ? "Hide ▲" : "Show ▼"}</span>
-      </button>
+  const showContent = embedded || open;
 
-      {open && (
-        <div className="px-6 pb-5">
+  return (
+    <div className={embedded ? "" : "card overflow-hidden"}>
+      {!embedded && (
+        <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-6 py-4 text-left">
+          <div className="eyebrow">{title}</div>
+          <span className="text-ink text-[15.5px]">{open ? "Hide ▲" : "Show ▼"}</span>
+        </button>
+      )}
+
+      {showContent && (
+        <div className={embedded ? "" : "px-6 pb-5"}>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
             <div className="flex items-center gap-1.5 flex-wrap">
               {TABS.map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className={`flex items-center gap-1.5 text-[12.5px] font-semibold px-2.5 py-1 rounded-md border transition-colors ${
+                  className={`flex items-center gap-1.5 text-[15px] font-semibold px-2.5 py-1 rounded-md border transition-colors ${
                     tab === t
                       ? "bg-navySoft text-navy border-navySoft"
                       : "bg-transparent text-ink border-gridline hover:bg-plane"
                   }`}
                 >
                   {t}
-                  <span className={`text-[10.5px] px-1 rounded ${tab === t ? "bg-navy/15" : "bg-plane"}`}>
+                  <span className={`text-[13px] px-1 rounded ${tab === t ? "bg-navy/15" : "bg-plane"}`}>
                     {counts[t] || 0}
                   </span>
                 </button>
               ))}
             </div>
             <div className="flex items-center gap-2 bg-plane border border-gridline rounded-lg px-3 h-8 sm:ml-auto sm:w-[220px]">
-              <span className="text-muted text-[12px]">⌕</span>
+              <span className="text-muted text-[14.5px]">⌕</span>
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter lot #, item, or vendor…"
-                className="flex-1 min-w-0 text-[12.5px] text-ink bg-transparent outline-none placeholder:text-muted"
+                className="flex-1 min-w-0 text-[15px] text-ink bg-transparent outline-none placeholder:text-muted"
               />
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-[15.5px]">
               <thead>
-                <tr className="text-ink text-[11px] uppercase tracking-wide">
+                <tr className="text-ink text-[13.5px] uppercase tracking-wide">
                   <SortHeader label="Lot #" sortKey="lotNumber" sort={sort} onSort={handleSort} />
                   <SortHeader label="Item" sortKey="item" sort={sort} onSort={handleSort} />
                   <SortHeader label="Branch" sortKey="branch" sort={sort} onSort={handleSort} />
@@ -129,6 +139,7 @@ export default function OperationsTable({ data: operationsDetail }) {
                   <SortHeader label="Category" sortKey="category" sort={sort} onSort={handleSort} />
                   <th className="text-left font-medium pb-2 pr-4">Status</th>
                   <SortHeader label="Total Bid Amount" sortKey="totalBidAmount" sort={sort} onSort={handleSort} align="right" />
+                  <SortHeader label="Reserved Price" sortKey="reservedPrice" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Sold Price" sortKey="soldPrice" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Buyer's Premium" sortKey="buyersPremium" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Service Fee" sortKey="serviceFee" sort={sort} onSort={handleSort} align="right" />
@@ -149,7 +160,7 @@ export default function OperationsTable({ data: operationsDetail }) {
                     <td className="py-2.5 pr-4 text-ink">{r.category}</td>
                     <td className="py-2.5 pr-4">
                       <span
-                        className={`px-2 py-0.5 rounded text-[12px] font-medium ${
+                        className={`px-2 py-0.5 rounded text-[14.5px] font-medium ${
                           statusStyle[r.status] || "text-ink bg-gridline"
                         }`}
                       >
@@ -157,6 +168,9 @@ export default function OperationsTable({ data: operationsDetail }) {
                       </span>
                     </td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalBidAmount)}</td>
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {r.reservedPrice > 0 ? formatPeso(r.reservedPrice) : <span className="text-muted">No Reserve</span>}
+                    </td>
                     <td className="py-2.5 pr-4 text-right tabular text-series1">{formatPeso(r.soldPrice)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.buyersPremium)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.serviceFee)}</td>
@@ -168,7 +182,7 @@ export default function OperationsTable({ data: operationsDetail }) {
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={13} className="py-6 text-center text-muted text-[13px]">
+                    <td colSpan={14} className="py-6 text-center text-muted text-[15.5px]">
                       No lots match this filter.
                     </td>
                   </tr>

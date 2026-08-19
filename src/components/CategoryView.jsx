@@ -6,9 +6,9 @@ import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 import HourlyTrend from "./HourlyTrend";
 import UnsoldLotsCard from "./UnsoldLotsCard";
-import VendorPayablesBacklog from "./VendorPayablesBacklog";
+import VendorPayablesBreakdown from "./VendorPayablesBreakdown";
 import MoneyFlowWaterfall from "./MoneyFlowWaterfall";
-import OperationsTable from "./OperationsTable";
+import AuctionSummaryTable from "./AuctionSummaryTable";
 import { formatPeso } from "../utils/format";
 import { buildCategoryStoryline } from "../insights";
 import { useCategoryOverview } from "../useCategoryOverview";
@@ -25,7 +25,7 @@ const STATUS_MAP = { Paid: "Sold", Released: "Sold", Unpaid: "For Approval", Out
 // (each called with ?category=X) into the same shape CategoryView already
 // renders, mirroring App.jsx's buildLiveOverview for the main Overview tab.
 function buildLiveCategoryData(live) {
-  const { overview: o, leaderboards, payables, lots } = live;
+  const { overview: o, leaderboards, lots } = live;
 
   const totalBidAmount = Number(o.total_bid_amount) || 0;
   const buyersPremium = Number(o.buyers_premium_amount) || 0;
@@ -72,14 +72,6 @@ function buildLiveCategoryData(live) {
     })),
     hourlyTrend,
     unsoldLots: { count: lotsUnsold, value: Number(o.unsold_value) || 0 },
-    vendorPayablesBacklog: {
-      totalBacklog: Number(payables.total_backlog) || 0,
-      aging: [
-        { bucket: "0–30 days", value: Number(payables.aged_0_30) || 0, status: "good" },
-        { bucket: "31–60 days", value: Number(payables.aged_31_60) || 0, status: "warning" },
-        { bucket: "60+ days", value: Number(payables.aged_60_plus) || 0, status: "critical" },
-      ],
-    },
     moneyFlow: [
       { stage: "Bid Amount", value: totalBidAmount, type: "total" },
       { stage: "Buyer's Premium", value: -buyersPremium, type: "deduction" },
@@ -95,13 +87,13 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
 
   if (error) {
     return (
-      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[13px]">
+      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
         Couldn't load {category} data: {error}
       </div>
     );
   }
   if (loading || !live) {
-    return <div className="text-center text-ink text-[13px] py-12">Loading {category} data…</div>;
+    return <div className="text-center text-ink text-[15.5px] py-12">Loading {category} data…</div>;
   }
 
   const d = buildLiveCategoryData(live);
@@ -138,7 +130,7 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
         </div>
       </div>
 
-      <StorySection title="Fee economics" insight={story.feeInsight}>
+      <StorySection title="Commission & Fees" insight="The average commission and buyer's premium rates HMR charges on this category.">
         <div className="grid grid-cols-3 gap-4">
           <StatTile eyebrow="Avg Buyer's Premium" value={`${d.avgBuyersPremiumPct}%`} />
           <StatTile eyebrow="Avg Commission" value={`${d.avgCommissionPct}%`} />
@@ -146,18 +138,18 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
         </div>
       </StorySection>
 
-      <StorySection title="Who's driving this category" insight={story.peopleInsight}>
+      <StorySection title="Top Vendors & Bidders" insight="The vendors bringing in the most consignments and the bidders winning the most lots in this category.">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Leaderboard title={`Top Vendors · ${category}`} rows={d.topVendors} nameKey="vendor" metaKey="lots" metaLabel="lots" />
           <Leaderboard title={`Top Bidders · ${category}`} rows={d.topBidders} nameKey="bidder" metaKey="wins" metaLabel="wins" />
         </div>
       </StorySection>
 
-      <StorySection title="Bidding pace" insight={story.paceInsight}>
+      <StorySection title="Bidding Activity by Hour" insight="How bidding activity is spread across the hours of the day.">
         <HourlyTrend data={d.hourlyTrend} rangeLabel={rangeLabel} />
       </StorySection>
 
-      <StorySection title="What needs attention" insight={story.attentionInsight}>
+      <StorySection title="What Needs Attention" insight="Reserve-price performance and unsold lots for this category.">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-2">
             <Card title="Reserve Price Performance">
@@ -166,23 +158,20 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
           </div>
           <UnsoldLotsCard data={d.unsoldLots} />
         </div>
-        <div className="mt-4">
-          <VendorPayablesBacklog data={d.vendorPayablesBacklog} />
-        </div>
       </StorySection>
 
-      <StorySection title="Where the money goes" insight={story.moneyFlowInsight}>
+      <VendorPayablesBreakdown data={live.payables} scopeLabel={category} isLastSection={false} />
+
+      <StorySection title="Revenue & Payout Breakdown" insight="How the total bid amount splits between buyer's premium, service fees, and what's left for the vendor.">
         <MoneyFlowWaterfall data={d.moneyFlow} rangeLabel={rangeLabel} />
       </StorySection>
 
       <StorySection
-        title="Full lot detail"
-        insight={`Drill into every individual ${category} lot from ${
-          rangeLabel === "Today" ? "today" : `the ${rangeLabel.toLowerCase()}`
-        } below.`}
+        title="Full Auction Detail"
+        insight={`Every ${category} auction from the selected date range, rolled up from its individual lots.`}
         last
       >
-        <OperationsTable data={d.operationsDetail} />
+        <AuctionSummaryTable data={d.operationsDetail} />
       </StorySection>
     </div>
   );

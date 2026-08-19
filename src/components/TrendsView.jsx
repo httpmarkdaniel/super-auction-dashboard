@@ -17,17 +17,17 @@ export default function TrendsView({ store, refreshNonce }) {
 
   if (error) {
     return (
-      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[13px]">
+      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
         Couldn't load trends data: {error}
       </div>
     );
   }
   if (loading || !trends) {
-    return <div className="text-center text-ink text-[13px] py-12">Loading yearly trends…</div>;
+    return <div className="text-center text-ink text-[15.5px] py-12">Loading yearly trends…</div>;
   }
   if (!trends.years?.length) {
     return (
-      <div className="text-center text-ink text-[13px] py-12">
+      <div className="text-center text-ink text-[15.5px] py-12">
         Not enough historical data {store === "All Stores" ? "company-wide" : `for ${store}`} to chart a trend yet.
       </div>
     );
@@ -44,21 +44,21 @@ export default function TrendsView({ store, refreshNonce }) {
         />
       </div>
 
-      <StorySection title="Volume & structure" insight={story.volumeInsight}>
+      <StorySection title="Auctions & Lot Volume" insight="How many auctions and items are running per branch, year over year.">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TrendChart years={trends.years} {...pick(metric(trends, "itemsPerAuction"))} />
           <TrendChart years={trends.years} {...pick(metric(trends, "avgAuctionsPerBranch"))} />
         </div>
       </StorySection>
 
-      <StorySection title="Demand strength" insight={story.demandInsight}>
+      <StorySection title="Bidder Demand" insight="How many bidders are competing per auction, and how many lots are actually selling.">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TrendChart years={trends.years} {...pick(metric(trends, "bidderToAuctionRatio"))} />
           <TrendChart years={trends.years} {...pick(metric(trends, "sellThroughRate"))} />
         </div>
       </StorySection>
 
-      <StorySection title="Value & margin" insight={story.marginInsight} last>
+      <StorySection title="Revenue & Margin" insight="Average bid value per item and HMR's service-income margin, year over year." last>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <TrendChart years={trends.years} {...pick(metric(trends, "avgBidPerItem"))} />
           <TrendChart years={trends.years} {...pick(metric(trends, "serviceIncomeMargin"))} />

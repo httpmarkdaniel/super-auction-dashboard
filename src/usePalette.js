@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 const LIGHT = {
   series1: "#22304f",
   series2: "#1baf7a",
+  series3: "#eda100",
   divPos: "#22304f",
   divNeg: "#e34948",
   good: "#0ca30c",
@@ -17,6 +18,7 @@ const LIGHT = {
 const DARK = {
   series1: "#7e93c2",
   series2: "#199e70",
+  series3: "#c98500",
   divPos: "#7e93c2",
   divNeg: "#e66767",
   good: "#0ca30c",

@@ -36,27 +36,41 @@ function ScoreRing({ score, tone }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[24px] font-bold text-ink leading-none">{score}</span>
-        <span className="text-[10px] text-muted mt-0.5">/ 100</span>
+        <span className="text-[29px] font-display text-ink leading-none">{score}</span>
+        <span className="text-[12.5px] text-muted mt-0.5">/ 100</span>
       </div>
     </div>
   );
 }
 
-export default function HealthScoreCard({ score, status, tone, description, trend }) {
+export default function HealthScoreCard({ score, status, tone, description, trend, methodology }) {
+  const hasTip = Boolean(methodology);
   return (
-    <div className="card px-5 py-4 flex items-center gap-5 shrink-0 w-full lg:w-[400px]">
+    <div className={`card px-5 py-4 flex items-center gap-5 shrink-0 w-full lg:w-[400px] relative ${hasTip ? "group/tip" : ""}`}>
       <ScoreRing score={score} tone={tone} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           <span className="eyebrow">Health Score</span>
-          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${TONE_CLASSES[tone]}`}>
+          {hasTip && (
+            <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">
+              i
+            </span>
+          )}
+          <span className={`text-[13.5px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${TONE_CLASSES[tone]}`}>
             {status}
           </span>
         </div>
-        <p className="text-[12.5px] text-ink leading-snug mb-2">{description}</p>
+        <p className="text-[15px] text-ink leading-snug mb-2">{description}</p>
         {trend && <Sparkline data={trend} width={140} height={26} colorClass={tone === "critical" ? "text-toneRedText" : tone === "warning" ? "text-toneAmberText" : "text-toneGreenText"} />}
       </div>
+      {hasTip && (
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
+        >
+          <div className="floating px-3 py-2 text-[14px] leading-snug text-ink shadow-lg text-left">{methodology}</div>
+        </div>
+      )}
     </div>
   );
 }

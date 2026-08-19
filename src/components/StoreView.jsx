@@ -1,13 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import StatTile from "./primitives/StatTile";
 import Leaderboard from "./Leaderboard";
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 import { ALL_STORES } from "../mockData";
+import { MOCK_STORE_DETAIL } from "../mockApiData";
 import { formatPeso } from "../utils/format";
 import { buildStoreStoryline } from "../insights";
 import { resolveDateRange } from "../utils/dateRange";
 import { useLiveBidCorrection } from "../useLiveBidding";
+
+// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
+function useStoreDetail(store, dateRangeKey, refreshNonce = 0) {
+  const [state] = useState(
+    store === ALL_STORES
+      ? { data: null, loading: false, error: null }
+      : { data: MOCK_STORE_DETAIL, loading: false, error: null }
+  );
+  return state;
+}
+
+/* Original live implementation:
+import { useEffect, useState } from "react";
 
 function useStoreDetail(store, dateRangeKey, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
@@ -46,29 +60,30 @@ function useStoreDetail(store, dateRangeKey, refreshNonce = 0) {
 
   return state;
 }
+*/
 
 export default function StoreView({ store, dateRange, refreshNonce }) {
   const { data: live, loading, error } = useStoreDetail(store, dateRange, refreshNonce);
   // Deferred, non-blocking correction of the stale ClickHouse snapshot for
   // auctions still live right now at this branch — see useLiveBidCorrection.
-  const bidCorrectionDelta = useLiveBidCorrection(live?.auctions);
+  const bidCorrectionDelta = useLiveBidCorrection(live?.auctions, refreshNonce);
 
   if (store === ALL_STORES) {
     return (
-      <div className="text-center text-ink text-[13px] py-12">
+      <div className="text-center text-ink text-[15.5px] py-12">
         Select a specific store from the dropdown above to view its detail.
       </div>
     );
   }
   if (error) {
     return (
-      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[13px]">
+      <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
         Couldn't load {store} data: {error}
       </div>
     );
   }
   if (loading || !live) {
-    return <div className="text-center text-ink text-[13px] py-12">Loading {store} data…</div>;
+    return <div className="text-center text-ink text-[15.5px] py-12">Loading {store} data…</div>;
   }
 
   const totalBidAmount = (Number(live.total_bid_amount) || 0) + bidCorrectionDelta;
@@ -110,7 +125,7 @@ export default function StoreView({ store, dateRange, refreshNonce }) {
         </div>
       </div>
 
-      <StorySection title="Who's driving results here" insight={story.peopleInsight} last>
+      <StorySection title="Top Vendors" insight="The vendors bringing in the most consignments at this branch." last>
         <Leaderboard title={`Top Vendors · ${store}`} rows={d.topVendors} nameKey="vendor" metaKey="lots" metaLabel="lots" />
       </StorySection>
     </div>

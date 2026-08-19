@@ -39,7 +39,8 @@ export default {
         toneGreenText: "var(--tone-green-text)",
       },
       fontFamily: {
-        sans: ['"IBM Plex Sans"', "system-ui", "-apple-system", '"Segoe UI"', "sans-serif"],
+        sans: ["Inter", "system-ui", "-apple-system", '"Segoe UI"', "sans-serif"],
+        display: ['"Bebas Neue"', '"Arial Black"', "sans-serif"],
       },
       boxShadow: {
         card: "var(--shadow-card)",

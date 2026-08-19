@@ -1,3 +1,32 @@
+// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
+import { useState } from "react";
+import {
+  MOCK_OVERVIEW,
+  MOCK_LEADERBOARDS,
+  MOCK_RESERVE_PERFORMANCE,
+  MOCK_CATEGORIES,
+  MOCK_LOTS,
+  MOCK_PAYABLES,
+} from "./mockApiData";
+
+export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
+  const [state] = useState({
+    data: {
+      overview: MOCK_OVERVIEW,
+      leaderboards: MOCK_LEADERBOARDS,
+      reservePerformance: MOCK_RESERVE_PERFORMANCE,
+      categories: MOCK_CATEGORIES,
+      lots: MOCK_LOTS,
+      payables: MOCK_PAYABLES,
+    },
+    loading: false,
+    error: null,
+  });
+
+  return state;
+}
+
+/* Original live implementation:
 import { useEffect, useState } from "react";
 import { resolveDateRange } from "./utils/dateRange";
 
@@ -56,3 +85,4 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
 
   return state;
 }
+*/

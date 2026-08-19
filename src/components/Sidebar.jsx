@@ -9,7 +9,7 @@ function NavItem({ label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left pl-3 pr-3 py-2 rounded-lg text-[13.5px] transition-colors border-l-2 ${
+      className={`w-full text-left pl-3 pr-3 py-2 rounded-lg text-[15.5px] leading-tight transition-colors border-l-2 ${
         active
           ? "bg-navySoft text-navy font-medium border-l-navy"
           : "text-ink border-l-transparent hover:bg-plane hover:text-ink"
@@ -20,10 +20,45 @@ function NavItem({ label, active, onClick }) {
   );
 }
 
+// One dropdown instead of one nav row per category — saves 3 rows of
+// vertical space in the sidebar, reinvested into a bigger nav font size
+// elsewhere rather than every category getting its own full-width button.
+function CategoryDropdown({ active, onChange }) {
+  const isActive = CATEGORY_TABS.includes(active);
+  return (
+    <div
+      className={`flex items-center gap-2 pl-3 pr-2 py-2 rounded-lg border-l-2 ${
+        isActive ? "bg-navySoft border-l-navy" : "border-l-transparent bg-plane"
+      }`}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`shrink-0 ${isActive ? "text-navy" : "text-muted"}`}>
+        <path d="M3 8l9-5 9 5-9 5-9-5z" />
+        <path d="M3 8v8l9 5 9-5V8" />
+      </svg>
+      <select
+        value={isActive ? active : ""}
+        onChange={(e) => e.target.value && onChange(e.target.value)}
+        className={`flex-1 min-w-0 text-[15.5px] bg-transparent outline-none cursor-pointer ${
+          isActive ? "text-navy font-medium" : "text-ink"
+        }`}
+      >
+        <option value="" disabled>
+          Select category…
+        </option>
+        {CATEGORY_TABS.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function NavGroup({ label, children }) {
   return (
     <div className="mb-1">
-      <div className="px-3 pt-4 pb-1.5 text-[11px] tracking-[0.08em] uppercase text-muted font-semibold">
+      <div className="px-3 pt-3.5 pb-1.5 text-[12.5px] tracking-[0.08em] uppercase text-muted font-semibold">
         {label}
       </div>
       <div className="space-y-0.5">{children}</div>
@@ -42,11 +77,11 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
       {open && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={onClose} />}
 
       <aside
-        className={`w-[220px] shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 bg-surface1 border-r border-gridline px-3 py-5 flex flex-col transition-transform duration-200 md:translate-x-0 ${
+        className={`w-[220px] shrink-0 h-screen fixed md:sticky top-0 left-0 z-50 bg-surface1 border-r border-gridline px-3 py-3 flex flex-col overflow-y-auto transition-transform duration-200 md:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="px-3 mb-4">
+        <div className="px-3 mb-3">
           <button
             type="button"
             onClick={() => {
@@ -71,22 +106,21 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
         </NavGroup>
 
         <NavGroup label="Categories">
-          {CATEGORY_TABS.map((c) => (
-            <NavItem key={c} label={c} active={active === c} onClick={() => go(c)} />
-          ))}
+          <CategoryDropdown active={active} onChange={go} />
         </NavGroup>
 
         <NavGroup label="Insights">
-          <NavItem label="Trends" active={active === "Trends"} onClick={() => go("Trends")} />
-          <NavItem label="Auction Types" active={active === "Auction Types"} onClick={() => go("Auction Types")} />
-          <NavItem label="Stores" active={active === "Stores"} onClick={() => go("Stores")} />
+          <NavItem label="Vendor Payables" active={active === "Vendor Payables"} onClick={() => go("Vendor Payables")} />
+          <NavItem label="Full Auction Detail" active={active === "Full Auction Detail"} onClick={() => go("Full Auction Detail")} />
+          <NavItem label="Bidding Pace" active={active === "Bidding Pace"} onClick={() => go("Bidding Pace")} />
+          <NavItem label="Revenue Breakdown" active={active === "Revenue Breakdown"} onClick={() => go("Revenue Breakdown")} />
         </NavGroup>
 
         <NavGroup label="Reports">
           <NavItem label="Export" active={active === "Export"} onClick={() => go("Export")} />
         </NavGroup>
 
-        <div className="mt-4 px-3 pt-4 border-t border-gridline flex items-center gap-2 text-[11.5px] text-muted">
+        <div className="mt-3 px-3 pt-3.5 border-t border-gridline flex items-center gap-2 text-[14px] text-muted">
           <span className="w-1.5 h-1.5 rounded-full bg-good pulse-dot" />
           Connected
         </div>

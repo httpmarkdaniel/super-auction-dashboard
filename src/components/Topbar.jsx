@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { ALL_STORES } from "../mockData";
+import { useEffect, useRef, useState } from "react";
 import SearchBar from "./SearchBar";
 import { formatCompactPeso } from "../utils/format";
 import { RANGE_PRESETS, resolveDateRange } from "../utils/dateRange";
@@ -13,7 +12,7 @@ function StoreChip({ value, onChange, options }) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="text-[12.5px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[120px]"
+        className="text-[15px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[120px]"
       >
         {options.map((s) => (
           <option key={s} value={s}>
@@ -27,15 +26,47 @@ function StoreChip({ value, onChange, options }) {
 
 function DateRangePicker({ value, onChange }) {
   const [open, setOpen] = useState(false);
-  const current = RANGE_PRESETS.find((p) => p.key === value) ?? RANGE_PRESETS[2];
+  const containerRef = useRef(null);
+  const current = resolveDateRange(value);
+  const isCustom = Boolean(value && typeof value === "object" && value.key === "custom");
+
+  const [draftFrom, setDraftFrom] = useState(current.from ?? "");
+  const [draftTo, setDraftTo] = useState(current.to ?? "");
+
+  // Keep the draft inputs in sync whenever the selection changes from
+  // outside this popover (e.g. a preset button click resets the range).
+  useEffect(() => {
+    const r = resolveDateRange(value);
+    setDraftFrom(r.from ?? "");
+    setDraftTo(r.to ?? "");
+  }, [value]);
+
+  // Click-outside rather than onBlur+timeout — the native <input type="date">
+  // popup calendar steals focus from the toggle button, which would trip a
+  // blur-based close before the user finishes picking a date.
+  useEffect(() => {
+    if (!open) return;
+    function onDocMouseDown(e) {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open]);
+
+  function applyCustom() {
+    if (!draftFrom || !draftTo) return;
+    const from = draftFrom <= draftTo ? draftFrom : draftTo;
+    const to = draftFrom <= draftTo ? draftTo : draftFrom;
+    onChange({ key: "custom", from, to });
+    setOpen(false);
+  }
 
   return (
-    <div className="relative shrink-0">
+    <div className="relative shrink-0" ref={containerRef}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="hidden xl:flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[12.5px] font-medium text-ink"
+        className="hidden xl:flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[15px] font-medium text-ink"
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted shrink-0">
           <rect x="3" y="5" width="18" height="16" rx="2" />
@@ -48,7 +79,7 @@ function DateRangePicker({ value, onChange }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1.5 w-44 floating py-1.5 z-30">
+        <div className="absolute right-0 mt-1.5 w-64 floating py-2 z-30">
           {RANGE_PRESETS.map((p) => (
             <button
               key={p.key}
@@ -57,13 +88,42 @@ function DateRangePicker({ value, onChange }) {
                 onChange(p.key);
                 setOpen(false);
               }}
-              className={`w-full text-left px-3.5 py-1.5 text-[12.5px] hover:bg-gridline/50 ${
-                p.key === value ? "text-navy font-semibold" : "text-ink"
+              className={`w-full text-left px-3.5 py-1.5 text-[15px] hover:bg-gridline/50 ${
+                !isCustom && p.key === value ? "text-navy font-semibold" : "text-ink"
               }`}
             >
               {p.label}
             </button>
           ))}
+
+          <div className="border-t border-gridline mt-1.5 pt-2.5 px-3.5 pb-1">
+            <div className="text-[13px] tracking-[0.06em] uppercase text-muted font-semibold mb-2">Custom Range</div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <input
+                type="date"
+                value={draftFrom}
+                max={draftTo || undefined}
+                onChange={(e) => setDraftFrom(e.target.value)}
+                className="flex-1 min-w-0 text-[14.5px] bg-surface1 border border-gridline rounded-md px-1.5 py-1 text-ink"
+              />
+              <span className="text-muted text-[13.5px] shrink-0">to</span>
+              <input
+                type="date"
+                value={draftTo}
+                min={draftFrom || undefined}
+                onChange={(e) => setDraftTo(e.target.value)}
+                className="flex-1 min-w-0 text-[14.5px] bg-surface1 border border-gridline rounded-md px-1.5 py-1 text-ink"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={applyCustom}
+              disabled={!draftFrom || !draftTo}
+              className="w-full text-center bg-navy text-white text-[14.5px] font-semibold rounded-md px-2 py-1.5 disabled:opacity-40"
+            >
+              Apply
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -72,7 +132,7 @@ function DateRangePicker({ value, onChange }) {
 
 function LiveDataBadge() {
   return (
-    <div className="hidden md:flex items-center gap-1.5 bg-toneGreenBg text-toneGreenText rounded-md px-2 h-6 text-[10.5px] font-bold tracking-wide shrink-0">
+    <div className="hidden md:flex items-center gap-1.5 bg-toneGreenBg text-toneGreenText rounded-md px-2 h-6 text-[13px] font-bold tracking-wide shrink-0">
       <span className="w-1.5 h-1.5 rounded-full bg-toneGreenText pulse-dot" />
       LIVE DATA
     </div>
@@ -154,7 +214,7 @@ function ExportButton({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="hidden sm:flex items-center gap-1.5 border border-gridline rounded-lg px-3 h-8 text-[12.5px] font-semibold text-ink hover:bg-plane transition-colors shrink-0"
+      className="hidden sm:flex items-center gap-1.5 border border-gridline rounded-lg px-3 h-8 text-[15px] font-semibold text-ink hover:bg-plane transition-colors shrink-0"
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 3v12M8 11l4 4 4-4M5 21h14" />
@@ -167,10 +227,10 @@ function ExportButton({ onClick }) {
 function UserBadge() {
   return (
     <div className="hidden sm:flex items-center gap-1.5 bg-plane rounded-full pl-1 pr-2.5 h-8 shrink-0">
-      <div className="w-6 h-6 rounded-full bg-brandNavyDeep text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+      <div className="w-6 h-6 rounded-full bg-brandNavyDeep text-white text-[12.5px] font-bold flex items-center justify-center shrink-0">
         A
       </div>
-      <span className="text-[12px] font-semibold text-ink whitespace-nowrap">admin</span>
+      <span className="text-[14.5px] font-semibold text-ink whitespace-nowrap">admin</span>
     </div>
   );
 }
@@ -184,7 +244,7 @@ const TONE_DOT = {
 
 function TickerItem({ tone = "good", children }) {
   return (
-    <span className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink whitespace-nowrap shrink-0">
+    <span className="flex items-center gap-1.5 text-[15px] font-medium text-ink whitespace-nowrap shrink-0">
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]}`} />
       {children}
     </span>
@@ -198,7 +258,7 @@ function AlertTicker({ items }) {
     <div className="flex items-stretch bg-surface1 border-b border-gridline">
       <div className="flex items-center gap-1.5 pl-4 pr-3 py-1.5 shrink-0 bg-critical">
         <span className="w-1.5 h-1.5 rounded-full bg-white pulse-dot" />
-        <span className="text-[11px] font-bold tracking-[0.08em] uppercase text-white whitespace-nowrap">Live Alerts</span>
+        <span className="text-[13.5px] font-bold tracking-[0.08em] uppercase text-white whitespace-nowrap">Live Alerts</span>
       </div>
       <div className="marquee-viewport flex-1 min-w-0 overflow-hidden">
         <div className="flex items-center gap-8 px-4 py-1.5 w-max marquee-track">
@@ -213,71 +273,48 @@ function AlertTicker({ items }) {
   );
 }
 
-function buildActivityItems({
-  store,
-  recentSold,
-  topVendor,
-  unsoldCount,
-  unsoldValue,
-  unsoldDeltaPct,
-  aboveReserve,
-  belowReserve,
-}) {
-  const storeLabel = store === ALL_STORES ? "ALL STORES" : store;
-  const items = [];
+function formatCountdown(sec) {
+  const totalMin = Math.max(1, Math.round(sec / 60));
+  if (totalMin >= 60) {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
+  }
+  return `${totalMin}m`;
+}
 
-  if (topVendor) {
-    items.push({
+// Live-auction-only ticker: sold today (fixed calendar day, all stores),
+// how many auctions end today, and which ones are closing within the hour
+// — nothing else, so the marquee stays a pure "what's happening right now"
+// feed rather than a grab-bag of overview stats.
+function buildActivityItems({ loading, error, soldToday, endingTodayCount, endingSoon }) {
+  if (error) return [{ tone: "critical", node: <>Couldn't load live auction activity: {error}</> }];
+  if (loading) return [{ tone: "info", node: <>Loading live auction activity…</> }];
+
+  const items = [
+    {
       tone: "good",
-      node: (
-        <>
-          {storeLabel}: {topVendor.vendor} leads today's consignors with {formatCompactPeso(topVendor.bidAmount)} in sales
-        </>
-      ),
-    });
-  }
-
-  if (aboveReserve) {
-    items.push({
-      tone: "good",
-      node: (
-        <>
-          {aboveReserve.count} lots sold above reserve ({aboveReserve.pct}%), fetching {formatCompactPeso(aboveReserve.value)}
-        </>
-      ),
-    });
-  }
-
-  if (belowReserve) {
-    items.push({
-      tone: "warning",
-      node: (
-        <>
-          {belowReserve.count} lots went below reserve ({belowReserve.pct}%), totaling {formatCompactPeso(belowReserve.value)}
-        </>
-      ),
-    });
-  }
-
-  recentSold.forEach((lot) => {
-    items.push({
+      node: <>{formatCompactPeso(soldToday)} sold today across all stores</>,
+    },
+    {
       tone: "info",
       node: (
         <>
-          Lot {lot.lotNumber} just sold for {formatCompactPeso(lot.soldPrice)} {lot.store ? `· ${lot.store}` : ""}
+          {endingTodayCount} auction{endingTodayCount === 1 ? "" : "s"} ending today
+        </>
+      ),
+    },
+  ];
+
+  endingSoon.forEach((a) => {
+    items.push({
+      tone: a.closesInSec <= 600 ? "critical" : "warning",
+      node: (
+        <>
+          Auction #{a.auctionNumber} · {a.store} ending in {formatCountdown(a.closesInSec)}
         </>
       ),
     });
-  });
-
-  items.push({
-    tone: "critical",
-    node: (
-      <>
-        {unsoldCount} lots remain unsold, worth {formatCompactPeso(unsoldValue)}
-        {unsoldDeltaPct !== undefined ? ` (${unsoldDeltaPct >= 0 ? "+" : ""}${unsoldDeltaPct}%)` : ""}
-      </>
-    ),
   });
 
   return items;
@@ -288,13 +325,7 @@ export default function Topbar({
   onStoreChange,
   onExportClick,
   onMenuClick,
-  unsoldCount,
-  unsoldValue,
-  unsoldDeltaPct,
-  recentSold,
-  topVendor,
-  aboveReserve,
-  belowReserve,
+  marquee,
   searchPool,
   dateRange,
   onDateRangeChange,
@@ -302,16 +333,7 @@ export default function Topbar({
   updatedAt,
   onRefresh,
 }) {
-  const activityItems = buildActivityItems({
-    store,
-    recentSold,
-    topVendor,
-    unsoldCount,
-    unsoldValue,
-    unsoldDeltaPct,
-    aboveReserve,
-    belowReserve,
-  });
+  const activityItems = buildActivityItems(marquee);
 
   return (
     <div className="flex flex-col w-full bg-surface1 border-b border-gridline">
@@ -328,8 +350,8 @@ export default function Topbar({
         </button>
 
         <div className="hidden md:block shrink-0 leading-tight">
-          <div className="text-[13px] font-bold text-ink">HMR Auctions</div>
-          <div className="text-[11px] text-muted mt-0.5 whitespace-nowrap">Updated {updatedAt}</div>
+          <div className="text-[15.5px] font-bold text-ink">HMR Auctions</div>
+          <div className="text-[13.5px] text-muted mt-0.5 whitespace-nowrap">Updated {updatedAt}</div>
         </div>
 
         <SearchBar pool={searchPool} />

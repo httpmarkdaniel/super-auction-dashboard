@@ -10,7 +10,7 @@ function AgingBar({ fresh, aging, stale }) {
         <div className="bg-warning" style={{ width: seg(aging) }} title={`${aging} lots 31–90 days`} />
         <div className="bg-critical" style={{ width: seg(stale) }} title={`${stale} lots 90+ days`} />
       </div>
-      <div className="flex items-center justify-between mt-1.5 text-[11px] text-muted">
+      <div className="flex items-center justify-between mt-1.5 text-[13.5px] text-muted">
         <span>≤30d: {fresh}</span>
         <span>31–90d: {aging}</span>
         <span>90+d: {stale}</span>
@@ -26,22 +26,22 @@ export default function UnsoldLotsCard({ data: unsoldLots }) {
   return (
     <div className="card px-6 py-5 h-full">
       <div className="eyebrow mb-3">Unsold Inventory · Value at Stake</div>
-      <div className="font-bold text-[32px] leading-none text-series1 mb-2">
+      <div className="font-bold text-[38.5px] leading-none text-series1 mb-2">
         {formatPeso(unsoldLots.value)}
       </div>
       {hasDelta && (
         <div className="flex items-center gap-2 mb-1">
           <span
-            className={`inline-flex items-center gap-1 text-[13px] font-medium ${
+            className={`inline-flex items-center gap-1 text-[15.5px] font-medium ${
               improving ? "text-toneGreenText" : "text-toneRedText"
             }`}
           >
             {improving ? "▼" : "▲"} {Math.abs(unsoldLots.deltaPct)}%
           </span>
-          <span className="text-[13px] text-ink">vs last week</span>
+          <span className="text-[15.5px] text-ink">vs last week</span>
         </div>
       )}
-      <div className="text-[12.5px] text-muted">
+      <div className="text-[15px] text-muted">
         {unsoldLots.count} lots sitting unsold
         {hasAging && unsoldLots.avgAgeDays > 0 && ` · avg ${unsoldLots.avgAgeDays.toLocaleString()} days old`}
       </div>

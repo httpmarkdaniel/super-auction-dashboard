@@ -25,14 +25,14 @@ function formatBidTime(ts) {
 // cms.hmr.ph's 60 requests/min limit.
 function BidHistory({ bids }) {
   if (!bids || bids.length === 0) {
-    return <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">No bids yet.</div>;
+    return <div className="mt-3 pt-3 border-t border-gridline text-[14.5px] text-muted">No bids yet.</div>;
   }
   return (
     <div className="mt-3 pt-3 border-t border-gridline">
-      <div className="text-[10.5px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">Recent Bids</div>
+      <div className="text-[13px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">Recent Bids</div>
       <div className="space-y-1">
         {bids.slice(0, 6).map((b, i) => (
-          <div key={`${b.bidderNumber}-${b.timestamp}-${i}`} className="flex items-center justify-between gap-2 text-[12px]">
+          <div key={`${b.bidderNumber}-${b.timestamp}-${i}`} className="flex items-center justify-between gap-2 text-[14.5px]">
             <div className="flex items-center gap-1.5 min-w-0">
               {i === 0 && <span className="w-1.5 h-1.5 rounded-full bg-good pulse-dot shrink-0" />}
               <span className="text-ink truncate">
@@ -41,7 +41,7 @@ function BidHistory({ bids }) {
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className="tabular text-ink">{formatPeso(b.amount)}</span>
-              <span className="tabular text-muted text-[11px] w-[68px] text-right">{formatBidTime(b.timestamp)}</span>
+              <span className="tabular text-muted text-[13.5px] w-[68px] text-right">{formatBidTime(b.timestamp)}</span>
             </div>
           </div>
         ))}
@@ -52,18 +52,18 @@ function BidHistory({ bids }) {
 
 function Bidders({ bidders }) {
   if (!bidders || bidders.length === 0) {
-    return <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">No named bidders yet.</div>;
+    return <div className="mt-3 pt-3 border-t border-gridline text-[14.5px] text-muted">No named bidders yet.</div>;
   }
   return (
     <div className="mt-3 pt-3 border-t border-gridline">
-      <div className="text-[10.5px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">
+      <div className="text-[13px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">
         Bidders ({bidders.length})
       </div>
       <div className="space-y-1 max-h-[150px] overflow-y-auto pr-1">
         {bidders.map((b) => (
-          <div key={b.bidderNumber} className="flex items-center justify-between gap-2 text-[12px]">
+          <div key={b.bidderNumber} className="flex items-center justify-between gap-2 text-[14.5px]">
             <span className="text-ink truncate">{b.name || `Bidder #${b.bidderNumber}`}</span>
-            <span className="tabular text-muted text-[11px]">#{b.bidderNumber}</span>
+            <span className="tabular text-muted text-[13.5px]">#{b.bidderNumber}</span>
           </div>
         ))}
       </div>
@@ -80,11 +80,11 @@ function LotCard({ lot }) {
     <div className="tile px-5 py-4">
       <div className="flex items-start justify-between mb-2">
         <div>
-          <div className="text-[12px] tabular text-ink mb-0.5">Lot {lot.lotNumber}</div>
-          <div className="text-[14px] text-ink font-medium">{lot.item}</div>
+          <div className="text-[14.5px] tabular text-ink mb-0.5">Lot {lot.lotNumber}</div>
+          <div className="text-[17px] text-ink font-medium">{lot.item}</div>
         </div>
         <span
-          className={`text-[11px] font-semibold px-2 py-0.5 rounded shrink-0 ${
+          className={`text-[13.5px] font-semibold px-2 py-0.5 rounded shrink-0 ${
             closingSoon ? "text-toneRedText bg-critical/10" : "text-toneGreenText bg-good/10"
           }`}
         >
@@ -93,10 +93,10 @@ function LotCard({ lot }) {
       </div>
       <div className="flex items-end justify-between mt-3">
         <div>
-          <div className="text-[11px] text-ink mb-0.5">
+          <div className="text-[13.5px] text-ink mb-0.5">
             {lot.currentBid != null ? "Current Bid" : lot.startingBid != null ? "Starting Bid" : "Current Bid"}
           </div>
-          <div className="text-[22px] leading-none text-series1 font-semibold">
+          <div className="text-[27px] leading-none text-series1 font-semibold">
             {lot.currentBid != null
               ? formatPeso(lot.currentBid)
               : lot.startingBid != null
@@ -105,8 +105,8 @@ function LotCard({ lot }) {
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[11px] text-ink mb-0.5">Closes in</div>
-          <div className={`tabular text-[15px] ${closingSoon ? "text-toneRedText font-semibold" : "text-series1"}`}>
+          <div className="text-[13.5px] text-ink mb-0.5">Closes in</div>
+          <div className={`tabular text-[18px] ${closingSoon ? "text-toneRedText font-semibold" : "text-series1"}`}>
             {formatCountdown(lot.closesInSec)}
           </div>
         </div>
@@ -115,25 +115,25 @@ function LotCard({ lot }) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="mt-3 text-[11.5px] font-semibold text-series1 hover:underline"
+        className="mt-3 text-[14px] font-semibold text-series1 hover:underline"
       >
         {expanded ? "Hide bid history & bidders" : "View bid history & bidders"}
       </button>
 
       {expanded && (
         <>
-          {detail.loading && <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-muted">Loading…</div>}
+          {detail.loading && <div className="mt-3 pt-3 border-t border-gridline text-[14.5px] text-muted">Loading…</div>}
           {!detail.loading && (
             <>
               {detail.biddersError ? (
-                <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-toneRedText">
+                <div className="mt-3 pt-3 border-t border-gridline text-[14.5px] text-toneRedText">
                   Couldn't load bidders: {detail.biddersError}
                 </div>
               ) : (
                 <Bidders bidders={detail.bidders} />
               )}
               {detail.bidsError ? (
-                <div className="mt-3 pt-3 border-t border-gridline text-[12px] text-toneRedText">
+                <div className="mt-3 pt-3 border-t border-gridline text-[14.5px] text-toneRedText">
                   Couldn't load bid history: {detail.bidsError}
                 </div>
               ) : (
@@ -159,26 +159,26 @@ export default function LiveAuctionView({ store }) {
         <StoryHeader eyebrow={`${store} · Right Now · The Story`} headline={story.headline} />
       </div>
 
-      <StorySection title="Lots to watch" insight={story.hotLotInsight} last>
+      <StorySection title="Lots to Watch" insight="Every lot currently live, with real-time bid amounts and countdowns." last>
         <div className="flex items-center gap-2 mb-6">
           <span className="w-2 h-2 rounded-full bg-critical pulse-dot" />
-          <span className="text-[13px] font-medium text-toneRedText">{allLots.length} lots live now at {store}</span>
+          <span className="text-[15.5px] font-medium text-toneRedText">{allLots.length} lots live now at {store}</span>
         </div>
 
-        {error && <div className="text-center text-toneRedText text-[13px] py-4">Couldn't load live bidding: {error}</div>}
+        {error && <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load live bidding: {error}</div>}
 
         {!error && loading && auctions.length === 0 && (
-          <div className="text-center text-ink text-[13px] py-12">Loading live auctions…</div>
+          <div className="text-center text-ink text-[15.5px] py-12">Loading live auctions…</div>
         )}
 
         {auctionsWithLots.map((a) => (
           <div key={a.auctionNumber} className="mb-6 last:mb-0">
             <div className="flex items-center gap-2 mb-3">
               <span className="w-1.5 h-4 rounded-sm bg-navy shrink-0" />
-              <h3 className="text-[13.5px] font-semibold text-series1">
+              <h3 className="text-[16px] font-semibold text-series1">
                 {a.auctionNumber} · {a.store}
               </h3>
-              <span className="text-[12px] text-muted">({a.lots.length} lots)</span>
+              <span className="text-[14.5px] text-muted">({a.lots.length} lots)</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {a.lots.map((lot) => (
@@ -189,7 +189,7 @@ export default function LiveAuctionView({ store }) {
         ))}
 
         {!loading && !error && allLots.length === 0 && (
-          <div className="text-center text-ink text-[13px] py-12">No live lots at {store} right now.</div>
+          <div className="text-center text-ink text-[15.5px] py-12">No live lots at {store} right now.</div>
         )}
       </StorySection>
     </div>

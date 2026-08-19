@@ -36,7 +36,7 @@ export default function ExportView({ store, overview, rangeLabel = "Today" }) {
         <Card title="Report Sections" subtitle="Choose what to include, then generate a PDF snapshot for sharing with executives.">
           <div className="space-y-2.5 mb-6">
             {sections.map((s) => (
-              <label key={s} className="flex items-center gap-2.5 text-[13.5px] text-ink cursor-pointer">
+              <label key={s} className="flex items-center gap-2.5 text-[16px] text-ink cursor-pointer">
                 <input
                   type="checkbox"
                   checked={checked[s]}
@@ -50,11 +50,11 @@ export default function ExportView({ store, overview, rangeLabel = "Today" }) {
 
           <button
             onClick={() => window.print()}
-            className="w-full bg-navy hover:opacity-90 text-white text-[13.5px] font-medium rounded-lg py-2.5 transition-opacity"
+            className="w-full bg-navy hover:opacity-90 text-white text-[16px] font-medium rounded-lg py-2.5 transition-opacity"
           >
             Generate PDF
           </button>
-          <div className="text-[11.5px] text-muted mt-3 text-center">
+          <div className="text-[14px] text-muted mt-3 text-center">
             Uses your browser's print dialog — choose "Save as PDF" as the destination.
           </div>
         </Card>

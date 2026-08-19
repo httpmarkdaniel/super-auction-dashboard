@@ -1,3 +1,11 @@
+// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
+// Returning null makes the caller fall back to mockData.js's static
+// STORE_OPTIONS list, which is already exactly what's wanted here.
+export function useStoreList() {
+  return null;
+}
+
+/* Original live implementation:
 import { useEffect, useState } from "react";
 
 // Real distinct store/branch names from ClickHouse, for the store
@@ -25,3 +33,4 @@ export function useStoreList() {
 
   return stores;
 }
+*/

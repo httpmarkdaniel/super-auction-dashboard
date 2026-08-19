@@ -6,7 +6,7 @@ import { formatPeso } from "../utils/format";
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="floating px-3.5 py-2.5 text-[13px]">
+    <div className="floating px-3.5 py-2.5 text-[15.5px]">
       <div className="text-ink mb-0.5">{label}</div>
       <div className="tabular text-series1">{formatPeso(payload[0].value)}</div>
     </div>
@@ -18,7 +18,7 @@ export default function HourlyTrend({ data: hourlyTrend, rangeLabel = "Today" })
   return (
     <Card title={`${rangeLabel} Pace · Bid Amount by Hour`}>
       {hourlyTrend.length === 0 ? (
-        <div className="h-[160px] flex items-center justify-center text-center text-muted text-[12.5px]">
+        <div className="h-[160px] flex items-center justify-center text-center text-muted text-[15px]">
           No bidding activity in this period.
         </div>
       ) : (
