@@ -1,10 +1,20 @@
 import { useState } from "react";
-import { LineChart, Line, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import {
+  LineChart,
+  Line,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso } from "../utils/format";
 
-export default function BidderComposition({ data: bidderComposition, rangeLabel = "Today" }) {
+export default function BidderComposition({
+  data: bidderComposition,
+  rangeLabel = "Today",
+}) {
   const [showByAuction, setShowByAuction] = useState(false);
   const byAuction = bidderComposition.byAuction || [];
   const palette = usePalette();
@@ -12,27 +22,32 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
   const returningAmount = bidderComposition.returningBiddersBidAmount || 0;
   const totalAmount = newAmount + returningAmount;
   const newSharePct = totalAmount > 0 ? (newAmount / totalAmount) * 100 : 0;
-  const returningSharePct = totalAmount > 0 ? (returningAmount / totalAmount) * 100 : 0;
-  const totalBidders = bidderComposition.newBidders + bidderComposition.returningBidders;
-  const newBidderPct = totalBidders > 0 ? Math.round((bidderComposition.newBidders / totalBidders) * 100) : 0;
+  const returningSharePct =
+    totalAmount > 0 ? (returningAmount / totalAmount) * 100 : 0;
+  const totalBidders =
+    bidderComposition.newBidders + bidderComposition.returningBidders;
+  const newBidderPct =
+    totalBidders > 0
+      ? Math.round((bidderComposition.newBidders / totalBidders) * 100)
+      : 0;
   const returningBidderPct = totalBidders > 0 ? 100 - newBidderPct : 0;
   const auctionTotals = byAuction.reduce(
-  (acc, a) => ({
-    newBidders: acc.newBidders + Number(a.newBidders || 0),
-    newBiddersBidAmount:
-      acc.newBiddersBidAmount + Number(a.newBiddersBidAmount || 0),
-    returningBidders:
-      acc.returningBidders + Number(a.returningBidders || 0),
-    returningBiddersBidAmount:
-      acc.returningBiddersBidAmount + Number(a.returningBiddersBidAmount || 0),
-  }),
-  {
-    newBidders: 0,
-    newBiddersBidAmount: 0,
-    returningBidders: 0,
-    returningBiddersBidAmount: 0,
-  }
-);
+    (acc, a) => ({
+      newBidders: acc.newBidders + Number(a.newBidders || 0),
+      newBiddersBidAmount:
+        acc.newBiddersBidAmount + Number(a.newBiddersBidAmount || 0),
+      returningBidders: acc.returningBidders + Number(a.returningBidders || 0),
+      returningBiddersBidAmount:
+        acc.returningBiddersBidAmount +
+        Number(a.returningBiddersBidAmount || 0),
+    }),
+    {
+      newBidders: 0,
+      newBiddersBidAmount: 0,
+      returningBidders: 0,
+      returningBiddersBidAmount: 0,
+    },
+  );
   // The donut represents bidder COUNT composition, while the contribution
   // bar below represents BID VALUE. Keeping those concepts separate avoids
   // implying that bidder share and bid-value share are the same metric.
@@ -52,8 +67,12 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
                 {bidderComposition.newBidders}
               </div>
               <div className="text-[14.5px] text-ink">New bidders</div>
-              <div className="text-[12.5px] text-muted mt-0.5">{newBidderPct}% of active bidders</div>
-              <div className="text-[13.5px] tabular text-muted mt-1">{formatPeso(newAmount)} bid value</div>
+              <div className="text-[12.5px] text-muted mt-0.5">
+                {newBidderPct}% of active bidders
+              </div>
+              <div className="text-[13.5px] tabular text-muted mt-1">
+                {formatPeso(newAmount)} bid value
+              </div>
             </div>
             <div className="w-px h-12 bg-gridline" />
             <div>
@@ -61,8 +80,12 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
                 {bidderComposition.returningBidders}
               </div>
               <div className="text-[14.5px] text-ink">Returning bidders</div>
-              <div className="text-[12.5px] text-muted mt-0.5">{returningBidderPct}% of active bidders</div>
-              <div className="text-[13.5px] tabular text-muted mt-1">{formatPeso(returningAmount)} bid value</div>
+              <div className="text-[12.5px] text-muted mt-0.5">
+                {returningBidderPct}% of active bidders
+              </div>
+              <div className="text-[13.5px] tabular text-muted mt-1">
+                {formatPeso(returningAmount)} bid value
+              </div>
             </div>
             <div className="flex-1 h-8 ml-2">
               <ResponsiveContainer width="100%" height="100%">
@@ -84,14 +107,18 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
             Bid Value Contribution
           </div>
           <div className="h-2 rounded-full overflow-hidden flex bg-gridline">
-            <div className="bg-series1 h-full" style={{ width: `${newSharePct}%` }} />
+            <div
+              className="bg-series1 h-full"
+              style={{ width: `${newSharePct}%` }}
+            />
           </div>
           <div className="flex justify-between gap-4 mt-1.5 text-[14px] text-ink">
             <span>
               New bidders · {newSharePct.toFixed(1)}% · {formatPeso(newAmount)}
             </span>
             <span className="text-right">
-              Returning bidders · {returningSharePct.toFixed(1)}% · {formatPeso(returningAmount)}
+              Returning bidders · {returningSharePct.toFixed(1)}% ·{" "}
+              {formatPeso(returningAmount)}
             </span>
           </div>
         </div>
@@ -118,17 +145,32 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
           </div>
           <div className="space-y-1.5">
             <div className="flex items-start gap-1.5 text-[13.5px] text-ink">
-              <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ background: pieColors[0] }} />
+              <span
+                className="w-2 h-2 rounded-full shrink-0 mt-1"
+                style={{ background: pieColors[0] }}
+              />
               <div>
-                <div>New · {bidderComposition.newBidders} ({newBidderPct}%)</div>
-                <div className="text-[12.5px] tabular text-muted">{formatPeso(newAmount)} bid value</div>
+                <div>
+                  New · {bidderComposition.newBidders} ({newBidderPct}%)
+                </div>
+                <div className="text-[12.5px] tabular text-muted">
+                  {formatPeso(newAmount)} bid value
+                </div>
               </div>
             </div>
             <div className="flex items-start gap-1.5 text-[13.5px] text-ink">
-              <span className="w-2 h-2 rounded-full shrink-0 mt-1" style={{ background: pieColors[1] }} />
+              <span
+                className="w-2 h-2 rounded-full shrink-0 mt-1"
+                style={{ background: pieColors[1] }}
+              />
               <div>
-                <div>Returning · {bidderComposition.returningBidders} ({returningBidderPct}%)</div>
-                <div className="text-[12.5px] tabular text-muted">{formatPeso(returningAmount)} bid value</div>
+                <div>
+                  Returning · {bidderComposition.returningBidders} (
+                  {returningBidderPct}%)
+                </div>
+                <div className="text-[12.5px] tabular text-muted">
+                  {formatPeso(returningAmount)} bid value
+                </div>
               </div>
             </div>
           </div>
@@ -150,31 +192,76 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
               <thead>
                 <tr className="text-ink text-[13px] uppercase tracking-wide">
                   <th className="text-left font-medium pb-2 pr-4">Auction #</th>
-                  <th className="text-right font-medium pb-2 pr-4">New Bidders</th>
-                  <th className="text-right font-medium pb-2 pr-4">New Amount</th>
-                  <th className="text-right font-medium pb-2 pr-4">Returning Bidders</th>
-                  <th className="text-right font-medium pb-2">Returning Amount</th>
+                  <th className="text-right font-medium pb-2 pr-4">
+                    New Bidders
+                  </th>
+                  <th className="text-right font-medium pb-2 pr-4">
+                    New Amount
+                  </th>
+                  <th className="text-right font-medium pb-2 pr-4">
+                    Returning Bidders
+                  </th>
+                  <th className="text-right font-medium pb-2">
+                    Returning Amount
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {byAuction.map((a) => (
-                  <tr key={a.auctionNumber} className="border-t border-gridline">
-                    <td className="py-2 pr-4 tabular text-ink">{a.auctionNumber}</td>
-                    <td className="py-2 pr-4 text-right tabular text-ink">{a.newBidders}</td>
-                    <td className="py-2 pr-4 text-right tabular text-ink">{formatPeso(a.newBiddersBidAmount)}</td>
-                    <td className="py-2 pr-4 text-right tabular text-ink">{a.returningBidders}</td>
-                    <td className="py-2 text-right tabular text-ink">{formatPeso(a.returningBiddersBidAmount)}</td>
+                  <tr
+                    key={a.auctionNumber}
+                    className="border-t border-gridline"
+                  >
+                    <td className="py-2 pr-4 tabular text-ink">
+                      {a.auctionNumber}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">
+                      {a.newBidders}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">
+                      {formatPeso(a.newBiddersBidAmount)}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">
+                      {a.returningBidders}
+                    </td>
+                    <td className="py-2 text-right tabular text-ink">
+                      {formatPeso(a.returningBiddersBidAmount)}
+                    </td>
                   </tr>
                 ))}
                 {byAuction.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-muted text-[14.5px]">
+                    <td
+                      colSpan={5}
+                      className="py-6 text-center text-muted text-[14.5px]"
+                    >
                       No auctions in this range yet.
                     </td>
                   </tr>
                 )}
+
+                {byAuction.length > 0 && (
+                  <tr className="border-t-2 border-gridline font-semibold">
+                    <td className="py-3 pr-4 text-ink">GRAND TOTAL</td>
+
+                    <td className="py-3 pr-4 text-right tabular text-ink">
+                      {auctionTotals.newBidders}
+                    </td>
+
+                    <td className="py-3 pr-4 text-right tabular text-ink">
+                      {formatPeso(auctionTotals.newBiddersBidAmount)}
+                    </td>
+
+                    <td className="py-3 pr-4 text-right tabular text-ink">
+                      {auctionTotals.returningBidders}
+                    </td>
+
+                    <td className="py-3 text-right tabular text-ink">
+                      {formatPeso(auctionTotals.returningBiddersBidAmount)}
+                    </td>
+                  </tr>
+                )}
               </tbody>
-              
             </table>
           </div>
         )}
