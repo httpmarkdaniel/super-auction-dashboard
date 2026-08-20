@@ -38,9 +38,7 @@ export function buildStoryline(overview, storeName) {
     : "";
 
   return {
-    headline: `Bid amount reached ${formatPeso(heroKPIs.totalBidAmount)} ${scopeAdverb(
-      storeName
-    )}${deltaClause}, with ${heroKPIs.sellThroughRate}% of listed lots clearing the block.`,
+    headline: `The combined value of all bids placed during the selected period, based on the current filters.`,
   };
 }
 
