@@ -49,17 +49,30 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       try {
         const { from, to } = resolveDateRange(dateRangeKey);
 
-        const liveLeaderboards = await fetchJson("/api/leaderboards", {
-          from,
-          to,
-          store,
-        });
+        const [liveOverview, liveLeaderboards] = await Promise.all([
+          fetchJson("/api/overview", {
+            from,
+            to,
+            store,
+          }),
+
+          fetchJson("/api/leaderboards", {
+            from,
+            to,
+            store,
+          }),
+        ]);
 
         if (cancelled) return;
 
         setState({
           data: {
-            overview: MOCK_OVERVIEW,
+            overview: {
+              ...MOCK_OVERVIEW,
+
+              // LIVE FROM CLICKHOUSE
+              total_bid_amount: liveOverview.total_bid_amount,
+            },
 
             leaderboards: {
               ...MOCK_LEADERBOARDS,
@@ -84,7 +97,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       } catch (err) {
         if (cancelled) return;
 
-        console.error("Failed loading live bidder composition:", err);
+        console.error("Failed loading live dashboard data:", err);
 
         setState({
           data: {
@@ -101,10 +114,8 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       }
     }
 
-    // Initial fetch
     load();
 
-    // Refresh from ClickHouse every 30 seconds
     const interval = setInterval(load, 30_000);
 
     return () => {
