@@ -69,8 +69,26 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           data: {
             overview: {
               ...MOCK_OVERVIEW,
+
+              // LIVE TOTAL BID AMOUNT
               total_bid_amount: liveOverview.total_bid_amount,
+
+              // LIVE BRANCH BREAKDOWN
               branches: liveOverview.branches ?? [],
+
+              // LIVE ACTIVE AUCTIONS
+              total_auctions: liveOverview.active_auctions ?? 0,
+
+              // LIVE LOTS SOLD / LISTED
+              ended_lots_listed: liveOverview.listed_lots ?? 0,
+              ended_lots_sold: liveOverview.sold_lots ?? 0,
+
+              // LIVE UNSOLD LOTS
+              unsold_count: liveOverview.unsold_lots ?? 0,
+              unsold_value: liveOverview.unsold_value ?? 0,
+
+              // Used as denominator for unsold calculations
+              total_inventory: liveOverview.listed_lots ?? 0,
             },
 
             leaderboards: {
@@ -95,6 +113,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           loading: false,
           error: null,
         });
+
       } catch (err) {
         if (cancelled) return;
 
