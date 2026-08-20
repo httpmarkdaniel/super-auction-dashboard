@@ -23,6 +23,9 @@ export default async function handler(req, res) {
       store,
     };
 
+    // ---------------------------------------------------------
+    // TOTAL BID AMOUNT
+    // ---------------------------------------------------------
     const totalResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -35,6 +38,7 @@ export default async function handler(req, res) {
 
         SELECT
           sum(b.bid_amount) AS total_bid_amount
+
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -48,10 +52,14 @@ export default async function handler(req, res) {
             OR s.store_name = {store:String}
           )
       `,
+
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
+    // ---------------------------------------------------------
+    // BID AMOUNT BY BRANCH
+    // ---------------------------------------------------------
     const branchResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -65,6 +73,7 @@ export default async function handler(req, res) {
         SELECT
           s.store_name AS branch,
           sum(b.bid_amount) AS bid_amount
+
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -81,10 +90,16 @@ export default async function handler(req, res) {
         GROUP BY s.store_name
         ORDER BY bid_amount DESC
       `,
+
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
+    // ---------------------------------------------------------
+    // BID AMOUNT BY AUCTION TAG / CATEGORY
+    //
+    // auction_tags is a calculated field based on Vendor Analysis "name".
+    // ---------------------------------------------------------
     const categoryResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -99,12 +114,38 @@ export default async function handler(req, res) {
           SELECT
             auction_number,
             lot_number,
-            any(auction_tags) AS auction_tags
+
+            any(
+              CASE
+                WHEN name ILIKE '%bulk%'
+                  OR name ILIKE '%pallet%'
+                  THEN 'Bulk Auction'
+
+                WHEN name ILIKE '%vehicle%'
+                  OR name ILIKE '%motorcycle%'
+                  OR name ILIKE '%car%'
+                  OR name ILIKE '%truck%'
+                  OR name ILIKE '%van%'
+                  OR name ILIKE '%electric vehicle%'
+                  THEN 'Vehicles and Automotive'
+
+                WHEN name ILIKE '%equipment%'
+                  OR name ILIKE '%industrial%'
+                  OR name ILIKE '%generator%'
+                  OR name ILIKE '%backhoe%'
+                  OR name ILIKE '%excavator%'
+                  OR name ILIKE '%construction%'
+                  THEN 'Equipment and Industrial'
+
+                ELSE 'General Merchandise'
+              END
+            ) AS auction_tags
+
           FROM xv3.mart_auction_vendor_analysis
+
           WHERE auction_number IS NOT NULL
             AND lot_number IS NOT NULL
-            AND auction_tags IS NOT NULL
-            AND trim(auction_tags) != ''
+
           GROUP BY
             auction_number,
             lot_number
@@ -113,6 +154,7 @@ export default async function handler(req, res) {
         SELECT
           lc.auction_tags AS category,
           sum(b.bid_amount) AS bid_amount
+
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -133,6 +175,7 @@ export default async function handler(req, res) {
         GROUP BY lc.auction_tags
         ORDER BY bid_amount DESC
       `,
+
       query_params: queryParams,
       format: "JSONEachRow",
     });
