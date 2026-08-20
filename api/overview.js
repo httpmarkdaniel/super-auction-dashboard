@@ -15,23 +15,28 @@ export default async function handler(req, res) {
         if (type === "active-auctions") {
             const result = await client.query({
                 query: `
-          SELECT
-            auction_number,
-            any(name) AS name,
-            any(store_name) AS store_name,
-            min(starting_time) AS starting_time,
-            max(ending_time) AS ending_time,
-            max(lot_count) AS lot_count
-          FROM xv3.mart_auction_productivity_report
-          WHERE starting_time <= now()
-            AND ending_time >= now()
-            AND (
-              {store:String} = ''
-              OR store_name = {store:String}
-            )
-          GROUP BY auction_number
-          ORDER BY ending_time ASC
-        `,
+      SELECT
+        auction_number,
+        any(name) AS auction_name,
+        any(store_name) AS store_name,
+        min(starting_time) AS auction_starting_time,
+        max(ending_time) AS auction_ending_time,
+        max(lot_count) AS lot_count
+
+      FROM xv3.mart_auction_productivity_report
+
+      WHERE starting_time <= now()
+        AND ending_time >= now()
+
+        AND (
+          {store:String} = ''
+          OR store_name = {store:String}
+        )
+
+      GROUP BY auction_number
+      ORDER BY auction_ending_time ASC
+    `,
+
                 query_params: { store },
                 format: "JSONEachRow",
             });
@@ -41,12 +46,13 @@ export default async function handler(req, res) {
             return res.status(200).json({
                 type: "active-auctions",
                 total: rows.length,
+
                 rows: rows.map((row) => ({
                     auction_number: row.auction_number,
-                    name: row.name,
+                    name: row.auction_name,
                     store_name: row.store_name,
-                    starting_time: row.starting_time,
-                    ending_time: row.ending_time,
+                    starting_time: row.auction_starting_time,
+                    ending_time: row.auction_ending_time,
                     lot_count: Number(row.lot_count ?? 0),
                 })),
             });
