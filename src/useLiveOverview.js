@@ -69,31 +69,25 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           data: {
             overview: {
               ...MOCK_OVERVIEW,
-
-              // LIVE FROM CLICKHOUSE
               total_bid_amount: liveOverview.total_bid_amount,
               branches: liveOverview.branches ?? [],
             },
 
-             categories: {
-               ...MOCK_CATEGORIES,
-               categories: liveOverview.categories ?? [],
-             },
-      
-
             leaderboards: {
               ...MOCK_LEADERBOARDS,
-
-              // LIVE FROM CLICKHOUSE
               composition: liveLeaderboards.composition,
-
-              // LIVE FROM CLICKHOUSE
               perAuctionComposition:
                 liveLeaderboards.perAuctionComposition ?? [],
             },
 
+            categories: {
+              ...MOCK_CATEGORIES,
+
+              // LIVE FROM CLICKHOUSE
+              categories: liveOverview.categories ?? [],
+            },
+
             reservePerformance: MOCK_RESERVE_PERFORMANCE,
-            categories: MOCK_CATEGORIES,
             lots: MOCK_LOTS,
             payables: MOCK_PAYABLES,
           },
