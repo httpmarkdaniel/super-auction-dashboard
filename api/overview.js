@@ -19,21 +19,36 @@ export default async function handler(req, res) {
 
     const result = await client.query({
       query: `
+        WITH auction_store AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE auction_number IS NOT NULL
+        )
+
         SELECT
-          sum(total_bid_amount) AS total_bid_amount
-        FROM xv3.mart_auction_productivity_report
-        WHERE starting_time >= {from:Date}
-          AND starting_time < addDays({to:Date}, 1)
+          sum(b.bid_amount) AS total_bid_amount
+        FROM cms.mart_cms_bid_history_report b
+
+        INNER JOIN auction_store s
+          ON b.auction_number = s.auction_number
+
+        WHERE b.bid_created_at >= {from:Date}
+          AND b.bid_created_at < addDays({to:Date}, 1)
+
           AND (
             {store:String} = ''
-            OR store_name = {store:String}
+            OR s.store_name = {store:String}
           )
       `,
+
       query_params: {
         from,
         to,
         store,
       },
+
       format: "JSONEachRow",
     });
 
