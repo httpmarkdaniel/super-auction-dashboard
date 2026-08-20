@@ -23,9 +23,10 @@ export default async function handler(req, res) {
       store,
     };
 
-    // ---------------------------------------------------------
+    // =========================================================
     // TOTAL BID AMOUNT
-    // ---------------------------------------------------------
+    // =========================================================
+
     const totalResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -38,7 +39,6 @@ export default async function handler(req, res) {
 
         SELECT
           sum(b.bid_amount) AS total_bid_amount
-
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -52,14 +52,17 @@ export default async function handler(req, res) {
             OR s.store_name = {store:String}
           )
       `,
-
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
-    // ---------------------------------------------------------
+    const totalRows = await totalResult.json();
+    const total = totalRows[0] ?? {};
+
+    // =========================================================
     // BID AMOUNT BY BRANCH
-    // ---------------------------------------------------------
+    // =========================================================
+
     const branchResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -73,7 +76,6 @@ export default async function handler(req, res) {
         SELECT
           s.store_name AS branch,
           sum(b.bid_amount) AS bid_amount
-
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -90,16 +92,16 @@ export default async function handler(req, res) {
         GROUP BY s.store_name
         ORDER BY bid_amount DESC
       `,
-
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
-    // ---------------------------------------------------------
-    // BID AMOUNT BY AUCTION TAG / CATEGORY
-    //
-    // auction_tags is a calculated field based on Vendor Analysis "name".
-    // ---------------------------------------------------------
+    const branchRows = await branchResult.json();
+
+    // =========================================================
+    // BID AMOUNT BY CATEGORY / AUCTION TAG
+    // =========================================================
+
     const categoryResult = await client.query({
       query: `
         WITH auction_store AS (
@@ -154,7 +156,6 @@ export default async function handler(req, res) {
         SELECT
           lc.auction_tags AS category,
           sum(b.bid_amount) AS bid_amount
-
         FROM cms.mart_cms_bid_history_report b
 
         INNER JOIN auction_store s
@@ -175,18 +176,15 @@ export default async function handler(req, res) {
         GROUP BY lc.auction_tags
         ORDER BY bid_amount DESC
       `,
-
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
-    const [totalRows, branchRows, categoryRows] = await Promise.all([
-      totalResult.json(),
-      branchResult.json(),
-      categoryResult.json(),
-    ]);
+    const categoryRows = await categoryResult.json();
 
-    const total = totalRows[0] ?? {};
+    // =========================================================
+    // RESPONSE
+    // =========================================================
 
     return res.status(200).json({
       total_bid_amount: Number(total.total_bid_amount ?? 0),
@@ -206,6 +204,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       error: "Failed to load overview",
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 }
