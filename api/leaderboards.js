@@ -87,7 +87,6 @@ export default async function handler(req, res) {
             },
             format: "JSONEachRow",
         });
-
         const perAuctionResult = await client.query({
             query: `
     WITH auction_store AS (
@@ -98,10 +97,10 @@ export default async function handler(req, res) {
       WHERE auction_number IS NOT NULL
     ),
 
-    bidder_first_bid AS (
+    bidder_first_ever_bid AS (
       SELECT
         lowerUTF8(trim(email)) AS bidder_key,
-        min(bid_created_at) AS first_bid_at
+        min(bid_created_at) AS first_ever_bid_at
       FROM cms.mart_cms_bid_history_report
       WHERE bid_created_at IS NOT NULL
         AND email IS NOT NULL
@@ -109,12 +108,11 @@ export default async function handler(req, res) {
       GROUP BY bidder_key
     ),
 
-    period_bidder_auction AS (
+    period_bidder_activity AS (
       SELECT
-        b.auction_number,
-        s.store_name,
         lowerUTF8(trim(b.email)) AS bidder_key,
-        sum(b.bid_amount) AS bid_amount
+        argMin(b.auction_number, b.bid_created_at) AS attributed_auction_number,
+        sum(b.bid_amount) AS period_bid_amount
 
       FROM cms.mart_cms_bid_history_report b
 
@@ -133,46 +131,50 @@ export default async function handler(req, res) {
         AND trim(b.email) != ''
         AND b.auction_number IS NOT NULL
 
-      GROUP BY
-        b.auction_number,
-        s.store_name,
-        bidder_key
+      GROUP BY bidder_key
+    ),
+
+    classified_bidders AS (
+      SELECT
+        p.bidder_key,
+        p.attributed_auction_number,
+        p.period_bid_amount,
+
+        if(
+          f.first_ever_bid_at >= {from:Date}
+          AND f.first_ever_bid_at < addDays({to:Date}, 1),
+          'New',
+          'Returning'
+        ) AS bidder_status
+
+      FROM period_bidder_activity p
+
+      INNER JOIN bidder_first_ever_bid f
+        ON p.bidder_key = f.bidder_key
     )
 
     SELECT
-      p.auction_number,
-      p.store_name,
+      attributed_auction_number AS auction_number,
 
-      countIf(
-        f.first_bid_at >= {from:Date}
-        AND f.first_bid_at < addDays({to:Date}, 1)
-      ) AS new_bidders,
-
-      countIf(
-        f.first_bid_at < {from:Date}
-      ) AS returning_bidders,
+      countIf(bidder_status = 'New') AS new_bidders,
 
       sumIf(
-        p.bid_amount,
-        f.first_bid_at >= {from:Date}
-        AND f.first_bid_at < addDays({to:Date}, 1)
+        period_bid_amount,
+        bidder_status = 'New'
       ) AS new_bidders_bid_amount,
 
+      countIf(bidder_status = 'Returning') AS returning_bidders,
+
       sumIf(
-        p.bid_amount,
-        f.first_bid_at < {from:Date}
+        period_bid_amount,
+        bidder_status = 'Returning'
       ) AS returning_bidders_bid_amount
 
-    FROM period_bidder_auction p
+    FROM classified_bidders
 
-    INNER JOIN bidder_first_bid f
-      ON p.bidder_key = f.bidder_key
+    GROUP BY attributed_auction_number
 
-    GROUP BY
-      p.auction_number,
-      p.store_name
-
-    ORDER BY p.auction_number
+    ORDER BY attributed_auction_number
   `,
 
             query_params: {
@@ -183,7 +185,7 @@ export default async function handler(req, res) {
 
             format: "JSONEachRow",
         });
-
+        
         const compositionRows = await compositionResult.json();
         const auctionRows = await perAuctionResult.json();
 
