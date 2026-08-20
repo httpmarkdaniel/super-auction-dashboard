@@ -1,22 +1,20 @@
 import { createClient } from "@clickhouse/client";
 
 const client = createClient({
-  url: process.env.CLICKHOUSE_HOST,
-  username: process.env.CLICKHOUSE_USER,
-  password: process.env.CLICKHOUSE_PASSWORD,
-  database: process.env.CLICKHOUSE_DATABASE,
+    url: process.env.CLICKHOUSE_HOST,
+    username: process.env.CLICKHOUSE_USER,
+    password: process.env.CLICKHOUSE_PASSWORD,
+    database: process.env.CLICKHOUSE_DATABASE,
 });
 
 export default async function handler(req, res) {
-  try {
-    const { from, to, store = "", type = "summary" } = req.query;
+    try {
+        const { from, to, store = "", type = "summary" } = req.query;
 
-    // =========================================================
-    // ACTIVE AUCTIONS DRILL-DOWN
-    // =========================================================
-    if (type === "active-auctions") {
-      const result = await client.query({
-        query: `
+        // ACTIVE AUCTIONS MUST BE HANDLED FIRST
+        if (type === "active-auctions") {
+            const result = await client.query({
+                query: `
           SELECT
             auction_number,
             any(name) AS name,
@@ -24,56 +22,53 @@ export default async function handler(req, res) {
             min(starting_time) AS starting_time,
             max(ending_time) AS ending_time,
             max(lot_count) AS lot_count
-
           FROM xv3.mart_auction_productivity_report
-
           WHERE starting_time <= now()
             AND ending_time >= now()
-
             AND (
               {store:String} = ''
               OR store_name = {store:String}
             )
-
           GROUP BY auction_number
           ORDER BY ending_time ASC
         `,
-        query_params: { store },
-        format: "JSONEachRow",
-      });
+                query_params: { store },
+                format: "JSONEachRow",
+            });
 
-      const rows = await result.json();
+            const rows = await result.json();
 
-      return res.status(200).json({
-        type: "active-auctions",
-        total: rows.length,
+            return res.status(200).json({
+                type: "active-auctions",
+                total: rows.length,
+                rows: rows.map((row) => ({
+                    auction_number: row.auction_number,
+                    name: row.name,
+                    store_name: row.store_name,
+                    starting_time: row.starting_time,
+                    ending_time: row.ending_time,
+                    lot_count: Number(row.lot_count ?? 0),
+                })),
+            });
+        }
 
-        rows: rows.map((row) => ({
-          auction_number: row.auction_number,
-          name: row.name,
-          store_name: row.store_name,
-          starting_time: row.starting_time,
-          ending_time: row.ending_time,
-          lot_count: Number(row.lot_count ?? 0),
-        })),
-      });
-    }
+        // ONLY SUMMARY / LOT DRILLDOWNS REQUIRE DATES
+        if (!from || !to) {
+            return res.status(400).json({
+                error: "Missing from/to date parameters",
+            });
+        }
 
-    // Everything below needs a selected date range.
-    if (!from || !to) {
-      return res.status(400).json({
-        error: "Missing from/to date parameters",
-      });
-    }
+        const queryParams = { from, to, store };
 
-    const queryParams = { from, to, store };
+        // ...rest of your existing code
 
-    // =========================================================
-    // LOTS SOLD / LISTED DRILL-DOWN
-    // =========================================================
-    if (type === "lots") {
-      const result = await client.query({
-        query: `
+        // =========================================================
+        // LOTS SOLD / LISTED DRILL-DOWN
+        // =========================================================
+        if (type === "lots") {
+            const result = await client.query({
+                query: `
           WITH selected_auctions AS (
             SELECT DISTINCT
               auction_number,
@@ -147,56 +142,56 @@ export default async function handler(req, res) {
             auction_number,
             lot_number
         `,
-        query_params: queryParams,
-        format: "JSONEachRow",
-      });
+                query_params: queryParams,
+                format: "JSONEachRow",
+            });
 
-      const rows = await result.json();
+            const rows = await result.json();
 
-      const mappedRows = rows.map((row) => ({
-        auction_number: row.auction_number,
-        lot_number: row.lot_number,
-        name: row.name,
-        store_name: row.store_name,
-        status: row.status,
-        disposition: row.disposition,
-        reserved_price: Number(row.reserved_price ?? 0),
-        sold_price: Number(row.sold_price ?? 0),
-      }));
+            const mappedRows = rows.map((row) => ({
+                auction_number: row.auction_number,
+                lot_number: row.lot_number,
+                name: row.name,
+                store_name: row.store_name,
+                status: row.status,
+                disposition: row.disposition,
+                reserved_price: Number(row.reserved_price ?? 0),
+                sold_price: Number(row.sold_price ?? 0),
+            }));
 
-      const sold = mappedRows.filter(
-        (row) => row.disposition === "Sold"
-      ).length;
+            const sold = mappedRows.filter(
+                (row) => row.disposition === "Sold"
+            ).length;
 
-      const unsold = mappedRows.filter(
-        (row) => row.disposition === "Unsold"
-      ).length;
+            const unsold = mappedRows.filter(
+                (row) => row.disposition === "Unsold"
+            ).length;
 
-      return res.status(200).json({
-        type: "lots",
+            return res.status(200).json({
+                type: "lots",
 
-        summary: {
-          listed: mappedRows.length,
-          sold,
-          unsold,
-          sell_through_rate:
-            mappedRows.length > 0
-              ? Number(
-                  ((sold / mappedRows.length) * 100).toFixed(1)
-                )
-              : 0,
-        },
+                summary: {
+                    listed: mappedRows.length,
+                    sold,
+                    unsold,
+                    sell_through_rate:
+                        mappedRows.length > 0
+                            ? Number(
+                                ((sold / mappedRows.length) * 100).toFixed(1)
+                            )
+                            : 0,
+                },
 
-        rows: mappedRows,
-      });
-    }
+                rows: mappedRows,
+            });
+        }
 
-    // =========================================================
-    // UNSOLD LOTS DRILL-DOWN
-    // =========================================================
-    if (type === "unsold-lots") {
-      const result = await client.query({
-        query: `
+        // =========================================================
+        // UNSOLD LOTS DRILL-DOWN
+        // =========================================================
+        if (type === "unsold-lots") {
+            const result = await client.query({
+                query: `
           WITH selected_auctions AS (
             SELECT DISTINCT
               auction_number,
@@ -254,48 +249,48 @@ export default async function handler(req, res) {
             auction_number,
             lot_number
         `,
-        query_params: queryParams,
-        format: "JSONEachRow",
-      });
+                query_params: queryParams,
+                format: "JSONEachRow",
+            });
 
-      const rows = await result.json();
+            const rows = await result.json();
 
-      const mappedRows = rows.map((row) => ({
-        auction_number: row.auction_number,
-        lot_number: row.lot_number,
-        name: row.name,
-        store_name: row.store_name,
-        status: row.status,
-        reserved_price: Number(row.reserved_price ?? 0),
-        sold_price: Number(row.sold_price ?? 0),
-      }));
+            const mappedRows = rows.map((row) => ({
+                auction_number: row.auction_number,
+                lot_number: row.lot_number,
+                name: row.name,
+                store_name: row.store_name,
+                status: row.status,
+                reserved_price: Number(row.reserved_price ?? 0),
+                sold_price: Number(row.sold_price ?? 0),
+            }));
 
-      const unsoldValue = mappedRows.reduce(
-        (sum, row) => sum + row.reserved_price,
-        0
-      );
+            const unsoldValue = mappedRows.reduce(
+                (sum, row) => sum + row.reserved_price,
+                0
+            );
 
-      return res.status(200).json({
-        type: "unsold-lots",
+            return res.status(200).json({
+                type: "unsold-lots",
 
-        summary: {
-          count: mappedRows.length,
-          value: unsoldValue,
-        },
+                summary: {
+                    count: mappedRows.length,
+                    value: unsoldValue,
+                },
 
-        rows: mappedRows,
-      });
-    }
+                rows: mappedRows,
+            });
+        }
 
-    // =========================================================
-    // SUMMARY
-    // =========================================================
+        // =========================================================
+        // SUMMARY
+        // =========================================================
 
-    // ---------------------------------------------------------
-    // TOTAL BID AMOUNT
-    // ---------------------------------------------------------
-    const totalResult = await client.query({
-      query: `
+        // ---------------------------------------------------------
+        // TOTAL BID AMOUNT
+        // ---------------------------------------------------------
+        const totalResult = await client.query({
+            query: `
         WITH auction_store AS (
           SELECT DISTINCT
             auction_number,
@@ -320,18 +315,18 @@ export default async function handler(req, res) {
             OR s.store_name = {store:String}
           )
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
+            query_params: queryParams,
+            format: "JSONEachRow",
+        });
 
-    const totalRows = await totalResult.json();
-    const total = totalRows[0] ?? {};
+        const totalRows = await totalResult.json();
+        const total = totalRows[0] ?? {};
 
-    // ---------------------------------------------------------
-    // BID AMOUNT BY BRANCH
-    // ---------------------------------------------------------
-    const branchResult = await client.query({
-      query: `
+        // ---------------------------------------------------------
+        // BID AMOUNT BY BRANCH
+        // ---------------------------------------------------------
+        const branchResult = await client.query({
+            query: `
         WITH auction_store AS (
           SELECT DISTINCT
             auction_number,
@@ -360,17 +355,17 @@ export default async function handler(req, res) {
         GROUP BY s.store_name
         ORDER BY bid_amount DESC
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
+            query_params: queryParams,
+            format: "JSONEachRow",
+        });
 
-    const branchRows = await branchResult.json();
+        const branchRows = await branchResult.json();
 
-    // ---------------------------------------------------------
-    // BID AMOUNT BY CATEGORY
-    // ---------------------------------------------------------
-    const categoryResult = await client.query({
-      query: `
+        // ---------------------------------------------------------
+        // BID AMOUNT BY CATEGORY
+        // ---------------------------------------------------------
+        const categoryResult = await client.query({
+            query: `
         WITH auction_store AS (
           SELECT DISTINCT
             auction_number,
@@ -444,17 +439,17 @@ export default async function handler(req, res) {
         GROUP BY lc.auction_tags
         ORDER BY bid_amount DESC
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
+            query_params: queryParams,
+            format: "JSONEachRow",
+        });
 
-    const categoryRows = await categoryResult.json();
+        const categoryRows = await categoryResult.json();
 
-    // ---------------------------------------------------------
-    // ACTIVE AUCTIONS RIGHT NOW
-    // ---------------------------------------------------------
-    const activeAuctionResult = await client.query({
-      query: `
+        // ---------------------------------------------------------
+        // ACTIVE AUCTIONS RIGHT NOW
+        // ---------------------------------------------------------
+        const activeAuctionResult = await client.query({
+            query: `
         SELECT
           countDistinct(auction_number) AS active_auctions
 
@@ -468,18 +463,18 @@ export default async function handler(req, res) {
             OR store_name = {store:String}
           )
       `,
-      query_params: { store },
-      format: "JSONEachRow",
-    });
+            query_params: { store },
+            format: "JSONEachRow",
+        });
 
-    const activeAuctionRows = await activeAuctionResult.json();
-    const activeAuction = activeAuctionRows[0] ?? {};
+        const activeAuctionRows = await activeAuctionResult.json();
+        const activeAuction = activeAuctionRows[0] ?? {};
 
-    // ---------------------------------------------------------
-    // LOT STATUS KPIs
-    // ---------------------------------------------------------
-    const lotStatusResult = await client.query({
-      query: `
+        // ---------------------------------------------------------
+        // LOT STATUS KPIs
+        // ---------------------------------------------------------
+        const lotStatusResult = await client.query({
+            query: `
         WITH selected_auctions AS (
           SELECT DISTINCT
             auction_number
@@ -538,52 +533,52 @@ export default async function handler(req, res) {
 
         FROM lots
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
+            query_params: queryParams,
+            format: "JSONEachRow",
+        });
 
-    const lotStatusRows = await lotStatusResult.json();
-    const lotStatus = lotStatusRows[0] ?? {};
+        const lotStatusRows = await lotStatusResult.json();
+        const lotStatus = lotStatusRows[0] ?? {};
 
-    const listedLots = Number(lotStatus.listed_lots ?? 0);
-    const soldLots = Number(lotStatus.sold_lots ?? 0);
-    const unsoldLots = Number(lotStatus.unsold_lots ?? 0);
+        const listedLots = Number(lotStatus.listed_lots ?? 0);
+        const soldLots = Number(lotStatus.sold_lots ?? 0);
+        const unsoldLots = Number(lotStatus.unsold_lots ?? 0);
 
-    const sellThroughRate =
-      listedLots > 0
-        ? Number(((soldLots / listedLots) * 100).toFixed(1))
-        : 0;
+        const sellThroughRate =
+            listedLots > 0
+                ? Number(((soldLots / listedLots) * 100).toFixed(1))
+                : 0;
 
-    // =========================================================
-    // SUMMARY RESPONSE
-    // =========================================================
-    return res.status(200).json({
-      total_bid_amount: Number(total.total_bid_amount ?? 0),
+        // =========================================================
+        // SUMMARY RESPONSE
+        // =========================================================
+        return res.status(200).json({
+            total_bid_amount: Number(total.total_bid_amount ?? 0),
 
-      active_auctions: Number(activeAuction.active_auctions ?? 0),
+            active_auctions: Number(activeAuction.active_auctions ?? 0),
 
-      listed_lots: listedLots,
-      sold_lots: soldLots,
-      unsold_lots: unsoldLots,
-      sell_through_rate: sellThroughRate,
-      unsold_value: Number(lotStatus.unsold_value ?? 0),
+            listed_lots: listedLots,
+            sold_lots: soldLots,
+            unsold_lots: unsoldLots,
+            sell_through_rate: sellThroughRate,
+            unsold_value: Number(lotStatus.unsold_value ?? 0),
 
-      branches: branchRows.map((row) => ({
-        branch: row.branch,
-        bid_amount: Number(row.bid_amount ?? 0),
-      })),
+            branches: branchRows.map((row) => ({
+                branch: row.branch,
+                bid_amount: Number(row.bid_amount ?? 0),
+            })),
 
-      categories: categoryRows.map((row) => ({
-        category: row.category,
-        bid_amount: Number(row.bid_amount ?? 0),
-      })),
-    });
-  } catch (err) {
-    console.error("Overview API error:", err);
+            categories: categoryRows.map((row) => ({
+                category: row.category,
+                bid_amount: Number(row.bid_amount ?? 0),
+            })),
+        });
+    } catch (err) {
+        console.error("Overview API error:", err);
 
-    return res.status(500).json({
-      error: "Failed to load overview",
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
+        return res.status(500).json({
+            error: "Failed to load overview",
+            message: err instanceof Error ? err.message : String(err),
+        });
+    }
 }
