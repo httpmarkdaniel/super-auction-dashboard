@@ -16,6 +16,23 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
   const totalBidders = bidderComposition.newBidders + bidderComposition.returningBidders;
   const newBidderPct = totalBidders > 0 ? Math.round((bidderComposition.newBidders / totalBidders) * 100) : 0;
   const returningBidderPct = totalBidders > 0 ? 100 - newBidderPct : 0;
+  const auctionTotals = byAuction.reduce(
+  (acc, a) => ({
+    newBidders: acc.newBidders + Number(a.newBidders || 0),
+    newBiddersBidAmount:
+      acc.newBiddersBidAmount + Number(a.newBiddersBidAmount || 0),
+    returningBidders:
+      acc.returningBidders + Number(a.returningBidders || 0),
+    returningBiddersBidAmount:
+      acc.returningBiddersBidAmount + Number(a.returningBiddersBidAmount || 0),
+  }),
+  {
+    newBidders: 0,
+    newBiddersBidAmount: 0,
+    returningBidders: 0,
+    returningBiddersBidAmount: 0,
+  }
+);
   // The donut represents bidder COUNT composition, while the contribution
   // bar below represents BID VALUE. Keeping those concepts separate avoids
   // implying that bidder share and bid-value share are the same metric.
@@ -157,6 +174,7 @@ export default function BidderComposition({ data: bidderComposition, rangeLabel 
                   </tr>
                 )}
               </tbody>
+              
             </table>
           </div>
         )}
