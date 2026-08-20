@@ -75,6 +75,12 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               branches: liveOverview.branches ?? [],
             },
 
+             categories: {
+               ...MOCK_CATEGORIES,
+               categories: liveOverview.categories ?? [],
+             },
+      
+
             leaderboards: {
               ...MOCK_LEADERBOARDS,
 
