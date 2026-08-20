@@ -245,19 +245,19 @@ export default function BidderComposition({
                     <td className="py-3 pr-4 text-ink">GRAND TOTAL</td>
 
                     <td className="py-3 pr-4 text-right tabular text-ink">
-                      {auctionTotals.newBidders}
+                      {bidderComposition.newBidders}
                     </td>
 
                     <td className="py-3 pr-4 text-right tabular text-ink">
-                      {formatPeso(auctionTotals.newBiddersBidAmount)}
+                      {formatPeso(bidderComposition.newBiddersBidAmount)}
                     </td>
 
                     <td className="py-3 pr-4 text-right tabular text-ink">
-                      {auctionTotals.returningBidders}
+                      {bidderComposition.returningBidders}
                     </td>
 
                     <td className="py-3 text-right tabular text-ink">
-                      {formatPeso(auctionTotals.returningBiddersBidAmount)}
+                      {formatPeso(bidderComposition.returningBiddersBidAmount)}
                     </td>
                   </tr>
                 )}
