@@ -72,6 +72,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
 
               // LIVE FROM CLICKHOUSE
               total_bid_amount: liveOverview.total_bid_amount,
+              branches: liveOverview.branches ?? [],
             },
 
             leaderboards: {
