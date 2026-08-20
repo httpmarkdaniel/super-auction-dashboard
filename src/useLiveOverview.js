@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { resolveDateRange } from "./utils/dateRange";
 import {
+  MOCK_OVERVIEW,
   MOCK_LEADERBOARDS,
   MOCK_RESERVE_PERFORMANCE,
   MOCK_CATEGORIES,
@@ -10,20 +11,31 @@ import {
 
 function fetchJson(path, params = {}) {
   const qs = new URLSearchParams(
-    Object.entries(params).filter(([, v]) => v)
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
   )
     .toString()
     .replace(/\+/g, "%20");
 
-  return fetch(`${path}?${qs}`).then((res) => {
-    if (!res.ok) throw new Error(`${path} returned ${res.status}`);
+  return fetch(`${path}?${qs}`).then(async (res) => {
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${path} returned ${res.status}: ${text}`);
+    }
+
     return res.json();
   });
 }
 
 export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
   const [state, setState] = useState({
-    data: null,
+    data: {
+      overview: MOCK_OVERVIEW,
+      leaderboards: MOCK_LEADERBOARDS,
+      reservePerformance: MOCK_RESERVE_PERFORMANCE,
+      categories: MOCK_CATEGORIES,
+      lots: MOCK_LOTS,
+      payables: MOCK_PAYABLES,
+    },
     loading: true,
     error: null,
   });
@@ -31,26 +43,29 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
   useEffect(() => {
     let cancelled = false;
 
-    setState((s) => ({
-      ...s,
-      loading: true,
-      error: null,
-    }));
+    async function load() {
+      try {
+        const { from, to } = resolveDateRange(dateRangeKey);
 
-    const { from, to } = resolveDateRange(dateRangeKey);
+        const liveLeaderboards = await fetchJson("/api/leaderboards", {
+          from,
+          to,
+          store,
+        });
 
-    fetchJson("/api/overview", {
-      from,
-      to,
-      store,
-    })
-      .then((overview) => {
         if (cancelled) return;
 
         setState({
           data: {
-            overview,
-            leaderboards: MOCK_LEADERBOARDS,
+            overview: MOCK_OVERVIEW,
+
+            leaderboards: {
+              ...MOCK_LEADERBOARDS,
+
+              // LIVE FROM CLICKHOUSE
+              composition: liveLeaderboards.composition,
+            },
+
             reservePerformance: MOCK_RESERVE_PERFORMANCE,
             categories: MOCK_CATEGORIES,
             lots: MOCK_LOTS,
@@ -59,19 +74,34 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           loading: false,
           error: null,
         });
-      })
-      .catch((err) => {
+      } catch (err) {
         if (cancelled) return;
 
+        console.error("Failed loading live bidder composition:", err);
+
         setState({
-          data: null,
+          data: {
+            overview: MOCK_OVERVIEW,
+            leaderboards: MOCK_LEADERBOARDS,
+            reservePerformance: MOCK_RESERVE_PERFORMANCE,
+            categories: MOCK_CATEGORIES,
+            lots: MOCK_LOTS,
+            payables: MOCK_PAYABLES,
+          },
           loading: false,
           error: err.message,
         });
-      });
+      }
+    }
+
+    load();
+
+    // Refresh ClickHouse every 30 seconds
+    const interval = setInterval(load, 30_000);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [dateRangeKey, store, refreshNonce]);
 
