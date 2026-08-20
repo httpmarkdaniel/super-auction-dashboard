@@ -11,23 +11,21 @@ export default async function handler(req, res) {
     try {
         const { from, to, store = "", type = "summary" } = req.query;
 
-        // ACTIVE AUCTIONS MUST BE HANDLED FIRST
         if (type === "active-auctions") {
             const result = await client.query({
                 query: `
       SELECT
         auction_number,
         any(name) AS auction_name,
-        any(store_name) AS store_name,
+        any(store_name) AS auction_store_name,
         min(starting_time) AS auction_starting_time,
         max(ending_time) AS auction_ending_time,
-        max(lot_count) AS lot_count
+        max(lot_count) AS auction_lot_count
 
       FROM xv3.mart_auction_productivity_report
 
       WHERE starting_time <= now()
         AND ending_time >= now()
-
         AND (
           {store:String} = ''
           OR store_name = {store:String}
@@ -50,10 +48,10 @@ export default async function handler(req, res) {
                 rows: rows.map((row) => ({
                     auction_number: row.auction_number,
                     name: row.auction_name,
-                    store_name: row.store_name,
+                    store_name: row.auction_store_name,
                     starting_time: row.auction_starting_time,
                     ending_time: row.auction_ending_time,
-                    lot_count: Number(row.lot_count ?? 0),
+                    lot_count: Number(row.auction_lot_count ?? 0),
                 })),
             });
         }
