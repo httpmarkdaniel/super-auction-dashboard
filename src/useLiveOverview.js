@@ -11,7 +11,9 @@ import {
 
 function fetchJson(path, params = {}) {
   const qs = new URLSearchParams(
-    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== "")
+    Object.entries(params).filter(
+      ([, v]) => v !== undefined && v !== null && v !== ""
+    )
   )
     .toString()
     .replace(/\+/g, "%20");
@@ -64,6 +66,10 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
 
               // LIVE FROM CLICKHOUSE
               composition: liveLeaderboards.composition,
+
+              // LIVE FROM CLICKHOUSE
+              perAuctionComposition:
+                liveLeaderboards.perAuctionComposition ?? [],
             },
 
             reservePerformance: MOCK_RESERVE_PERFORMANCE,
@@ -71,6 +77,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             lots: MOCK_LOTS,
             payables: MOCK_PAYABLES,
           },
+
           loading: false,
           error: null,
         });
@@ -94,9 +101,10 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       }
     }
 
+    // Initial fetch
     load();
 
-    // Refresh ClickHouse every 30 seconds
+    // Refresh from ClickHouse every 30 seconds
     const interval = setInterval(load, 30_000);
 
     return () => {
