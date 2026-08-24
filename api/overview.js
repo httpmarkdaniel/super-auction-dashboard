@@ -334,6 +334,54 @@ export default async function handler(req, res) {
     const total = totalRows[0] ?? {};
 
     // ---------------------------------------------------------
+    // TODAY'S BID
+    // Always uses the current Asia/Manila calendar day.
+    // Still respects the selected store.
+    // ---------------------------------------------------------
+    const todayBidResult = await client.query({
+      query: `
+    WITH auction_store AS (
+      SELECT DISTINCT
+        auction_number,
+        store_name
+      FROM xv3.mart_auction_productivity_report
+      WHERE auction_number IS NOT NULL
+    )
+
+    SELECT
+      ifNull(sum(b.bid_amount), 0) AS todays_bid_amount
+
+    FROM cms.mart_cms_bid_history_report b
+
+    INNER JOIN auction_store s
+      ON b.auction_number = s.auction_number
+
+    WHERE b.bid_created_at >= toStartOfDay(
+      now('Asia/Manila')
+    )
+
+      AND b.bid_created_at < addDays(
+        toStartOfDay(now('Asia/Manila')),
+        1
+      )
+
+      AND (
+        {store:String} = ''
+        OR s.store_name = {store:String}
+      )
+  `,
+
+      query_params: {
+        store,
+      },
+
+      format: "JSONEachRow",
+    });
+
+    const todayBidRows = await todayBidResult.json();
+    const todayBid = todayBidRows[0] ?? {};
+
+    // ---------------------------------------------------------
     // BID AMOUNT BY BRANCH
     // ---------------------------------------------------------
     const branchResult = await client.query({
