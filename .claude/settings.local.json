@@ -69,7 +69,8 @@
       "WebFetch(domain:www.climatiq.io)",
       "WebFetch(domain:docs.google.com)",
       "WebFetch(domain:doc-00-60-sheets.googleusercontent.com)",
-      "WebFetch(domain:doc-00-64-sheets.googleusercontent.com)"
+      "WebFetch(domain:doc-00-64-sheets.googleusercontent.com)",
+      "Bash(xargs -I{} echo {})"
     ]
   }
 }
