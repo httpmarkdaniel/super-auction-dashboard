@@ -411,6 +411,17 @@ export default async function handler(req, res) {
             AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS new_bidders_bid_amount,
 
+          -- Distinct bidder counts use the bridged plaintext email — the
+          -- same identity the classification itself is keyed on. Only
+          -- lots with a fully-resolved bridge (cb_email/f.first_ever_bid_at
+          -- non-null) ever contribute here, so an unclassified lot can
+          -- never be miscounted as a distinct New/Returning bidder.
+          uniqExactIf(
+            cb_email,
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS new_bidders,
+
           countIf(
             f.first_ever_bid_at IS NOT NULL
             AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
@@ -419,7 +430,13 @@ export default async function handler(req, res) {
             ifNull(sl.lot_bid_amount, 0),
             f.first_ever_bid_at IS NOT NULL
             AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-          ) AS returning_bidders_bid_amount
+          ) AS returning_bidders_bid_amount,
+
+          uniqExactIf(
+            cb_email,
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS returning_bidders
 
         FROM settled_lots sl
 
@@ -537,13 +554,37 @@ export default async function handler(req, res) {
             AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_new_bid_amount,
 
+          countIf(
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_new_lots,
+
+          uniqExactIf(
+            cb_email,
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_new_bidders,
+
           sumIf(
             ifNull(sl.lot_bid_amount, 0),
             f.first_ever_bid_at IS NOT NULL
             AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_returning_bid_amount,
 
-          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS settled_unclassified_bid_amount
+          countIf(
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_returning_lots,
+
+          uniqExactIf(
+            cb_email,
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_returning_bidders,
+
+          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS settled_unclassified_bid_amount,
+
+          countIf(f.first_ever_bid_at IS NULL) AS settled_unclassified_lots
 
         FROM settled_lots sl
 
@@ -579,12 +620,22 @@ export default async function handler(req, res) {
       // to api/overview.js's total_bid_amount. See the query comment
       // above for the identity-bridge chain and Unclassified definition.
       composition: {
+        // True distinct bridged-bidder counts (uniqExact on the bridged
+        // plaintext email) — NOT lot counts. A bidder winning 3 lots
+        // counts once here.
+        new_bidders: Number(settledComposition.new_bidders ?? 0),
+        returning_bidders: Number(settledComposition.returning_bidders ?? 0),
+
         new_bidders_bid_amount: Number(settledComposition.new_bidders_bid_amount ?? 0),
         returning_bidders_bid_amount: Number(settledComposition.returning_bidders_bid_amount ?? 0),
         unclassified_bid_amount: Number(settledComposition.unclassified_bid_amount ?? 0),
 
+        // Lot counts, kept alongside the distinct-bidder counts above —
+        // deliberately NOT relabeled as bidder counts.
         new_bidder_lots: Number(settledComposition.new_bidder_lots ?? 0),
         returning_bidder_lots: Number(settledComposition.returning_bidder_lots ?? 0),
+        // No "unclassified_bidders" field: an unclassified lot has no
+        // resolved bidder identity to count, distinct or otherwise.
         unclassified_lots: Number(settledComposition.unclassified_lots ?? 0),
 
         total_lots: Number(settledComposition.total_lots ?? 0),
@@ -595,9 +646,17 @@ export default async function handler(req, res) {
         auction_number: row.auction_number,
         store_name: row.store_name,
         settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+
+        new_bidders: Number(row.settled_new_bidders ?? 0),
+        returning_bidders: Number(row.settled_returning_bidders ?? 0),
+
         new_bidders_bid_amount: Number(row.settled_new_bid_amount ?? 0),
         returning_bidders_bid_amount: Number(row.settled_returning_bid_amount ?? 0),
         unclassified_bid_amount: Number(row.settled_unclassified_bid_amount ?? 0),
+
+        new_bidder_lots: Number(row.settled_new_lots ?? 0),
+        returning_bidder_lots: Number(row.settled_returning_lots ?? 0),
+        unclassified_lots: Number(row.settled_unclassified_lots ?? 0),
       })),
 
       // Preserved, not deleted: the previous bid-history cumulative-
