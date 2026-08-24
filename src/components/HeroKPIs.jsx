@@ -20,8 +20,7 @@ const ICONS = {
   alert: <Icon path={<><circle cx="12" cy="12" r="9" /><path d="M12 8v5" /><path d="M12 16h.01" /></>} />,
   tag: <Icon path={<><path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3H4a1 1 0 0 0-1 1v5.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.82 0l4.6-4.6a2 2 0 0 0 0-2.83z" /><circle cx="7.5" cy="7.5" r="1.5" /></>} />,
   clock: <Icon path={<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>} />,
-  wallet: <Icon path={<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M17 12h.01" /></>} />,
-  backlog: <Icon path={<><path d="M4 19V5a1 1 0 0 1 1-1h8l6 6v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M13 4v6h6" /></>} />,
+  wallet: <Icon path={<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M17 12h.01" /></>} />
 };
 
 const METHODOLOGY = {
@@ -38,9 +37,7 @@ const METHODOLOGY = {
   withReservePrice:
     "Of the unsold lots above, how many have a reserve price set (and their combined reserve value) — lots with no reserve on file don't contribute a comparable value figure. Click to see them.",
   serviceIncome:
-    "Buyer's premium plus service fee, scoped to lots with status Paid or Released only — HMR's realized revenue share on lots actually settled, not just won, within the selected date range.",
-  vendorPayables:
-    "Running balance still owed to vendors for sold lots not yet remitted (payment status On Process or Available) — a standing balance, company-wide, not scoped to the selected date range.",
+    "Buyer's premium plus service fee, scoped to lots with status Paid or Released only — HMR's realized revenue share on lots actually settled, not just won, within the selected date range."
 };
 
 function LotDrilldownModal({ open, onClose, title, subtitle, data, initialTab }) {
@@ -52,7 +49,15 @@ function LotDrilldownModal({ open, onClose, title, subtitle, data, initialTab })
 }
 
 export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
-  const { heroKPIs, unsoldLots, vendorPayablesBacklog, hourlyTrend, operationsDetail, branchTally, categoryTally, auctionNumbersInRange } = overview;
+  const {
+    heroKPIs,
+    unsoldLots,
+    hourlyTrend,
+    operationsDetail,
+    branchTally,
+    categoryTally,
+    auctionNumbersInRange,
+  } = overview;
   const trend = hourlyTrend.map((h) => h.bidAmount);
   const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
   const hasBidDelta = heroKPIs.totalBidAmountDeltaPct !== undefined;

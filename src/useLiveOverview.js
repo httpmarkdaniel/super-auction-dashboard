@@ -73,6 +73,8 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               // LIVE TOTAL BID AMOUNT
               total_bid_amount: liveOverview.total_bid_amount,
 
+              todays_bid_amount: liveOverview.todays_bid_amount ?? 0,
+
               // LIVE BRANCH BREAKDOWN
               branches: liveOverview.branches ?? [],
 

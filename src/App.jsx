@@ -4,7 +4,6 @@ import Topbar from "./components/Topbar";
 import StoryHeader from "./components/StoryHeader";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
-import HealthScoreCard from "./components/HealthScoreCard";
 import BranchTallyModal from "./components/primitives/BranchTallyModal";
 import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
@@ -21,8 +20,8 @@ import PayablesView from "./components/PayablesView";
 import FullAuctionDetailView from "./components/FullAuctionDetailView";
 import BiddingPaceView from "./components/BiddingPaceView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
+import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
-import { buildStoryline, computeHealthScore } from "./insights";
 import { formatPeso } from "./utils/format";
 import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection, useMarqueeSummary } from "./useLiveBidding";
@@ -52,6 +51,7 @@ const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => {
 const EMPTY_OVERVIEW = {
   heroKPIs: {
     totalBidAmount: 0,
+    todaysBidAmount: 0,
     totalBidAmountDeltaPct: undefined,
     totalBidAmountWeekDeltaPct: undefined,
     totalBidAmountMonthDeltaPct: undefined,
@@ -222,6 +222,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   return {
     heroKPIs: {
       totalBidAmount: bidAmount,
+      todaysBidAmount: Number(kpis.todays_bid_amount) || 0,
       totalBidAmountDeltaPct: undefined,
       totalBidAmountWeekDeltaPct,
       totalBidAmountMonthDeltaPct,
@@ -298,13 +299,8 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 const BID_AMOUNT_METHODOLOGY =
   "Sum of every lot's bid amount across auctions in the selected date range, corrected against cms.hmr.ph's live current-bid figures for any auction still in progress (ClickHouse's own snapshot can lag behind real-time bids).";
 
-const HEALTH_SCORE_METHODOLOGY =
-  "Composite 0–100 score: 50% sell-through rate + 30% reserve performance (lots sold at or above reserve) + 20% inverse unsold-inventory ratio (current company-wide standing stock, not scoped to the selected date range). 80+ is On Track, 60–79 is Needs Attention, below 60 is Critical.";
-
 function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
   const story = buildStoryline(overview, store);
-  const health = computeHealthScore(overview);
-  const trend = overview.hourlyTrend.map((h) => h.bidAmount);
   const [showBranchTally, setShowBranchTally] = useState(false);
 
   return (
@@ -344,7 +340,20 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
               ].filter(Boolean)}
             />
           </div>
-          <HealthScoreCard {...health} trend={trend} methodology={HEALTH_SCORE_METHODOLOGY} />
+          <div className="card px-7 py-6 shrink-0 lg:w-[320px]">
+            <div className="text-[13.5px] tracking-[0.1em] uppercase text-navy font-bold font-display mb-2.5">
+              Today's Bid
+            </div>
+
+            <div className="font-display text-[42px] leading-none text-ink">
+              {formatPeso(overview.heroKPIs.todaysBidAmount)}
+            </div>
+
+            <div className="text-[14px] text-muted mt-2">
+              Total bid value placed today.
+            </div>
+          </div>
+
           <BranchTallyModal
             open={showBranchTally}
             onClose={() => setShowBranchTally(false)}
