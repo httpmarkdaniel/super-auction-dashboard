@@ -37,6 +37,9 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       categories: MOCK_CATEGORIES,
       lots: MOCK_LOTS,
       payables: MOCK_PAYABLES,
+      settledLots: [],
+      activeAuctionRows: [],
+      unsoldLotRows: [],
     },
     loading: true,
     error: null,
@@ -49,18 +52,31 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       try {
         const { from, to } = resolveDateRange(dateRangeKey);
 
-        const [liveOverview, liveLeaderboards] = await Promise.all([
-          fetchJson("/api/overview", {
-            from,
-            to,
-            store,
-          }),
+        const [
+          liveOverview,
+          liveLeaderboards,
+          settledLotsResult,
+          lotsResult,
+          unsoldLotsResult,
+          activeAuctionsResult,
+        ] = await Promise.all([
+          fetchJson("/api/overview", { from, to, store }),
+          fetchJson("/api/leaderboards", { from, to, store }),
 
-          fetchJson("/api/leaderboards", {
-            from,
-            to,
-            store,
-          }),
+          // TOTAL BID AMOUNT DRILLDOWN — the exact settled lots behind
+          // total_bid_amount, sum(bid_amount) reconciles to it exactly.
+          fetchJson("/api/overview", { from, to, store, type: "settled-lots" }),
+
+          // LOTS SOLD / LISTED DRILLDOWN
+          fetchJson("/api/overview", { from, to, store, type: "lots" }),
+
+          // UNSOLD LOTS + WITH RESERVE PRICE DRILLDOWN (same rows, the
+          // With Reserve view filters client-side by reserved_price > 0)
+          fetchJson("/api/overview", { from, to, store, type: "unsold-lots" }),
+
+          // ACTIVE AUCTIONS DRILLDOWN — "right now", independent of the
+          // selected date range, but still store-scoped.
+          fetchJson("/api/overview", { store, type: "active-auctions" }),
         ]);
 
         if (cancelled) return;
@@ -70,7 +86,9 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             overview: {
               ...MOCK_OVERVIEW,
 
-              // LIVE TOTAL BID AMOUNT
+              // LIVE TOTAL BID AMOUNT — settled (Paid/Released) only. Do
+              // NOT add any live_bid_correction_delta / current-bid-value
+              // figure here; that's a separate metric (current_bid_value).
               total_bid_amount: liveOverview.total_bid_amount,
 
               todays_bid_amount: liveOverview.todays_bid_amount ?? 0,
@@ -88,6 +106,10 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               // LIVE UNSOLD LOTS
               unsold_count: liveOverview.unsold_lots ?? 0,
               unsold_value: liveOverview.unsold_value ?? 0,
+
+              // LIVE WITH RESERVE PRICE
+              unsold_with_reserve_count: liveOverview.unsold_with_reserve_count ?? 0,
+              unsold_with_reserve_value: liveOverview.unsold_with_reserve_value ?? 0,
 
               // Used as denominator for unsold calculations
               total_inventory: liveOverview.listed_lots ?? 0,
@@ -113,8 +135,75 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             },
 
             reservePerformance: MOCK_RESERVE_PERFORMANCE,
-            lots: MOCK_LOTS,
+
+            // LIVE LOTS SOLD/LISTED drilldown rows, replacing MOCK_LOTS
+            // for this section. type=lots' own disposition (Sold/Unsold)
+            // already covers every listed lot — NOT merged with the
+            // separate strict unsold-lots fetch below, since that would
+            // double-count lots appearing in both (type=lots' disposition
+            // bucket is a superset of strict status='Unsold' — see
+            // implementation report re Refunded/Returned lots).
+            lots: {
+              lots: (lotsResult.rows ?? []).map((row) => ({
+                lotNumber: row.lot_number,
+                item: row.name,
+                vendor: row.vendor ?? "—",
+                category: row.category ?? "—",
+                status: row.disposition,
+                soldPrice: Number(row.sold_price ?? 0),
+                approval: "",
+                totalBidAmount: Number(row.bid_amount ?? 0),
+                buyersPremium: 0,
+                serviceFee: 0,
+                reservedPrice: Number(row.reserved_price ?? 0),
+                branch: row.store_name ?? "—",
+                auctionNumber: row.auction_number,
+              })),
+            },
+
             payables: MOCK_PAYABLES,
+
+            // LIVE UNSOLD LOTS drilldown rows (strict status='Unsold') —
+            // used for the Unsold Lots AND With Reserve Price KPIs, which
+            // filters this same array client-side by reservedPrice > 0.
+            // Deliberately separate from `lots.lots` above — see comment
+            // there.
+            unsoldLotRows: (unsoldLotsResult.rows ?? []).map((row) => ({
+              lotNumber: row.lot_number,
+              item: row.name,
+              vendor: row.vendor ?? "—",
+              category: "—",
+              status: "Unsold",
+              totalBidAmount: 0,
+              reservedPrice: Number(row.reserved_price ?? 0),
+              soldPrice: Number(row.sold_price ?? 0),
+              branch: row.store_name ?? "—",
+              auctionNumber: row.auction_number,
+            })),
+
+            // LIVE TOTAL BID AMOUNT DRILLDOWN — the settled lots summing
+            // exactly to total_bid_amount.
+            settledLots: (settledLotsResult.rows ?? []).map((row) => ({
+              auctionNumber: row.auction_number,
+              lotNumber: row.lot_number,
+              item: row.name,
+              branch: row.store_name,
+              category: row.category,
+              vendor: row.vendor,
+              status: row.status,
+              bidderName: row.bidder_name,
+              bidAmount: Number(row.bid_amount ?? 0),
+            })),
+
+            // LIVE ACTIVE AUCTIONS DRILLDOWN — auction-level, not lot-level.
+            activeAuctionRows: (activeAuctionsResult.rows ?? []).map((row) => ({
+              auctionNumber: row.auction_number,
+              name: row.name,
+              branch: row.store_name,
+              startingTime: row.starting_time,
+              endingTime: row.ending_time,
+              lotCount: Number(row.lot_count ?? 0),
+            })),
           },
 
           loading: false,
@@ -134,6 +223,9 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             categories: MOCK_CATEGORIES,
             lots: MOCK_LOTS,
             payables: MOCK_PAYABLES,
+            settledLots: [],
+            activeAuctionRows: [],
+            unsoldLotRows: [],
           },
           loading: false,
           error: err.message,

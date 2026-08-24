@@ -2,6 +2,7 @@ import { useState } from "react";
 import StatTile from "./primitives/StatTile";
 import Modal from "./primitives/Modal";
 import BranchTallyModal from "./primitives/BranchTallyModal";
+import ActiveAuctionsModal from "./primitives/ActiveAuctionsModal";
 import OperationsTable from "./OperationsTable";
 import { formatPeso } from "../utils/format";
 
@@ -25,9 +26,9 @@ const ICONS = {
 
 const METHODOLOGY = {
   totalBidAmount:
-    "Sum of every lot's bid amount across auctions in the selected date range, corrected against cms.hmr.ph's live current-bid figures for any auction still in progress (ClickHouse's own snapshot can lag behind real-time bids). Click to see the tally by branch or category.",
+    "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the tally by branch, category, or the underlying settled lots.",
   activeAuctions:
-    "Count of distinct auctions that started within the selected date range, regardless of whether they've since ended. Click to see the lots in those auctions.",
+    "Count of auctions currently in progress right now (starting_time has passed, ending_time hasn't) — independent of the selected date range, but still scoped to the selected store. Click to see those auctions.",
   lotsSoldListed:
     "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the sold lots.",
   forApproval:
@@ -56,15 +57,19 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
     operationsDetail,
     branchTally,
     categoryTally,
-    auctionNumbersInRange,
+    settledLots,
+    activeAuctionRows,
+    unsoldLotRows,
   } = overview;
   const trend = hourlyTrend.map((h) => h.bidAmount);
   const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
   const hasBidDelta = heroKPIs.totalBidAmountDeltaPct !== undefined;
   const [drilldown, setDrilldown] = useState(null);
 
-  const activeAuctionLots = operationsDetail.filter((r) => auctionNumbersInRange.has(r.auctionNumber));
-  const unsoldWithReserveLots = operationsDetail.filter((r) => r.status === "Unsold" && r.reservedPrice > 0);
+  // Strict Unsold population (status='Unsold') — same rows used for both
+  // the Unsold Lots and With Reserve Price drilldowns, since "With
+  // Reserve" is just that same population filtered to reservedPrice > 0.
+  const unsoldWithReserveLots = unsoldLotRows.filter((r) => r.reservedPrice > 0);
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -143,15 +148,13 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         onClose={() => setDrilldown(null)}
         branchTally={branchTally}
         categoryTally={categoryTally}
+        lotsTally={settledLots}
         rangeLabel={rangeLabel}
       />
-      <LotDrilldownModal
+      <ActiveAuctionsModal
         open={drilldown === "activeAuctions"}
         onClose={() => setDrilldown(null)}
-        title="Active Auctions · Lot Detail"
-        subtitle={`${auctionNumbersInRange.size} auction${auctionNumbersInRange.size === 1 ? "" : "s"} started in ${rangeLabel.toLowerCase()} · up to 200 most recent lot rows`}
-        data={activeAuctionLots}
-        initialTab="All"
+        rows={activeAuctionRows}
       />
       <LotDrilldownModal
         open={drilldown === "lotsSoldListed"}
@@ -166,7 +169,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         onClose={() => setDrilldown(null)}
         title="Unsold Lots · Lot Detail"
         subtitle={`${rangeLabel} · up to 200 most recent unsold lot rows`}
-        data={operationsDetail}
+        data={unsoldLotRows}
         initialTab="Unsold"
       />
       <LotDrilldownModal

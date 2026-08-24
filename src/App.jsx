@@ -90,6 +90,9 @@ const EMPTY_OVERVIEW = {
     ],
   },
   operationsDetail: [],
+  settledLots: [],
+  activeAuctionRows: [],
+  unsoldLotRows: [],
   moneyFlow: [
     { stage: "Bid Amount", value: 0, type: "total" },
     { stage: "Commission", value: 0, type: "deduction" },
@@ -102,7 +105,17 @@ const EMPTY_OVERVIEW = {
 // Reshapes the raw /api/* responses into the shape every component below
 // renders — always real data; EMPTY_OVERVIEW above covers the pre-load case.
 function buildLiveOverview(live, bidCorrectionDelta) {
-  const { overview: kpis, leaderboards, reservePerformance, categories, lots, payables } = live;
+  const {
+    overview: kpis,
+    leaderboards,
+    reservePerformance,
+    categories,
+    lots,
+    payables,
+    settledLots,
+    activeAuctionRows,
+    unsoldLotRows,
+  } = live;
   const totalLots = Number(kpis.total_lots) || 0;
   const totalPaid = Number(kpis.total_paid) || 0;
   // Sell-through is scoped to auctions that have actually ended (an open
@@ -195,7 +208,16 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   // Real commission/premium/fee breakdown — built from the same overview
   // query rather than mock stage values, so the "% of gross" narrative
   // text stays consistent with the real total bid amount above it.
-  const bidAmount = (Number(kpis.total_bid_amount) || 0) + (bidCorrectionDelta || 0);
+  //
+  // Total Bid Amount is the settled (Paid/Released) definition only —
+  // api/overview.js's total_bid_amount. It must NOT be combined with
+  // bidCorrectionDelta/live_bid_correction_delta, which belongs to the
+  // separate Current Bid Value metric (current_bid_value in the API).
+  // bidCorrectionDelta is currently always 0 (useLiveBidCorrection is
+  // stubbed — see useLiveBidding.js), so this was already a no-op in
+  // practice, but the calculation itself was wrong and would have
+  // silently re-mixed the two metrics the moment that hook is re-enabled.
+  const bidAmount = Number(kpis.total_bid_amount) || 0;
   const commission = Number(kpis.total_commission) || 0;
   const buyersPremium = Number(kpis.total_buyers_premium) || 0;
   const serviceFee = Number(kpis.total_service_fee) || 0;
@@ -294,12 +316,23 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       ].map((a, i) => ({ ...a, status: AGING_STATUS[i] })),
     },
     operationsDetail: lots.lots || [],
+    // Settled (Paid/Released) lots behind Total Bid Amount — sums exactly
+    // to heroKPIs.totalBidAmount for the same range/store.
+    settledLots: settledLots || [],
+    // Auction-level rows behind Active Auctions — "right now", same
+    // count as heroKPIs.activeAuctionsNow.
+    activeAuctionRows: activeAuctionRows || [],
+    // Strict Unsold lots (status='Unsold') behind Unsold Lots / With
+    // Reserve Price — see api/overview.js's unsold-lots query comment for
+    // why this is kept separate from operationsDetail's disposition-based
+    // Unsold bucket.
+    unsoldLotRows: unsoldLotRows || [],
     moneyFlow,
   };
 }
 
 const BID_AMOUNT_METHODOLOGY =
-  "Sum of every lot's bid amount across auctions in the selected date range, corrected against cms.hmr.ph's live current-bid figures for any auction still in progress (ClickHouse's own snapshot can lag behind real-time bids).";
+  "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the branch/category tally or the underlying settled lots.";
 
 function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
   const story = buildStoryline(overview, store);
@@ -361,6 +394,7 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
             onClose={() => setShowBranchTally(false)}
             branchTally={overview.branchTally}
             categoryTally={overview.categoryTally}
+            lotsTally={overview.settledLots}
             rangeLabel={rangeLabel}
           />
         </div>

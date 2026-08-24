@@ -17,6 +17,39 @@ function toFiniteNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// vendor_analysis fans out one row per item_barcode within a lot, and
+// those rows can disagree on `status` when a lot's items were updated at
+// slightly different times mid-transition (e.g. some barcodes flipped to
+// 'Released' while a couple stayed at 'Paid'). any(status) is therefore
+// non-deterministic — ClickHouse doesn't guarantee which row it picks,
+// so the same query can return different Sold/Unsold counts across runs.
+//
+// Investigated against real data (see conversation record): released_date
+// is populated only on 'Released' rows and never on 'Paid' rows, and is
+// shared across all truly-Released rows in a lot — confirming Released is
+// a strictly later lifecycle stage than Paid, never the reverse. This
+// priority order lets argMax(status, priority) deterministically pick the
+// most-advanced status per lot instead of an arbitrary one:
+//   Released > Paid > Refunded > Returned > Outstanding > Unpaid > Unsold
+// Refunded/Returned (rare, real statuses not in the original 5-value set)
+// only ever co-occur with Released in the data checked, so their exact
+// rank relative to Paid doesn't move any real result — they're ranked
+// below Released on the same "actual transaction happened" logic used for
+// Unsold: if ANY row in a lot shows real transaction evidence, that
+// outranks a status claiming nothing happened.
+const STATUS_PRIORITY_SQL = `
+  CASE status
+    WHEN 'Released' THEN 7
+    WHEN 'Paid' THEN 6
+    WHEN 'Refunded' THEN 5
+    WHEN 'Returned' THEN 4
+    WHEN 'Outstanding' THEN 3
+    WHEN 'Unpaid' THEN 2
+    WHEN 'Unsold' THEN 1
+    ELSE 0
+  END
+`;
+
 export default async function handler(req, res) {
   try {
     const { from, to, store = "", type = "summary" } = req.query;
@@ -79,6 +112,14 @@ export default async function handler(req, res) {
 
     // =========================================================
     // LOTS SOLD / LISTED DRILL-DOWN
+    //
+    // Listed = every deduped lot in date-scoped auctions. Sold = any lot
+    // past the Unsold stage (Outstanding, Paid, Unpaid, Released) — kept
+    // unchanged per investigation (the dedup fix below doesn't change
+    // which statuses count as Sold, only which single status a lot with
+    // disagreeing duplicate rows resolves to). See STATUS_PRIORITY_SQL's
+    // comment for why any(status) was replaced with a deterministic pick.
+    // Date scoping is now Asia/Manila-aware, matching every settled query.
     // =========================================================
     if (type === "lots") {
       const result = await client.query({
@@ -90,8 +131,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE starting_time >= {from:Date}
-              AND starting_time < addDays({to:Date}, 1)
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
               AND (
                 {store:String} = ''
@@ -104,9 +145,11 @@ export default async function handler(req, res) {
               v.auction_number,
               v.lot_number,
               any(v.name) AS name,
-              any(v.status) AS status,
+              any(v.vendor) AS vendor,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
+              any(v.bid_amount) AS bid_amount,
               any(a.store_name) AS store_name
 
             FROM xv3.mart_auction_vendor_analysis v
@@ -126,9 +169,11 @@ export default async function handler(req, res) {
             auction_number,
             lot_number,
             name,
+            vendor,
             status,
             reserved_price,
             sold_price,
+            bid_amount,
             store_name,
 
             if(
@@ -144,14 +189,6 @@ export default async function handler(req, res) {
 
           FROM lots
 
-          WHERE status IN (
-            'Outstanding',
-            'Paid',
-            'Unpaid',
-            'Released',
-            'Unsold'
-          )
-
           ORDER BY
             auction_number,
             lot_number
@@ -166,11 +203,13 @@ export default async function handler(req, res) {
         auction_number: row.auction_number,
         lot_number: row.lot_number,
         name: row.name,
+        vendor: row.vendor,
         store_name: row.store_name,
         status: row.status,
         disposition: row.disposition,
         reserved_price: Number(row.reserved_price ?? 0),
         sold_price: Number(row.sold_price ?? 0),
+        bid_amount: Number(row.bid_amount ?? 0),
       }));
 
       const sold = mappedRows.filter(
@@ -200,6 +239,19 @@ export default async function handler(req, res) {
 
     // =========================================================
     // UNSOLD LOTS DRILL-DOWN
+    //
+    // Definition: status = 'Unsold' (strict), deduped by auction_number +
+    // lot_number, value = reserved_price. Same deterministic status
+    // resolution and Asia/Manila date scoping as the "lots" drilldown
+    // above.
+    //
+    // NOTE: strict status='Unsold' is a NARROWER population than "not
+    // Sold" — a lot resolved to 'Refunded' or 'Returned' (real statuses,
+    // confirmed present in real data, outside the original 5-value set)
+    // is neither in the Sold list nor literally 'Unsold', so
+    // sold_lots + unsold_lots will not always sum to listed_lots when
+    // such lots exist in range. Flagged, not silently resolved — see
+    // implementation report.
     // =========================================================
     if (type === "unsold-lots") {
       const result = await client.query({
@@ -211,8 +263,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE starting_time >= {from:Date}
-              AND starting_time < addDays({to:Date}, 1)
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
               AND (
                 {store:String} = ''
@@ -225,7 +277,8 @@ export default async function handler(req, res) {
               v.auction_number,
               v.lot_number,
               any(v.name) AS name,
-              any(v.status) AS status,
+              any(v.vendor) AS vendor,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
               any(a.store_name) AS store_name
@@ -247,6 +300,7 @@ export default async function handler(req, res) {
             auction_number,
             lot_number,
             name,
+            vendor,
             status,
             reserved_price,
             sold_price,
@@ -271,6 +325,7 @@ export default async function handler(req, res) {
         auction_number: row.auction_number,
         lot_number: row.lot_number,
         name: row.name,
+        vendor: row.vendor,
         store_name: row.store_name,
         status: row.status,
         reserved_price: Number(row.reserved_price ?? 0),
@@ -282,12 +337,178 @@ export default async function handler(req, res) {
         0,
       );
 
+      const withReserveRows = mappedRows.filter((row) => row.reserved_price > 0);
+      const withReserveValue = withReserveRows.reduce(
+        (sum, row) => sum + row.reserved_price,
+        0,
+      );
+
       return res.status(200).json({
         type: "unsold-lots",
 
         summary: {
           count: mappedRows.length,
           value: unsoldValue,
+          // With Reserve Price: same population, filtered to
+          // reserved_price > 0 — see api/overview.js's summary branch for
+          // the corresponding unsold_with_reserve_count/value KPI fields.
+          with_reserve_count: withReserveRows.length,
+          with_reserve_value: withReserveValue,
+        },
+
+        rows: mappedRows,
+      });
+    }
+
+    // =========================================================
+    // TOTAL BID AMOUNT DRILL-DOWN (settled lots)
+    //
+    // The exact lot-level population behind the settled Total Bid Amount
+    // KPI: status IN ('Paid','Released'), deduped by auction_number +
+    // lot_number, amount = bid_amount, same Asia/Manila date scoping and
+    // store filter as the summary's settledTotalResult query below —
+    // literally the same CTE, so sum(rows.bid_amount) is structurally
+    // guaranteed to equal total_bid_amount for the same from/to/store.
+    //
+    // Bidder identity uses the same deterministic ID bridge already
+    // validated for Bidder Composition / Top Bidders (vendor_analysis ->
+    // xv3.auctions -> xv3.postings -> xv3.customers ->
+    // cms.mart_cms_bidder_registrations). No fuzzy matching. A row whose
+    // identity can't be bridged returns bidder_name: null — the frontend
+    // renders that as "—", never a fabricated name.
+    // =========================================================
+    if (type === "settled-lots") {
+      const result = await client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT
+              auction_number,
+              store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(a.store_name) AS store_name,
+              any(v.name) AS name,
+              any(v.vendor) AS vendor,
+              any(v.status) AS status,
+              any(v.bid_amount) AS bid_amount,
+
+              any(
+                CASE
+                  WHEN v.name ILIKE '%bulk%' OR v.name ILIKE '%pallet%' THEN 'Bulk Auction'
+                  WHEN v.name ILIKE '%vehicle%' OR v.name ILIKE '%motorcycle%' OR v.name ILIKE '%car%'
+                    OR v.name ILIKE '%truck%' OR v.name ILIKE '%van%' OR v.name ILIKE '%electric vehicle%'
+                    THEN 'Vehicles and Automotive'
+                  WHEN v.name ILIKE '%equipment%' OR v.name ILIKE '%industrial%' OR v.name ILIKE '%generator%'
+                    OR v.name ILIKE '%backhoe%' OR v.name ILIKE '%excavator%' OR v.name ILIKE '%construction%'
+                    THEN 'Equipment and Industrial'
+                  ELSE 'General Merchandise'
+                END
+              ) AS category
+
+            FROM xv3.mart_auction_vendor_analysis v
+
+            INNER JOIN selected_auctions a
+              ON v.auction_number = a.auction_number
+
+            WHERE v.status IN ('Paid', 'Released')
+              AND v.auction_number IS NOT NULL
+              AND v.lot_number IS NOT NULL
+
+            GROUP BY v.auction_number, v.lot_number
+          ),
+
+          posting_customer AS (
+            SELECT
+              au.auction_number AS pc_auction_number,
+              p.lot_number AS pc_lot_number,
+              any(p.customer_id) AS pc_customer_id
+            FROM xv3.postings p
+            INNER JOIN xv3.auctions au ON p.auction_id = au.auction_id
+            WHERE p.customer_id IS NOT NULL AND p.customer_id != 0
+            GROUP BY au.auction_number, p.lot_number
+          ),
+
+          customer_bridge AS (
+            SELECT
+              customer_id AS br_customer_id,
+              any(hmr_customer_id) AS br_hmr_customer_id
+            FROM xv3.customers
+            WHERE hmr_customer_id IS NOT NULL
+            GROUP BY customer_id
+          ),
+
+          cms_bidder_email AS (
+            SELECT
+              customer_id AS cb_customer_id,
+              any(customer_firstname) AS firstname,
+              any(customer_lastname) AS lastname
+            FROM cms.mart_cms_bidder_registrations
+            WHERE customer_id IS NOT NULL AND email IS NOT NULL
+            GROUP BY customer_id
+          )
+
+          SELECT
+            sl.auction_number AS auction_number,
+            sl.lot_number AS lot_number,
+            sl.name AS name,
+            sl.vendor AS vendor,
+            sl.status AS status,
+            sl.bid_amount AS bid_amount,
+            sl.store_name AS store_name,
+            sl.category AS category,
+            cb.firstname AS bidder_firstname,
+            cb.lastname AS bidder_lastname
+
+          FROM settled_lots sl
+
+          LEFT JOIN posting_customer pc
+            ON sl.auction_number = pc.pc_auction_number AND sl.lot_number = pc.pc_lot_number
+
+          LEFT JOIN customer_bridge br
+            ON pc.pc_customer_id = br.br_customer_id
+
+          LEFT JOIN cms_bidder_email cb
+            ON br.br_hmr_customer_id = cb.cb_customer_id
+
+          ORDER BY sl.auction_number, sl.lot_number
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      });
+
+      const rows = await result.json();
+
+      const mappedRows = rows.map((row) => {
+        const bidderName = [row.bidder_lastname, row.bidder_firstname].filter(Boolean).join(", ") || null;
+        return {
+          auction_number: row.auction_number,
+          lot_number: row.lot_number,
+          name: row.name,
+          vendor: row.vendor,
+          status: row.status,
+          store_name: row.store_name,
+          category: row.category,
+          bidder_name: bidderName,
+          bid_amount: Number(row.bid_amount ?? 0),
+        };
+      });
+
+      const totalBidAmount = mappedRows.reduce((sum, row) => sum + row.bid_amount, 0);
+
+      return res.status(200).json({
+        type: "settled-lots",
+
+        summary: {
+          count: mappedRows.length,
+          total_bid_amount: totalBidAmount,
         },
 
         rows: mappedRows,
@@ -917,6 +1138,16 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // LOT STATUS KPIs
+    //
+    // Listed = every deduped lot in date-scoped auctions, regardless of
+    // status. Sold = Outstanding/Paid/Unpaid/Released (unchanged — see
+    // investigation). Unsold = strict status='Unsold'. Value = reserved
+    // price. Asia/Manila-aware date scoping + deterministic status
+    // resolution — see STATUS_PRIORITY_SQL's comment above for why
+    // any(status) was replaced.
+    //
+    // unsold_with_reserve_count/value: same Unsold population, filtered
+    // to reserved_price > 0 — the "With Reserve Price" KPI.
     // ---------------------------------------------------------
     const lotStatusResult = await client.query({
       query: `
@@ -926,8 +1157,8 @@ export default async function handler(req, res) {
 
           FROM xv3.mart_auction_productivity_report
 
-          WHERE starting_time >= {from:Date}
-            AND starting_time < addDays({to:Date}, 1)
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
             AND (
               {store:String} = ''
@@ -939,7 +1170,7 @@ export default async function handler(req, res) {
           SELECT
             v.auction_number,
             v.lot_number,
-            any(v.status) AS status,
+            argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
             max(ifNull(v.reserved_price, 0)) AS reserved_price
 
           FROM xv3.mart_auction_vendor_analysis v
@@ -974,7 +1205,16 @@ export default async function handler(req, res) {
           sumIf(
             reserved_price,
             status = 'Unsold'
-          ) AS unsold_value
+          ) AS unsold_value,
+
+          countIf(
+            status = 'Unsold' AND reserved_price > 0
+          ) AS unsold_with_reserve_count,
+
+          sumIf(
+            reserved_price,
+            status = 'Unsold' AND reserved_price > 0
+          ) AS unsold_with_reserve_value
 
         FROM lots
       `,
@@ -988,6 +1228,8 @@ export default async function handler(req, res) {
     const listedLots = Number(lotStatus.listed_lots ?? 0);
     const soldLots = Number(lotStatus.sold_lots ?? 0);
     const unsoldLots = Number(lotStatus.unsold_lots ?? 0);
+    const unsoldWithReserveCount = Number(lotStatus.unsold_with_reserve_count ?? 0);
+    const unsoldWithReserveValue = Number(lotStatus.unsold_with_reserve_value ?? 0);
 
     const sellThroughRate =
       listedLots > 0 ? Number(((soldLots / listedLots) * 100).toFixed(1)) : 0;
@@ -1402,6 +1644,11 @@ export default async function handler(req, res) {
       unsold_lots: unsoldLots,
       sell_through_rate: sellThroughRate,
       unsold_value: Number(lotStatus.unsold_value ?? 0),
+
+      // With Reserve Price: unsold lots with reserved_price > 0. Same
+      // dedup/date/store rules as unsold_lots above.
+      unsold_with_reserve_count: unsoldWithReserveCount,
+      unsold_with_reserve_value: unsoldWithReserveValue,
 
       // Bid Value by Branch/Category: now the settled (Paid/Released)
       // definition — see the SETTLED BRANCH/CATEGORY query comments
