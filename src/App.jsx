@@ -66,10 +66,40 @@ const EMPTY_OVERVIEW = {
     pendingApprovalValue: 0,
   },
   unsoldLots: { count: 0, value: 0, deltaPct: undefined, avgAgeDays: 0, fresh: 0, aging: 0, stale: 0, totalInventory: 0, withReserveCount: 0, withReserveValue: 0 },
-  categoryBreakdown: [],
-  branchBreakdown: [],
-  branchTally: [],
-  categoryTally: [],
+  categoryBreakdown: (categories.categories ?? []).map((row) => ({
+    category: row.category,
+    bidAmount: Number(row.bid_amount ?? 0),
+  })),
+
+  branchBreakdown: (kpis.branches ?? []).map((row) => ({
+    branch: row.branch,
+    bidAmount: Number(row.bid_amount ?? 0),
+  })),
+
+  branchTally: (kpis.branches ?? []).map((row) => ({
+    branch: row.branch,
+    bidAmount: Number(row.bid_amount ?? 0),
+    share:
+      Number(kpis.total_bid_amount ?? 0) > 0
+        ? (Number(row.bid_amount ?? 0) /
+          Number(kpis.total_bid_amount ?? 0)) *
+        100
+        : 0,
+  })),
+
+  categoryTally: (categories.categories ?? []).map((row) => ({
+    category: row.category,
+    bidAmount: Number(row.bid_amount ?? 0),
+    share:
+      Number(kpis.total_bid_amount ?? 0) > 0
+        ? (Number(row.bid_amount ?? 0) /
+          Number(kpis.total_bid_amount ?? 0)) *
+        100
+        : 0,
+  })),
+  auctionNumbersInRange: new Set(),
+  channelBreakdown: [],
+  hourlyTrend: [],
   auctionNumbersInRange: new Set(),
   channelBreakdown: [],
   hourlyTrend: [],
