@@ -1,7 +1,16 @@
+import { createClient } from "@clickhouse/client";
 import { hmrApiGet } from "./_hmrApi.js";
-import { chQuery } from "./_clickhouse.js";
-import { escapeSqlString } from "./_util.js";
 import { resolveAuctionId } from "./_liveBids.js";
+
+// Same ClickHouse client configuration as api/overview.js — the old
+// api/_clickhouse.js (raw HTTP interface, CH_* env vars) was removed in
+// 9f0b0c1 and is intentionally not restored.
+const client = createClient({
+  url: process.env.CLICKHOUSE_HOST,
+  username: process.env.CLICKHOUSE_USER,
+  password: process.env.CLICKHOUSE_PASSWORD,
+  database: process.env.CLICKHOUSE_DATABASE,
+});
 
 // cms.hmr.ph's bid-amounts response has no product name/description field
 // at all (confirmed against its actual payload, not just the docs) — but
@@ -11,13 +20,17 @@ import { resolveAuctionId } from "./_liveBids.js";
 // (status changes) and they all share the same name anyway.
 async function fetchLotNames(auctionNumber) {
   try {
-    const rows = await chQuery(`
-      SELECT lot_number AS lotNumber, any(name) AS name, any(description) AS description
-      FROM mart_auction_vendor_analysis
-      WHERE auction_number = '${escapeSqlString(auctionNumber)}'
-      GROUP BY lot_number
-      FORMAT JSON
-    `);
+    const result = await client.query({
+      query: `
+        SELECT lot_number AS lotNumber, any(name) AS name, any(description) AS description
+        FROM mart_auction_vendor_analysis
+        WHERE auction_number = {auctionNumber:String}
+        GROUP BY lot_number
+      `,
+      query_params: { auctionNumber },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json();
     return Object.fromEntries(rows.map((r) => [r.lotNumber, r.name || r.description || null]));
   } catch {
     // Names are an enrichment, not the point of this endpoint — a
@@ -41,18 +54,22 @@ async function fetchLotNames(auctionNumber) {
 // genuinely-current lots.
 async function fetchStartingAmounts(auctionNumber) {
   try {
-    const rows = await chQuery(`
-      SELECT
-        lot_number AS lotNumber,
-        argMax(name, updated_at) AS name,
-        argMax(starting_amount, updated_at) AS startingAmount
-      FROM postings
-      WHERE auction_id = (
-        SELECT auction_id FROM auctions WHERE auction_number = '${escapeSqlString(auctionNumber)}' LIMIT 1
-      )
-      GROUP BY lot_number
-      FORMAT JSON
-    `);
+    const result = await client.query({
+      query: `
+        SELECT
+          lot_number AS lotNumber,
+          argMax(name, updated_at) AS name,
+          argMax(starting_amount, updated_at) AS startingAmount
+        FROM postings
+        WHERE auction_id = (
+          SELECT auction_id FROM auctions WHERE auction_number = {auctionNumber:String} LIMIT 1
+        )
+        GROUP BY lot_number
+      `,
+      query_params: { auctionNumber },
+      format: "JSONEachRow",
+    });
+    const rows = await result.json();
     return Object.fromEntries(rows.map((r) => [r.lotNumber, { name: r.name, startingAmount: r.startingAmount }]));
   } catch {
     return {};
