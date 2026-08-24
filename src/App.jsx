@@ -348,8 +348,8 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
           <BranchTallyModal
             open={showBranchTally}
             onClose={() => setShowBranchTally(false)}
-            branchTally={overview.branchTally}
-            categoryTally={overview.categoryTally}
+            branchTally={liveBranchTally}
+            categoryTally={liveCategoryTally}
             rangeLabel={rangeLabel}
           />
         </div>
@@ -431,6 +431,27 @@ export default function App() {
     store === ALL_STORES ? undefined : store,
     refreshNonce
   );
+
+  const totalBidAmount = Number(live.overview?.total_bid_amount ?? 0);
+
+const liveBranchTally = (live.overview?.branches ?? []).map((row) => ({
+  branch: row.branch,
+  bidAmount: Number(row.bid_amount ?? 0),
+  share:
+    totalBidAmount > 0
+      ? (Number(row.bid_amount ?? 0) / totalBidAmount) * 100
+      : 0,
+}));
+
+const liveCategoryTally = (live.categories?.categories ?? []).map((row) => ({
+  category: row.category,
+  bidAmount: Number(row.bid_amount ?? 0),
+  share:
+    totalBidAmount > 0
+      ? (Number(row.bid_amount ?? 0) / totalBidAmount) * 100
+      : 0,
+}));
+
   const rangeLabel = resolveDateRange(dateRange).label;
 
   // Deferred, non-blocking correction of the stale ClickHouse snapshot for
