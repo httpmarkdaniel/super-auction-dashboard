@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { getLiveLotsSafe } from "./_liveBids.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -6,6 +7,15 @@ const client = createClient({
   password: process.env.CLICKHOUSE_PASSWORD,
   database: process.env.CLICKHOUSE_DATABASE,
 });
+
+// cms.hmr.ph is an external, not-fully-trusted upstream — a malformed
+// current_bid (empty string, "N/A", etc.) must never become NaN and
+// silently poison a running total via +=. Anything that doesn't parse to
+// a finite number is treated as 0.
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export default async function handler(req, res) {
   try {
@@ -290,6 +300,17 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // TOTAL BID AMOUNT
+    //
+    // Represents the sum of each lot's CURRENT/STANDING bid — not the sum
+    // of every bid ever placed. bid_history has one row per bid EVENT, so
+    // naively summing bid_amount across events measures cumulative bidding
+    // activity, not a lot's current value (confirmed against real data:
+    // auction 134SUC lot 7 had 6 events summing to 4,050 while its actual
+    // standing bid never exceeded 800). The correct per-lot figure is its
+    // latest bid by time — argMax(bid_amount, bid_created_at) — summed
+    // across lots. ClickHouse rejects sum(argMax(...)) at the same
+    // aggregation level, so this is computed as a CTE grouped by
+    // auction_number + lot_number first, then summed in the outer query.
     // ---------------------------------------------------------
     const totalResult = await client.query({
       query: `
@@ -299,17 +320,20 @@ export default async function handler(req, res) {
             store_name
           FROM xv3.mart_auction_productivity_report
           WHERE auction_number IS NOT NULL
-        )
+        ),
 
-        SELECT
-          sum(b.bid_amount) AS total_bid_amount
+        lot_latest_bid AS (
+          SELECT
+            b.auction_number AS auction_number,
+            b.lot_number AS lot_number,
+            argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
 
-        FROM cms.mart_cms_bid_history_report b
+          FROM cms.mart_cms_bid_history_report b
 
-        INNER JOIN auction_store s
-          ON b.auction_number = s.auction_number
+          INNER JOIN auction_store s
+            ON b.auction_number = s.auction_number
 
-        WHERE b.bid_created_at >= toDateTime(
+          WHERE b.bid_created_at >= toDateTime(
     concat({from:String}, ' 00:00:00'),
     'Asia/Manila'
   )
@@ -321,10 +345,20 @@ export default async function handler(req, res) {
     1
   )
 
-          AND (
-            {store:String} = ''
-            OR s.store_name = {store:String}
-          )
+            AND (
+              {store:String} = ''
+              OR s.store_name = {store:String}
+            )
+
+          GROUP BY
+            b.auction_number,
+            b.lot_number
+        )
+
+        SELECT
+          sum(latest_bid_amount) AS total_bid_amount
+
+        FROM lot_latest_bid
       `,
       query_params: queryParams,
       format: "JSONEachRow",
@@ -337,6 +371,9 @@ export default async function handler(req, res) {
     // TODAY'S BID
     // Always uses the current Asia/Manila calendar day.
     // Still respects the selected store.
+    //
+    // Same latest-per-lot definition as TOTAL BID AMOUNT above — see that
+    // comment for why sum(bid_amount) across events is the wrong metric.
     // ---------------------------------------------------------
     const todayBidResult = await client.query({
       query: `
@@ -346,29 +383,42 @@ export default async function handler(req, res) {
         store_name
       FROM xv3.mart_auction_productivity_report
       WHERE auction_number IS NOT NULL
+    ),
+
+    lot_latest_bid AS (
+      SELECT
+        b.auction_number AS auction_number,
+        b.lot_number AS lot_number,
+        argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
+
+      FROM cms.mart_cms_bid_history_report b
+
+      INNER JOIN auction_store s
+        ON b.auction_number = s.auction_number
+
+      WHERE b.bid_created_at >= toStartOfDay(
+        now('Asia/Manila')
+      )
+
+        AND b.bid_created_at < addDays(
+          toStartOfDay(now('Asia/Manila')),
+          1
+        )
+
+        AND (
+          {store:String} = ''
+          OR s.store_name = {store:String}
+        )
+
+      GROUP BY
+        b.auction_number,
+        b.lot_number
     )
 
     SELECT
-      ifNull(sum(b.bid_amount), 0) AS todays_bid_amount
+      ifNull(sum(latest_bid_amount), 0) AS todays_bid_amount
 
-    FROM cms.mart_cms_bid_history_report b
-
-    INNER JOIN auction_store s
-      ON b.auction_number = s.auction_number
-
-    WHERE b.bid_created_at >= toStartOfDay(
-      now('Asia/Manila')
-    )
-
-      AND b.bid_created_at < addDays(
-        toStartOfDay(now('Asia/Manila')),
-        1
-      )
-
-      AND (
-        {store:String} = ''
-        OR s.store_name = {store:String}
-      )
+    FROM lot_latest_bid
   `,
 
       query_params: {
@@ -624,13 +674,232 @@ export default async function handler(req, res) {
     const sellThroughRate =
       listedLots > 0 ? Number(((soldLots / listedLots) * 100).toFixed(1)) : 0;
 
+    // ---------------------------------------------------------
+    // LIVE BID CORRECTION (cms.hmr.ph) — temporary diagnostic
+    //
+    // ClickHouse's bid_history mart can lag cms.hmr.ph by hours. For
+    // auctions that are CURRENTLY ACTIVE, replace (not add to) that
+    // auction's ClickHouse "latest bid per lot" contribution with the live
+    // cms.hmr.ph current_bid figure, so a stale in-progress auction can't
+    // distort the totals below. Auctions that have already ended are
+    // untouched.
+    //
+    // Both sides now measure the SAME concept — each lot's current/standing
+    // bid (ClickHouse: argMax(bid_amount, bid_created_at) per lot; live:
+    // cms.hmr.ph's current_bid per lot) — validated against real data for
+    // auction 134SUC (see conversation record). This replaces the earlier
+    // sum(bid_amount)-based comparison, which mixed cumulative bid-event
+    // activity with a current-standing snapshot.
+    //
+    // DATE-RANGE SEMANTICS: total_bid_amount reflects the SELECTED date
+    // range and may represent a past, closed period — a live "right now"
+    // snapshot must never rewrite history. So the live correction is only
+    // ever applied to total_bid_amount when the selected [from, to] range
+    // includes today's Asia/Manila date. todays_bid_amount is, by
+    // definition, always about today regardless of the range picker, so it
+    // is always eligible for correction.
+    //
+    // Defensive: any failure here (per-auction or query-level) falls back
+    // to the raw ClickHouse totals so a live-source problem never breaks
+    // the overview endpoint. An auction whose live lookup fails keeps its
+    // ClickHouse latest-per-lot value untouched — its contribution is never
+    // subtracted without a successful replacement.
+    // ---------------------------------------------------------
+    let correctedTotalBidAmount = Number(total.total_bid_amount ?? 0);
+    let correctedTodaysBidAmount = Number(todayBid.todays_bid_amount ?? 0);
+    let liveBidCorrectionDelta = 0;
+    let liveCorrectedAuctions = [];
+
+    const todayManila = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+    }).format(new Date());
+    const rangeIncludesToday = from <= todayManila && todayManila <= to;
+
+    try {
+      const activeAuctionListResult = await client.query({
+        query: `
+          SELECT DISTINCT auction_number
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time <= now()
+            AND ending_time >= now()
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        `,
+        query_params: { store },
+        format: "JSONEachRow",
+      });
+
+      const activeAuctionNumbers = (await activeAuctionListResult.json()).map(
+        (row) => row.auction_number,
+      );
+
+      if (activeAuctionNumbers.length > 0) {
+        const [chRangeResult, chTodayResult] = await Promise.all([
+          client.query({
+            query: `
+              WITH auction_store AS (
+                SELECT DISTINCT auction_number, store_name
+                FROM xv3.mart_auction_productivity_report
+                WHERE auction_number IS NOT NULL
+              ),
+              lot_latest_bid AS (
+                SELECT
+                  b.auction_number AS auction_number,
+                  b.lot_number AS lot_number,
+                  argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
+                FROM cms.mart_cms_bid_history_report b
+                INNER JOIN auction_store s ON b.auction_number = s.auction_number
+                WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                  AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                  AND ({store:String} = '' OR s.store_name = {store:String})
+                  AND b.auction_number IN {activeAuctionNumbers:Array(String)}
+                GROUP BY b.auction_number, b.lot_number
+              )
+              SELECT
+                auction_number,
+                sum(latest_bid_amount) AS ch_amount
+              FROM lot_latest_bid
+              GROUP BY auction_number
+            `,
+            query_params: { from, to, store, activeAuctionNumbers },
+            format: "JSONEachRow",
+          }),
+          client.query({
+            query: `
+              WITH auction_store AS (
+                SELECT DISTINCT auction_number, store_name
+                FROM xv3.mart_auction_productivity_report
+                WHERE auction_number IS NOT NULL
+              ),
+              lot_latest_bid AS (
+                SELECT
+                  b.auction_number AS auction_number,
+                  b.lot_number AS lot_number,
+                  argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
+                FROM cms.mart_cms_bid_history_report b
+                INNER JOIN auction_store s ON b.auction_number = s.auction_number
+                WHERE b.bid_created_at >= toStartOfDay(now('Asia/Manila'))
+                  AND b.bid_created_at < addDays(toStartOfDay(now('Asia/Manila')), 1)
+                  AND ({store:String} = '' OR s.store_name = {store:String})
+                  AND b.auction_number IN {activeAuctionNumbers:Array(String)}
+                GROUP BY b.auction_number, b.lot_number
+              )
+              SELECT
+                auction_number,
+                sum(latest_bid_amount) AS ch_amount
+              FROM lot_latest_bid
+              GROUP BY auction_number
+            `,
+            query_params: { store, activeAuctionNumbers },
+            format: "JSONEachRow",
+          }),
+        ]);
+
+        const chRangeMap = Object.fromEntries(
+          (await chRangeResult.json()).map((r) => [r.auction_number, Number(r.ch_amount ?? 0)]),
+        );
+        const chTodayMap = Object.fromEntries(
+          (await chTodayResult.json()).map((r) => [r.auction_number, Number(r.ch_amount ?? 0)]),
+        );
+
+        const liveResults = await Promise.all(
+          activeAuctionNumbers.map((auctionNumber) => getLiveLotsSafe(auctionNumber)),
+        );
+
+        activeAuctionNumbers.forEach((auctionNumber, i) => {
+          const live = liveResults[i];
+          const chRangeAmount = chRangeMap[auctionNumber] ?? 0;
+          const chTodayAmount = chTodayMap[auctionNumber] ?? 0;
+
+          if (!live) {
+            console.error(
+              `Live bid correction: cms.hmr.ph lookup failed for auction_number ${auctionNumber}, keeping ClickHouse latest-per-lot value`,
+            );
+            liveCorrectedAuctions.push({
+              auction_number: auctionNumber,
+              clickhouse_latest_bid_total: chRangeAmount,
+              live_current_bid_total: null,
+              correction_delta: 0,
+              status: "live_lookup_failed",
+            });
+            return;
+          }
+
+          // Sum current_bid once per unique lot_number — null/undefined
+          // and any malformed, non-numeric value (empty string, "N/A",
+          // etc.) all resolve to 0 via toFiniteNumber, never NaN.
+          const uniqueLots = new Map();
+          for (const lot of live.lots) uniqueLots.set(lot.lot_number, lot.current_bid);
+          const liveAmount = [...uniqueLots.values()].reduce(
+            (sum, currentBid) => sum + toFiniteNumber(currentBid),
+            0,
+          );
+
+          const rangeDelta = liveAmount - chRangeAmount;
+          const todayDelta = liveAmount - chTodayAmount;
+
+          // Defense in depth: even though liveAmount can no longer be NaN
+          // by construction, verify all three values are finite before
+          // ever applying them — a single bad auction must never poison
+          // the running totals for every auction processed after it.
+          if (
+            !Number.isFinite(liveAmount) ||
+            !Number.isFinite(rangeDelta) ||
+            !Number.isFinite(todayDelta)
+          ) {
+            console.error(
+              `Live bid correction: non-finite live bid data for auction_number ${auctionNumber}, keeping ClickHouse latest-per-lot value`,
+            );
+            liveCorrectedAuctions.push({
+              auction_number: auctionNumber,
+              clickhouse_latest_bid_total: chRangeAmount,
+              live_current_bid_total: null,
+              correction_delta: 0,
+              status: "invalid_live_bid_data",
+            });
+            return;
+          }
+
+          // total_bid_amount only reflects "now" when the selected range
+          // actually includes today — otherwise a historical period is
+          // left untouched by the live snapshot.
+          if (rangeIncludesToday) {
+            correctedTotalBidAmount += rangeDelta;
+            liveBidCorrectionDelta += rangeDelta;
+          }
+          // todays_bid_amount is always "today" by definition, so it is
+          // always eligible for correction.
+          correctedTodaysBidAmount += todayDelta;
+
+          liveCorrectedAuctions.push({
+            auction_number: auctionNumber,
+            clickhouse_latest_bid_total: chRangeAmount,
+            live_current_bid_total: liveAmount,
+            correction_delta: rangeIncludesToday ? rangeDelta : 0,
+            status: rangeIncludesToday ? "ok" : "skipped_range_excludes_today",
+          });
+        });
+      }
+    } catch (correctionErr) {
+      console.error(
+        "Live bid correction failed, falling back to raw ClickHouse totals:",
+        correctionErr,
+      );
+      correctedTotalBidAmount = Number(total.total_bid_amount ?? 0);
+      correctedTodaysBidAmount = Number(todayBid.todays_bid_amount ?? 0);
+      liveBidCorrectionDelta = 0;
+      liveCorrectedAuctions = [];
+    }
+
     // =========================================================
     // SUMMARY RESPONSE
     // =========================================================
     return res.status(200).json({
-      total_bid_amount: Number(total.total_bid_amount ?? 0),
+      total_bid_amount: correctedTotalBidAmount,
 
-      todays_bid_amount: Number(todayBid.todays_bid_amount ?? 0),
+      todays_bid_amount: correctedTodaysBidAmount,
 
       active_auctions: Number(activeAuction.active_auctions ?? 0),
 
@@ -649,6 +918,11 @@ export default async function handler(req, res) {
         category: row.category,
         bid_amount: Number(row.bid_amount ?? 0),
       })),
+
+      // Temporary diagnostic fields for validating the live bid
+      // correction — not for permanent frontend consumption yet.
+      live_bid_correction_delta: liveBidCorrectionDelta,
+      live_corrected_auctions: liveCorrectedAuctions,
     });
   } catch (err) {
     console.error("Overview API error:", err);
