@@ -294,7 +294,7 @@ export default async function handler(req, res) {
         // TOTAL BID AMOUNT
         // ---------------------------------------------------------
         const totalResult = await client.query({
-            query: `
+          query: `
         WITH auction_store AS (
           SELECT DISTINCT
             auction_number,
@@ -311,16 +311,25 @@ export default async function handler(req, res) {
         INNER JOIN auction_store s
           ON b.auction_number = s.auction_number
 
-        WHERE b.bid_created_at >= {from:Date}
-          AND b.bid_created_at < addDays({to:Date}, 1)
+        WHERE b.bid_created_at >= toDateTime(
+    concat({from:String}, ' 00:00:00'),
+    'Asia/Manila'
+  )
+  AND b.bid_created_at < addDays(
+    toDateTime(
+      concat({to:String}, ' 00:00:00'),
+      'Asia/Manila'
+    ),
+    1
+  )
 
           AND (
             {store:String} = ''
             OR s.store_name = {store:String}
           )
       `,
-            query_params: queryParams,
-            format: "JSONEachRow",
+          query_params: queryParams,
+          format: "JSONEachRow",
         });
 
         const totalRows = await totalResult.json();
