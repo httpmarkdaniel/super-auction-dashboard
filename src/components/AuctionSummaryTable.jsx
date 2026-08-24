@@ -10,6 +10,7 @@ const SORTERS = {
   lotsListed: (r) => r.lotsListed,
   lotsSold: (r) => r.lotsSold,
   sellThroughRate: (r) => r.sellThroughRate,
+  totalBidders: (r) => r.participatingBidders,
   totalBidAmount: (r) => r.totalBidAmount,
   totalReservedPrice: (r) => r.totalReservedPrice,
   totalBuyersPremium: (r) => r.totalBuyersPremium,
@@ -17,165 +18,605 @@ const SORTERS = {
   totalServiceIncome: (r) => r.totalServiceIncome,
 };
 
-function SortHeader({ label, sortKey, sort, onSort, align = "left" }) {
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+}) {
   const active = sort.key === sortKey;
+
   return (
     <th
-      className={`font-medium pb-2 pr-4 cursor-pointer select-none ${align === "right" ? "text-right" : "text-left"}`}
+      className={`font-medium pb-2 pr-4 cursor-pointer select-none ${
+        align === "right" ? "text-right" : "text-left"
+      }`}
       onClick={() => onSort(sortKey)}
     >
-      <span className={`inline-flex items-center gap-1 ${active ? "text-ink" : ""}`}>
+      <span
+        className={`inline-flex items-center gap-1 ${
+          active ? "text-ink" : ""
+        }`}
+      >
         {label}
-        {active && <span className="text-[12.5px]">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+
+        {active && (
+          <span className="text-[12.5px]">
+            {sort.dir === "asc" ? "▲" : "▼"}
+          </span>
+        )}
       </span>
     </th>
   );
 }
 
-// Rolls the per-lot rows this table used to render one-line-per-lot into
-// one row per auction — the same underlying (capped-200, most-recent) lot
-// list, just aggregated, so an auction's lot count/mix stays consistent
-// with whatever the lot-level drilldown modals show elsewhere.
+function BidderMetricCard({ label, count, amount }) {
+  return (
+    <div className="border border-gridline rounded-lg p-4 bg-plane">
+      <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-2">
+        {label}
+      </div>
+
+      <div className="text-[24px] font-display text-ink leading-none">
+        {count}
+      </div>
+
+      <div className="text-[14px] text-muted mt-2">
+        {formatPeso(amount)}
+      </div>
+    </div>
+  );
+}
+
+function BidderBreakdownModal({ auction, onClose }) {
+  if (!auction) return null;
+
+  return (
+    <Modal
+      open={auction != null}
+      onClose={onClose}
+      title={`Auction ${auction.auctionNumber} · Bidder Breakdown`}
+      subtitle="Participating and winning bidders, split into new and returning bidders."
+    >
+      <div className="space-y-7">
+        {/* PARTICIPATING BIDDERS */}
+        <div>
+          <div className="mb-3">
+            <div className="eyebrow">
+              Total Participating Bidders
+            </div>
+
+            <div className="text-[14px] text-muted mt-1">
+              Distinct bidders who placed at least one bid in this
+              auction.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <BidderMetricCard
+              label="Total"
+              count={auction.participatingBidders}
+              amount={auction.participatingBidAmount}
+            />
+
+            <BidderMetricCard
+              label="New"
+              count={auction.participatingNewBidders}
+              amount={auction.participatingNewBidAmount}
+            />
+
+            <BidderMetricCard
+              label="Returning"
+              count={auction.participatingReturningBidders}
+              amount={auction.participatingReturningBidAmount}
+            />
+          </div>
+        </div>
+
+        {/* WINNING BIDDERS */}
+        <div>
+          <div className="mb-3">
+            <div className="eyebrow">
+              Total Winning Bidders
+            </div>
+
+            <div className="text-[14px] text-muted mt-1">
+              Distinct bidders who won at least one lot in this
+              auction.
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <BidderMetricCard
+              label="Total"
+              count={auction.winningBidders}
+              amount={auction.winningBidAmount}
+            />
+
+            <BidderMetricCard
+              label="New"
+              count={auction.winningNewBidders}
+              amount={auction.winningNewBidAmount}
+            />
+
+            <BidderMetricCard
+              label="Returning"
+              count={auction.winningReturningBidders}
+              amount={auction.winningReturningBidAmount}
+            />
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Rolls per-lot rows into one row per auction.
 function groupByAuction(lots) {
   const byAuction = new Map();
+
   for (const l of lots) {
     if (!byAuction.has(l.auctionNumber)) {
       byAuction.set(l.auctionNumber, {
         auctionNumber: l.auctionNumber,
         branch: l.branch,
         categories: new Set(),
+
         lotsListed: 0,
         lotsSold: 0,
         forApproval: 0,
         unsold: 0,
+
         totalBidAmount: 0,
         totalReservedPrice: 0,
         totalBuyersPremium: 0,
         totalServiceFee: 0,
+
+        // PARTICIPATING BIDDERS
+        participatingBidders:
+          Number(l.participatingBidders) || 0,
+
+        participatingBidAmount:
+          Number(l.participatingBidAmount) || 0,
+
+        participatingNewBidders:
+          Number(l.participatingNewBidders) || 0,
+
+        participatingNewBidAmount:
+          Number(l.participatingNewBidAmount) || 0,
+
+        participatingReturningBidders:
+          Number(l.participatingReturningBidders) || 0,
+
+        participatingReturningBidAmount:
+          Number(l.participatingReturningBidAmount) || 0,
+
+        // WINNING BIDDERS
+        winningBidders:
+          Number(l.winningBidders) || 0,
+
+        winningBidAmount:
+          Number(l.winningBidAmount) || 0,
+
+        winningNewBidders:
+          Number(l.winningNewBidders) || 0,
+
+        winningNewBidAmount:
+          Number(l.winningNewBidAmount) || 0,
+
+        winningReturningBidders:
+          Number(l.winningReturningBidders) || 0,
+
+        winningReturningBidAmount:
+          Number(l.winningReturningBidAmount) || 0,
       });
     }
+
     const agg = byAuction.get(l.auctionNumber);
+
     agg.categories.add(l.category || "—");
+
     agg.lotsListed += 1;
-    if (l.status === "Sold") agg.lotsSold += 1;
-    else if (l.status === "For Approval") agg.forApproval += 1;
-    else if (l.status === "Unsold") agg.unsold += 1;
-    agg.totalBidAmount += l.totalBidAmount || 0;
-    agg.totalReservedPrice += l.reservedPrice || 0;
-    agg.totalBuyersPremium += l.buyersPremium || 0;
-    agg.totalServiceFee += l.serviceFee || 0;
+
+    if (l.status === "Sold") {
+      agg.lotsSold += 1;
+    } else if (l.status === "For Approval") {
+      agg.forApproval += 1;
+    } else if (l.status === "Unsold") {
+      agg.unsold += 1;
+    }
+
+    agg.totalBidAmount += Number(l.totalBidAmount) || 0;
+    agg.totalReservedPrice += Number(l.reservedPrice) || 0;
+    agg.totalBuyersPremium += Number(l.buyersPremium) || 0;
+    agg.totalServiceFee += Number(l.serviceFee) || 0;
+
+    /*
+      IMPORTANT:
+      bidder metrics are auction-level values.
+
+      If the same bidder values are repeated on every lot row,
+      DO NOT SUM them here because they would multiply by the
+      number of lots.
+
+      Instead, keep the first valid auction-level values.
+    */
+
+    if (Number(l.participatingBidders) > 0) {
+      agg.participatingBidders =
+        Number(l.participatingBidders) || 0;
+
+      agg.participatingBidAmount =
+        Number(l.participatingBidAmount) || 0;
+
+      agg.participatingNewBidders =
+        Number(l.participatingNewBidders) || 0;
+
+      agg.participatingNewBidAmount =
+        Number(l.participatingNewBidAmount) || 0;
+
+      agg.participatingReturningBidders =
+        Number(l.participatingReturningBidders) || 0;
+
+      agg.participatingReturningBidAmount =
+        Number(l.participatingReturningBidAmount) || 0;
+    }
+
+    if (Number(l.winningBidders) > 0) {
+      agg.winningBidders =
+        Number(l.winningBidders) || 0;
+
+      agg.winningBidAmount =
+        Number(l.winningBidAmount) || 0;
+
+      agg.winningNewBidders =
+        Number(l.winningNewBidders) || 0;
+
+      agg.winningNewBidAmount =
+        Number(l.winningNewBidAmount) || 0;
+
+      agg.winningReturningBidders =
+        Number(l.winningReturningBidders) || 0;
+
+      agg.winningReturningBidAmount =
+        Number(l.winningReturningBidAmount) || 0;
+    }
   }
+
   return [...byAuction.values()].map((a) => ({
     ...a,
+
     category: [...a.categories].join(", "),
-    sellThroughRate: a.lotsListed > 0 ? Math.round((a.lotsSold / a.lotsListed) * 100) : 0,
-    totalServiceIncome: a.totalBuyersPremium + a.totalServiceFee,
+
+    sellThroughRate:
+      a.lotsListed > 0
+        ? Math.round(
+            (a.lotsSold / a.lotsListed) * 100
+          )
+        : 0,
+
+    totalServiceIncome:
+      a.totalBuyersPremium + a.totalServiceFee,
   }));
 }
 
-export default function AuctionSummaryTable({ data: operationsDetail, title = "Order Workbench · Auction Detail" }) {
+export default function AuctionSummaryTable({
+  data: operationsDetail,
+  title = "Order Workbench · Auction Detail",
+}) {
   const [open, setOpen] = useState(true);
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState({ key: "auctionNumber", dir: "desc" });
-  const [selectedAuction, setSelectedAuction] = useState(null);
 
-  const auctions = useMemo(() => groupByAuction(operationsDetail), [operationsDetail]);
+  const [query, setQuery] = useState("");
+
+  const [sort, setSort] = useState({
+    key: "auctionNumber",
+    dir: "desc",
+  });
+
+  const [selectedAuction, setSelectedAuction] =
+    useState(null);
+
+  const [
+    selectedBidderAuction,
+    setSelectedBidderAuction,
+  ] = useState(null);
+
+  const auctions = useMemo(
+    () => groupByAuction(operationsDetail),
+    [operationsDetail],
+  );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+
     let filtered = auctions.filter((r) => {
       if (!q) return true;
+
       return (
-        r.auctionNumber.toLowerCase().includes(q) ||
+        r.auctionNumber
+          .toLowerCase()
+          .includes(q) ||
         r.branch.toLowerCase().includes(q) ||
         r.category.toLowerCase().includes(q)
       );
     });
+
     const getter = SORTERS[sort.key];
+
     filtered = [...filtered].sort((a, b) => {
       const av = getter(a);
       const bv = getter(b);
-      const cmp = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
-      return sort.dir === "asc" ? cmp : -cmp;
+
+      const cmp =
+        typeof av === "number"
+          ? av - bv
+          : String(av).localeCompare(String(bv));
+
+      return sort.dir === "asc"
+        ? cmp
+        : -cmp;
     });
+
     return filtered;
   }, [auctions, query, sort]);
 
   function handleSort(key) {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+    setSort((prev) =>
+      prev.key === key
+        ? {
+            key,
+            dir:
+              prev.dir === "asc"
+                ? "desc"
+                : "asc",
+          }
+        : {
+            key,
+            dir: "asc",
+          },
+    );
   }
 
   return (
     <div className="card overflow-hidden">
-      <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-6 py-4 text-left">
-        <div className="eyebrow">{title}</div>
-        <span className="text-ink text-[15.5px]">{open ? "Hide ▲" : "Show ▼"}</span>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-6 py-4 text-left"
+      >
+        <div className="eyebrow">
+          {title}
+        </div>
+
+        <span className="text-ink text-[15.5px]">
+          {open ? "Hide ▲" : "Show ▼"}
+        </span>
       </button>
 
       {open && (
         <div className="px-6 pb-5">
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
             <div className="flex items-center gap-2 bg-plane border border-gridline rounded-lg px-3 h-8 w-full sm:w-[260px]">
-              <span className="text-muted text-[14.5px]">⌕</span>
+              <span className="text-muted text-[14.5px]">
+                ⌕
+              </span>
+
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) =>
+                  setQuery(e.target.value)
+                }
                 placeholder="Filter auction #, branch, or category…"
                 className="flex-1 min-w-0 text-[15px] text-ink bg-transparent outline-none placeholder:text-muted"
               />
             </div>
-            <div className="text-[13.5px] text-muted">Click an auction # to see its individual lots.</div>
+
+            <div className="text-[13.5px] text-muted">
+              Click an auction # for lots or Total
+              Bidders for bidder details.
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-[15.5px]">
               <thead>
                 <tr className="text-ink text-[13.5px] uppercase tracking-wide">
-                  <SortHeader label="Auction #" sortKey="auctionNumber" sort={sort} onSort={handleSort} />
-                  <SortHeader label="Branch" sortKey="branch" sort={sort} onSort={handleSort} />
-                  <SortHeader label="Category" sortKey="category" sort={sort} onSort={handleSort} />
-                  <SortHeader label="Lots Listed" sortKey="lotsListed" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Lots Sold" sortKey="lotsSold" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Sell-Through" sortKey="sellThroughRate" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Total Bid Amount" sortKey="totalBidAmount" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Reserved Price" sortKey="totalReservedPrice" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Buyer's Premium" sortKey="totalBuyersPremium" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Service Fee" sortKey="totalServiceFee" sort={sort} onSort={handleSort} align="right" />
-                  <SortHeader label="Service Income" sortKey="totalServiceIncome" sort={sort} onSort={handleSort} align="right" />
+                  <SortHeader
+                    label="Auction #"
+                    sortKey="auctionNumber"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+
+                  <SortHeader
+                    label="Branch"
+                    sortKey="branch"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+
+                  <SortHeader
+                    label="Category"
+                    sortKey="category"
+                    sort={sort}
+                    onSort={handleSort}
+                  />
+
+                  <SortHeader
+                    label="Lots Listed"
+                    sortKey="lotsListed"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Lots Sold"
+                    sortKey="lotsSold"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Sell-Through"
+                    sortKey="sellThroughRate"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Total Bidders"
+                    sortKey="totalBidders"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Total Bid Amount"
+                    sortKey="totalBidAmount"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Reserved Price"
+                    sortKey="totalReservedPrice"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Buyer's Premium"
+                    sortKey="totalBuyersPremium"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Service Fee"
+                    sortKey="totalServiceFee"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
+
+                  <SortHeader
+                    label="Service Income"
+                    sortKey="totalServiceIncome"
+                    sort={sort}
+                    onSort={handleSort}
+                    align="right"
+                  />
                 </tr>
               </thead>
+
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.auctionNumber} className="border-t border-gridline">
+                  <tr
+                    key={r.auctionNumber}
+                    className="border-t border-gridline"
+                  >
                     <td className="py-2.5 pr-4 tabular">
                       <button
                         type="button"
-                        onClick={() => setSelectedAuction(r.auctionNumber)}
+                        onClick={() =>
+                          setSelectedAuction(
+                            r.auctionNumber,
+                          )
+                        }
                         className="text-orange-600 dark:text-orange-500 hover:underline font-medium"
                       >
                         {r.auctionNumber}
                       </button>
                     </td>
-                    <td className="py-2.5 pr-4 text-ink">{r.branch}</td>
-                    <td className="py-2.5 pr-4 text-ink max-w-[200px] truncate" title={r.category}>
+
+                    <td className="py-2.5 pr-4 text-ink">
+                      {r.branch}
+                    </td>
+
+                    <td
+                      className="py-2.5 pr-4 text-ink max-w-[200px] truncate"
+                      title={r.category}
+                    >
                       {r.category}
                     </td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsListed}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsSold}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{r.sellThroughRate}%</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-series1">{formatPeso(r.totalBidAmount)}</td>
+
                     <td className="py-2.5 pr-4 text-right tabular text-ink">
-                      {r.totalReservedPrice > 0 ? formatPeso(r.totalReservedPrice) : <span className="text-muted">No Reserve</span>}
+                      {r.lotsListed}
                     </td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalBuyersPremium)}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalServiceFee)}</td>
-                    <td className="py-2.5 text-right tabular text-ink">{formatPeso(r.totalServiceIncome)}</td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {r.lotsSold}
+                    </td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {r.sellThroughRate}%
+                    </td>
+
+                    {/* TOTAL BIDDERS */}
+                    <td className="py-2.5 pr-4 text-right tabular">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedBidderAuction(r)
+                        }
+                        className="text-orange-600 dark:text-orange-500 hover:underline font-medium"
+                      >
+                        {r.participatingBidders}
+                      </button>
+                    </td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-series1">
+                      {formatPeso(
+                        r.totalBidAmount,
+                      )}
+                    </td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {r.totalReservedPrice > 0 ? (
+                        formatPeso(
+                          r.totalReservedPrice,
+                        )
+                      ) : (
+                        <span className="text-muted">
+                          No Reserve
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {formatPeso(
+                        r.totalBuyersPremium,
+                      )}
+                    </td>
+
+                    <td className="py-2.5 pr-4 text-right tabular text-ink">
+                      {formatPeso(
+                        r.totalServiceFee,
+                      )}
+                    </td>
+
+                    <td className="py-2.5 text-right tabular text-ink">
+                      {formatPeso(
+                        r.totalServiceIncome,
+                      )}
+                    </td>
                   </tr>
                 ))}
+
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="py-6 text-center text-muted text-[15.5px]">
+                    <td
+                      colSpan={12}
+                      className="py-6 text-center text-muted text-[15.5px]"
+                    >
                       No auctions match this filter.
                     </td>
                   </tr>
@@ -186,17 +627,32 @@ export default function AuctionSummaryTable({ data: operationsDetail, title = "O
         </div>
       )}
 
+      {/* LOT DETAIL */}
       <Modal
         open={selectedAuction != null}
-        onClose={() => setSelectedAuction(null)}
+        onClose={() =>
+          setSelectedAuction(null)
+        }
         title={`Auction ${selectedAuction} · Lot Detail`}
         subtitle="Every individual lot in this auction."
       >
         <OperationsTable
-          data={operationsDetail.filter((l) => l.auctionNumber === selectedAuction)}
+          data={operationsDetail.filter(
+            (l) =>
+              l.auctionNumber ===
+              selectedAuction,
+          )}
           embedded
         />
       </Modal>
+
+      {/* BIDDER BREAKDOWN */}
+      <BidderBreakdownModal
+        auction={selectedBidderAuction}
+        onClose={() =>
+          setSelectedBidderAuction(null)
+        }
+      />
     </div>
   );
 }
