@@ -431,6 +431,135 @@ export default async function handler(req, res) {
     const todayBidRows = await todayBidResult.json();
     const todayBid = todayBidRows[0] ?? {};
 
+    const todayManila = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+    }).format(new Date());
+
+    // ---------------------------------------------------------
+    // TOTAL BID AMOUNT (SETTLED) — the business definition of
+    // "Total Bid Amount" going forward.
+    //
+    // Population: xv3.mart_auction_vendor_analysis, status IN ('Paid',
+    // 'Released') only — a lot that's still being bid on, or won but not
+    // yet paid/released, does not count. Authoritative amount field is
+    // bid_amount (the hammer price) — NOT sold_price, which is bid_amount
+    // + buyer's premium (confirmed against real rows: sold_price =
+    // bid_amount * 1.15 exactly matching each row's own buyers_premium
+    // field). sold_price already belongs to Service Income, a separate
+    // metric — using it here would double-count the premium.
+    //
+    // vendor_analysis fans out one row per item_barcode within a lot, all
+    // sharing the same bid_amount — deduped via GROUP BY auction_number,
+    // lot_number + any() (verified: 97.4% of duplicate-key rows agree on
+    // every value; the rest only disagree on status mid-transition).
+    //
+    // Scoped by the auction's starting_time (same convention as the
+    // "lots"/sold_lots queries elsewhere in this file), not by any
+    // settlement-timestamp field on vendor_analysis — those fields
+    // (date_time_paid/released_date) are populated for only ~60-87% of
+    // rows, whereas starting_time via productivity_report covers ~100%
+    // of rows that have a real auction_number.
+    // ---------------------------------------------------------
+    const settledTotalResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount
+
+        FROM settled_lots
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const settledTotalRows = await settledTotalResult.json();
+    const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
+
+    // ---------------------------------------------------------
+    // TODAY'S BID AMOUNT (SETTLED)
+    // Same definition as above, fixed to today's Asia/Manila calendar
+    // day regardless of the selected range — mirrors how the old
+    // todays_bid_amount always meant "today" independent of the picker.
+    // ---------------------------------------------------------
+    const settledTodayResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({today:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({today:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          sum(ifNull(lot_bid_amount, 0)) AS settled_today_bid_amount
+
+        FROM settled_lots
+      `,
+      query_params: { today: todayManila, store },
+      format: "JSONEachRow",
+    });
+
+    const settledTodayRows = await settledTodayResult.json();
+    const settledTodayBidAmount = Number(settledTodayRows[0]?.settled_today_bid_amount ?? 0);
+
     // ---------------------------------------------------------
     // BID AMOUNT BY BRANCH
     //
@@ -760,9 +889,6 @@ export default async function handler(req, res) {
     let categoryCorrectionDeltas = new Map();
     let unmappedLiveLots = [];
 
-    const todayManila = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Manila",
-    }).format(new Date());
     const rangeIncludesToday = from <= todayManila && todayManila <= to;
 
     try {
@@ -1108,9 +1234,20 @@ export default async function handler(req, res) {
     // SUMMARY RESPONSE
     // =========================================================
     return res.status(200).json({
-      total_bid_amount: correctedTotalBidAmount,
+      // Business definition of Total Bid Amount: settled (Paid/Released)
+      // bid_amount only. See the SETTLED query comments above.
+      total_bid_amount: settledTotalBidAmount,
 
-      todays_bid_amount: correctedTodaysBidAmount,
+      todays_bid_amount: settledTodayBidAmount,
+
+      // The previous "Total Bid Amount" definition — current/standing bid
+      // value across active + recently-bid lots, live-corrected against
+      // cms.hmr.ph — is preserved here, not deleted, under its own name.
+      // live_bid_correction_delta/live_corrected_auctions/branches/
+      // categories below all still describe THIS number, not the settled
+      // total_bid_amount above.
+      current_bid_value: correctedTotalBidAmount,
+      current_bid_value_today: correctedTodaysBidAmount,
 
       active_auctions: Number(activeAuction.active_auctions ?? 0),
 
@@ -1120,12 +1257,17 @@ export default async function handler(req, res) {
       sell_through_rate: sellThroughRate,
       unsold_value: Number(lotStatus.unsold_value ?? 0),
 
+      // NOTE: branches/categories still describe current_bid_value (the
+      // live-corrected standing-bid number), not the new settled
+      // total_bid_amount — left untouched per instruction, pending
+      // confirmation of their intended KPI.
       branches: correctedBranches,
 
       categories: correctedCategories,
 
       // Temporary diagnostic fields for validating the live bid
-      // correction — not for permanent frontend consumption yet.
+      // correction on current_bid_value — not for permanent frontend
+      // consumption yet.
       live_bid_correction_delta: liveBidCorrectionDelta,
       live_corrected_auctions: liveCorrectedAuctions,
       unmapped_live_lots: unmappedLiveLots,

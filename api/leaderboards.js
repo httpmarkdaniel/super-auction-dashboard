@@ -270,13 +270,341 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
+    // =========================================================
+    // SETTLED BIDDER COMPOSITION (Paid/Released) — the business
+    // definition of Bidder Composition going forward.
+    //
+    // Uses the EXACT SAME population/field as Total Bid Amount in
+    // api/overview.js: xv3.mart_auction_vendor_analysis, status IN
+    // ('Paid','Released'), deduped by (auction_number, lot_number),
+    // authoritative amount = bid_amount, scoped by the auction's
+    // starting_time (not any vendor_analysis-native date field — see
+    // overview.js for why).
+    //
+    // vendor_analysis.email is Laravel-encrypted ciphertext and cannot be
+    // matched against bid_history's plaintext email — fuzzy bidder_name
+    // matching was tested and rejected (only ~44% of settled value
+    // matched in a real sample). Instead, each settled lot's winning
+    // bidder identity is traced through a deterministic ID bridge with
+    // no string/fuzzy matching anywhere:
+    //
+    //   vendor_analysis (auction_number, lot_number)
+    //     -> xv3.auctions (auction_number -> auction_id)
+    //     -> xv3.postings (auction_id, lot_number -> customer_id)
+    //     -> xv3.customers (customer_id -> hmr_customer_id)
+    //     -> cms.mart_cms_bidder_registrations (customer_id -> plaintext email)
+    //     -> cms.mart_cms_bid_history_report (email -> first-ever bid time)
+    //
+    // A lot is Unclassified if ANY hop in that chain fails to resolve —
+    // confirmed this happens for auctions that never posted through
+    // xv3.postings at all (e.g. "AA114", an internal employee-bidding
+    // auction with zero posting rows), not as a general data-quality gap.
+    // Verified in a real sample: once a lot reaches a bidder email, it
+    // always finds a bid_history record (0 "bridged but no history"
+    // cases) — so f.first_ever_bid_at IS NULL is a safe single test for
+    // "the bridge did not fully resolve," covering every failure hop.
+    //
+    // New = bidder's first-ever bid (across all of bid_history, not just
+    // this period) falls on/after the selected range's start.
+    // Returning = it falls before the selected range's start.
+    // These are never guessed — an unresolved bidder is Unclassified,
+    // never assumed New or Returning.
+    // =========================================================
+    const settledCompositionResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        posting_customer AS (
+          SELECT
+            au.auction_number AS pc_auction_number,
+            p.lot_number AS pc_lot_number,
+            any(p.customer_id) AS pc_customer_id
+
+          FROM xv3.postings p
+
+          INNER JOIN xv3.auctions au
+            ON p.auction_id = au.auction_id
+
+          WHERE p.customer_id IS NOT NULL
+            AND p.customer_id != 0
+
+          GROUP BY au.auction_number, p.lot_number
+        ),
+
+        customer_bridge AS (
+          SELECT
+            customer_id AS br_customer_id,
+            any(hmr_customer_id) AS br_hmr_customer_id
+
+          FROM xv3.customers
+
+          WHERE hmr_customer_id IS NOT NULL
+
+          GROUP BY customer_id
+        ),
+
+        cms_bidder_email AS (
+          SELECT
+            customer_id AS cb_customer_id,
+            any(lowerUTF8(trim(email))) AS cb_email
+
+          FROM cms.mart_cms_bidder_registrations
+
+          WHERE customer_id IS NOT NULL
+            AND email IS NOT NULL
+
+          GROUP BY customer_id
+        ),
+
+        bidder_first_ever_bid AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bid_created_at) AS first_ever_bid_at
+
+          FROM cms.mart_cms_bid_history_report
+
+          WHERE bid_created_at IS NOT NULL
+            AND email IS NOT NULL
+            AND trim(email) != ''
+
+          GROUP BY bidder_key
+        )
+
+        SELECT
+          count() AS total_lots,
+          sum(ifNull(sl.lot_bid_amount, 0)) AS total_bid_amount,
+
+          countIf(f.first_ever_bid_at IS NULL) AS unclassified_lots,
+          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS unclassified_bid_amount,
+
+          countIf(
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS new_bidder_lots,
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS new_bidders_bid_amount,
+
+          countIf(
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS returning_bidder_lots,
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS returning_bidders_bid_amount
+
+        FROM settled_lots sl
+
+        LEFT JOIN posting_customer
+          ON sl.auction_number = pc_auction_number AND sl.lot_number = pc_lot_number
+
+        LEFT JOIN customer_bridge
+          ON pc_customer_id = br_customer_id
+
+        LEFT JOIN cms_bidder_email
+          ON br_hmr_customer_id = cb_customer_id
+
+        LEFT JOIN bidder_first_ever_bid f
+          ON cb_email = f.bidder_key
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // Per-auction breakdown of the same settled/bridge classification.
+    const settledPerAuctionResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(a.store_name) AS store_name,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        posting_customer AS (
+          SELECT
+            au.auction_number AS pc_auction_number,
+            p.lot_number AS pc_lot_number,
+            any(p.customer_id) AS pc_customer_id
+
+          FROM xv3.postings p
+
+          INNER JOIN xv3.auctions au
+            ON p.auction_id = au.auction_id
+
+          WHERE p.customer_id IS NOT NULL
+            AND p.customer_id != 0
+
+          GROUP BY au.auction_number, p.lot_number
+        ),
+
+        customer_bridge AS (
+          SELECT
+            customer_id AS br_customer_id,
+            any(hmr_customer_id) AS br_hmr_customer_id
+
+          FROM xv3.customers
+
+          WHERE hmr_customer_id IS NOT NULL
+
+          GROUP BY customer_id
+        ),
+
+        cms_bidder_email AS (
+          SELECT
+            customer_id AS cb_customer_id,
+            any(lowerUTF8(trim(email))) AS cb_email
+
+          FROM cms.mart_cms_bidder_registrations
+
+          WHERE customer_id IS NOT NULL
+            AND email IS NOT NULL
+
+          GROUP BY customer_id
+        ),
+
+        bidder_first_ever_bid AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bid_created_at) AS first_ever_bid_at
+
+          FROM cms.mart_cms_bid_history_report
+
+          WHERE bid_created_at IS NOT NULL
+            AND email IS NOT NULL
+            AND trim(email) != ''
+
+          GROUP BY bidder_key
+        )
+
+        SELECT
+          sl.auction_number AS auction_number,
+          any(sl.store_name) AS store_name,
+
+          sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount,
+
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_new_bid_amount,
+
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            f.first_ever_bid_at IS NOT NULL
+            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS settled_returning_bid_amount,
+
+          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS settled_unclassified_bid_amount
+
+        FROM settled_lots sl
+
+        LEFT JOIN posting_customer
+          ON sl.auction_number = pc_auction_number AND sl.lot_number = pc_lot_number
+
+        LEFT JOIN customer_bridge
+          ON pc_customer_id = br_customer_id
+
+        LEFT JOIN cms_bidder_email
+          ON br_hmr_customer_id = cb_customer_id
+
+        LEFT JOIN bidder_first_ever_bid f
+          ON cb_email = f.bidder_key
+
+        GROUP BY sl.auction_number
+        ORDER BY sl.auction_number
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
     const compositionRows = await compositionResult.json();
     const auctionRows = await perAuctionResult.json();
+    const settledCompositionRows = await settledCompositionResult.json();
+    const settledPerAuctionRows = await settledPerAuctionResult.json();
 
     const composition = compositionRows[0] ?? {};
+    const settledComposition = settledCompositionRows[0] ?? {};
 
     return res.status(200).json({
+      // Settled (Paid/Released) bidder composition — reconciles exactly
+      // to api/overview.js's total_bid_amount. See the query comment
+      // above for the identity-bridge chain and Unclassified definition.
       composition: {
+        new_bidders_bid_amount: Number(settledComposition.new_bidders_bid_amount ?? 0),
+        returning_bidders_bid_amount: Number(settledComposition.returning_bidders_bid_amount ?? 0),
+        unclassified_bid_amount: Number(settledComposition.unclassified_bid_amount ?? 0),
+
+        new_bidder_lots: Number(settledComposition.new_bidder_lots ?? 0),
+        returning_bidder_lots: Number(settledComposition.returning_bidder_lots ?? 0),
+        unclassified_lots: Number(settledComposition.unclassified_lots ?? 0),
+
+        total_lots: Number(settledComposition.total_lots ?? 0),
+        total_bid_amount: Number(settledComposition.total_bid_amount ?? 0),
+      },
+
+      perAuctionComposition: settledPerAuctionRows.map((row) => ({
+        auction_number: row.auction_number,
+        store_name: row.store_name,
+        settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+        new_bidders_bid_amount: Number(row.settled_new_bid_amount ?? 0),
+        returning_bidders_bid_amount: Number(row.settled_returning_bid_amount ?? 0),
+        unclassified_bid_amount: Number(row.settled_unclassified_bid_amount ?? 0),
+      })),
+
+      // Preserved, not deleted: the previous bid-history cumulative-
+      // activity-based composition (sum of every bid EVENT per bidder,
+      // not settled value). Kept under its own names so nothing built on
+      // the old numbers silently breaks.
+      bidding_activity_composition: {
         new_bidders: Number(
           composition.new_bidders ?? 0,
         ),
@@ -294,7 +622,7 @@ export default async function handler(req, res) {
         ),
       },
 
-      perAuctionComposition: auctionRows.map((row) => ({
+      perAuctionBiddingActivity: auctionRows.map((row) => ({
         auction_number: row.auction_number,
 
         store_name: row.auction_store_name,
