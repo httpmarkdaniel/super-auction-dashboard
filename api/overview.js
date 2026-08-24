@@ -561,13 +561,160 @@ export default async function handler(req, res) {
     const settledTodayBidAmount = Number(settledTodayRows[0]?.settled_today_bid_amount ?? 0);
 
     // ---------------------------------------------------------
-    // BID AMOUNT BY BRANCH
+    // BID VALUE BY BRANCH (SETTLED)
     //
-    // Same latest-per-lot definition as TOTAL BID AMOUNT — grouped by
+    // Same population/definition as TOTAL BID AMOUNT above — literally
+    // the same settled_lots CTE, just grouped by store_name instead of
+    // collapsed to a scalar. This structurally guarantees
+    // sum(branches.bid_amount) == total_bid_amount, since both are sums
+    // over the exact same rows.
+    // ---------------------------------------------------------
+    const settledBranchResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(a.store_name) AS store_name,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          store_name AS branch,
+          sum(ifNull(lot_bid_amount, 0)) AS bid_amount
+
+        FROM settled_lots
+
+        GROUP BY store_name
+        ORDER BY bid_amount DESC
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const settledBranchRows = await settledBranchResult.json();
+
+    // ---------------------------------------------------------
+    // BID VALUE BY CATEGORY (SETTLED)
+    //
+    // Same population/definition as TOTAL BID AMOUNT above. Category is
+    // derived from vendor_analysis's own `name` column on the SAME row
+    // being summed (no join needed), with an unconditional ELSE branch —
+    // so every settled lot always resolves to a category and no
+    // "Uncategorized" fallback is structurally possible here. This
+    // guarantees sum(categories.bid_amount) == total_bid_amount.
+    // ---------------------------------------------------------
+    const settledCategoryResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount,
+
+            any(
+              CASE
+                WHEN v.name ILIKE '%bulk%'
+                  OR v.name ILIKE '%pallet%'
+                  THEN 'Bulk Auction'
+
+                WHEN v.name ILIKE '%vehicle%'
+                  OR v.name ILIKE '%motorcycle%'
+                  OR v.name ILIKE '%car%'
+                  OR v.name ILIKE '%truck%'
+                  OR v.name ILIKE '%van%'
+                  OR v.name ILIKE '%electric vehicle%'
+                  THEN 'Vehicles and Automotive'
+
+                WHEN v.name ILIKE '%equipment%'
+                  OR v.name ILIKE '%industrial%'
+                  OR v.name ILIKE '%generator%'
+                  OR v.name ILIKE '%backhoe%'
+                  OR v.name ILIKE '%excavator%'
+                  OR v.name ILIKE '%construction%'
+                  THEN 'Equipment and Industrial'
+
+                ELSE 'General Merchandise'
+              END
+            ) AS category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          category,
+          sum(ifNull(lot_bid_amount, 0)) AS bid_amount
+
+        FROM settled_lots
+
+        GROUP BY category
+        ORDER BY bid_amount DESC
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const settledCategoryRows = await settledCategoryResult.json();
+
+    // ---------------------------------------------------------
+    // CURRENT BID VALUE BY BRANCH (live-corrected, current-standing) —
+    // preserved under its own name, no longer exposed as "branches".
+    //
+    // Same latest-per-lot definition as CURRENT BID VALUE — grouped by
     // branch instead of collapsed to a single scalar. Uses the identical
     // lot_latest_bid CTE (same joins, same filters) as totalResult, so
-    // sum(branches.bid_amount) is structurally guaranteed to equal
-    // total_bid_amount's raw baseline.
+    // sum(current_bid_value_branches.bid_amount) is structurally
+    // guaranteed to equal current_bid_value's raw baseline.
     // ---------------------------------------------------------
     const branchResult = await client.query({
       query: `
@@ -629,14 +776,16 @@ export default async function handler(req, res) {
     const branchRows = await branchResult.json();
 
     // ---------------------------------------------------------
-    // BID AMOUNT BY CATEGORY
+    // CURRENT BID VALUE BY CATEGORY (live-corrected, current-standing) —
+    // preserved under its own name, no longer exposed as "categories".
     //
-    // Same latest-per-lot definition as TOTAL BID AMOUNT. lot_category is
+    // Same latest-per-lot definition as CURRENT BID VALUE. lot_category is
     // joined with LEFT JOIN + coalesce to 'Uncategorized' (not INNER JOIN)
     // so a lot with bid history but no matching vendor_analysis row still
     // contributes its bid somewhere, rather than being silently dropped —
-    // required so sum(categories.bid_amount) is guaranteed to equal
-    // total_bid_amount's raw baseline exactly, the same way branch does.
+    // required so sum(current_bid_value_categories.bid_amount) is
+    // guaranteed to equal current_bid_value's raw baseline exactly, the
+    // same way branch does.
     // ---------------------------------------------------------
     const categoryResult = await client.query({
       query: `
@@ -1243,9 +1392,6 @@ export default async function handler(req, res) {
       // The previous "Total Bid Amount" definition — current/standing bid
       // value across active + recently-bid lots, live-corrected against
       // cms.hmr.ph — is preserved here, not deleted, under its own name.
-      // live_bid_correction_delta/live_corrected_auctions/branches/
-      // categories below all still describe THIS number, not the settled
-      // total_bid_amount above.
       current_bid_value: correctedTotalBidAmount,
       current_bid_value_today: correctedTodaysBidAmount,
 
@@ -1257,13 +1403,25 @@ export default async function handler(req, res) {
       sell_through_rate: sellThroughRate,
       unsold_value: Number(lotStatus.unsold_value ?? 0),
 
-      // NOTE: branches/categories still describe current_bid_value (the
-      // live-corrected standing-bid number), not the new settled
-      // total_bid_amount — left untouched per instruction, pending
-      // confirmation of their intended KPI.
-      branches: correctedBranches,
+      // Bid Value by Branch/Category: now the settled (Paid/Released)
+      // definition — see the SETTLED BRANCH/CATEGORY query comments
+      // above. sum(branches.bid_amount) and sum(categories.bid_amount)
+      // both reconcile exactly to total_bid_amount above.
+      branches: settledBranchRows.map((row) => ({
+        branch: row.branch,
+        bid_amount: Number(row.bid_amount ?? 0),
+      })),
 
-      categories: correctedCategories,
+      categories: settledCategoryRows.map((row) => ({
+        category: row.category,
+        bid_amount: Number(row.bid_amount ?? 0),
+      })),
+
+      // Current Bid Value's own branch/category breakdown — preserved,
+      // not deleted, under its own name. sum() of each reconciles to
+      // current_bid_value, NOT to the settled total_bid_amount above.
+      current_bid_value_branches: correctedBranches,
+      current_bid_value_categories: correctedCategories,
 
       // Temporary diagnostic fields for validating the live bid
       // correction on current_bid_value — not for permanent frontend

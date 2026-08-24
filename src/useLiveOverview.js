@@ -98,6 +98,11 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               composition: liveLeaderboards.composition,
               perAuctionComposition:
                 liveLeaderboards.perAuctionComposition ?? [],
+
+              // LIVE TOP VENDORS / TOP BIDDERS (settled, Paid/Released) —
+              // real data, replaces the mock spread above.
+              vendors: liveLeaderboards.vendors ?? [],
+              bidders: liveLeaderboards.bidders ?? [],
             },
 
             categories: {

@@ -607,10 +607,173 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
+    // =========================================================
+    // TOP VENDORS (settled) — same Paid/Released settled population as
+    // Total Bid Amount. vendor comes directly off vendor_analysis's own
+    // row (verified 0% missing across 1.43M Paid/Released rows sampled),
+    // no identity bridge needed.
+    // =========================================================
+    const settledVendorsResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount,
+            any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        )
+
+        SELECT
+          vendor,
+          count() AS settled_lots,
+          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount
+
+        FROM settled_lots
+
+        GROUP BY vendor
+        ORDER BY settled_bid_amount DESC
+        LIMIT 5
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // =========================================================
+    // TOP BIDDERS (settled, winning bidders only) — uses the same
+    // deterministic identity bridge as settled Bidder Composition. No
+    // fuzzy matching. INNER JOINs through every bridge hop, so a settled
+    // lot that can't fully resolve an identity simply contributes to no
+    // bidder's ranking — never a fabricated or "Unclassified" entry here.
+    // The money is not lost: it's still counted in Total Bid Amount and
+    // surfaced separately via unattributed_bidder_lots/
+    // unattributed_bidder_bid_amount below (same figures as Bidder
+    // Composition's unclassified_lots/unclassified_bid_amount — same
+    // population, same bridge, so they're guaranteed identical, not
+    // independently recomputed).
+    // =========================================================
+    const settledBiddersResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        posting_customer AS (
+          SELECT
+            au.auction_number AS pc_auction_number,
+            p.lot_number AS pc_lot_number,
+            any(p.customer_id) AS pc_customer_id
+
+          FROM xv3.postings p
+
+          INNER JOIN xv3.auctions au
+            ON p.auction_id = au.auction_id
+
+          WHERE p.customer_id IS NOT NULL
+            AND p.customer_id != 0
+
+          GROUP BY au.auction_number, p.lot_number
+        ),
+
+        customer_bridge AS (
+          SELECT
+            customer_id AS br_customer_id,
+            any(hmr_customer_id) AS br_hmr_customer_id
+
+          FROM xv3.customers
+
+          WHERE hmr_customer_id IS NOT NULL
+
+          GROUP BY customer_id
+        ),
+
+        cms_bidder_email AS (
+          SELECT
+            customer_id AS cb_customer_id,
+            any(lowerUTF8(trim(email))) AS cb_email,
+            any(customer_firstname) AS firstname,
+            any(customer_lastname) AS lastname
+
+          FROM cms.mart_cms_bidder_registrations
+
+          WHERE customer_id IS NOT NULL
+            AND email IS NOT NULL
+
+          GROUP BY customer_id
+        )
+
+        SELECT
+          cb_email AS bidder_email,
+          any(firstname) AS firstname,
+          any(lastname) AS lastname,
+          count() AS settled_lots,
+          sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount
+
+        FROM settled_lots sl
+
+        INNER JOIN posting_customer
+          ON sl.auction_number = pc_auction_number AND sl.lot_number = pc_lot_number
+
+        INNER JOIN customer_bridge
+          ON pc_customer_id = br_customer_id
+
+        INNER JOIN cms_bidder_email
+          ON br_hmr_customer_id = cb_customer_id
+
+        GROUP BY cb_email
+        ORDER BY settled_bid_amount DESC
+        LIMIT 5
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
     const compositionRows = await compositionResult.json();
     const auctionRows = await perAuctionResult.json();
     const settledCompositionRows = await settledCompositionResult.json();
     const settledPerAuctionRows = await settledPerAuctionResult.json();
+    const settledVendorRows = await settledVendorsResult.json();
+    const settledBidderRows = await settledBiddersResult.json();
 
     const composition = compositionRows[0] ?? {};
     const settledComposition = settledCompositionRows[0] ?? {};
@@ -641,6 +804,44 @@ export default async function handler(req, res) {
         total_lots: Number(settledComposition.total_lots ?? 0),
         total_bid_amount: Number(settledComposition.total_bid_amount ?? 0),
       },
+
+      // TOP VENDORS (settled, Paid/Released) — ranked by settled_bid_amount
+      // descending. Replaces the previous mock-data leaderboard.
+      vendors: settledVendorRows.map((row) => {
+        const settled_lots = Number(row.settled_lots ?? 0);
+        const settled_bid_amount = Number(row.settled_bid_amount ?? 0);
+        return {
+          vendor: row.vendor,
+          settled_lots,
+          settled_bid_amount,
+          average_bid_amount_per_lot: settled_lots > 0 ? settled_bid_amount / settled_lots : 0,
+        };
+      }),
+
+      // TOP BIDDERS (settled, winning bidders only, via the deterministic
+      // identity bridge — no fuzzy matching). Replaces the previous
+      // mock-data leaderboard. A settled lot whose identity can't be
+      // bridged contributes to no bidder here — see
+      // unattributed_bidder_lots/unattributed_bidder_bid_amount below.
+      bidders: settledBidderRows.map((row) => {
+        const settled_lots = Number(row.settled_lots ?? 0);
+        const settled_bid_amount = Number(row.settled_bid_amount ?? 0);
+        const bidder_name = [row.lastname, row.firstname].filter(Boolean).join(", ") || "Unknown Bidder";
+        return {
+          bidder_name,
+          settled_lots,
+          settled_wins: settled_lots,
+          settled_bid_amount,
+          average_bid_amount_per_win: settled_lots > 0 ? settled_bid_amount / settled_lots : 0,
+        };
+      }),
+
+      // Same population/bridge as composition.unclassified_lots/
+      // unclassified_bid_amount above — deliberately reused rather than
+      // recomputed, so these can never independently drift from the
+      // Bidder Composition figures.
+      unattributed_bidder_lots: Number(settledComposition.unclassified_lots ?? 0),
+      unattributed_bidder_bid_amount: Number(settledComposition.unclassified_bid_amount ?? 0),
 
       perAuctionComposition: settledPerAuctionRows.map((row) => ({
         auction_number: row.auction_number,

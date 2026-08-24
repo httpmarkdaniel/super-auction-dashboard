@@ -175,15 +175,17 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     })),
   };
 
+  // Settled (Paid/Released) winning vendors/bidders — real data, no
+  // longer mock. See api/leaderboards.js's vendors/bidders fields.
   const topVendors = (leaderboards.vendors || []).map((v) => ({
     vendor: v.vendor,
-    bidAmount: Number(v.bid_amount) || 0,
-    lots: Number(v.lots) || 0,
+    bidAmount: Number(v.settled_bid_amount) || 0,
+    lots: Number(v.settled_lots) || 0,
   }));
   const topBidders = (leaderboards.bidders || []).map((b) => ({
     bidder: b.bidder_name,
-    bidAmount: Number(b.bid_amount) || 0,
-    wins: Number(b.wins) || 0,
+    bidAmount: Number(b.settled_bid_amount) || 0,
+    wins: Number(b.settled_wins) || 0,
   }));
 
   const rp = reservePerformance;
