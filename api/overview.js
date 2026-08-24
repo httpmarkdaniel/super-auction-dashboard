@@ -433,6 +433,12 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // BID AMOUNT BY BRANCH
+    //
+    // Same latest-per-lot definition as TOTAL BID AMOUNT — grouped by
+    // branch instead of collapsed to a single scalar. Uses the identical
+    // lot_latest_bid CTE (same joins, same filters) as totalResult, so
+    // sum(branches.bid_amount) is structurally guaranteed to equal
+    // total_bid_amount's raw baseline.
     // ---------------------------------------------------------
     const branchResult = await client.query({
       query: `
@@ -442,18 +448,21 @@ export default async function handler(req, res) {
             store_name
           FROM xv3.mart_auction_productivity_report
           WHERE auction_number IS NOT NULL
-        )
+        ),
 
-        SELECT
-          s.store_name AS branch,
-          sum(b.bid_amount) AS bid_amount
+        lot_latest_bid AS (
+          SELECT
+            b.auction_number AS auction_number,
+            b.lot_number AS lot_number,
+            any(s.store_name) AS store_name,
+            argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
 
-        FROM cms.mart_cms_bid_history_report b
+          FROM cms.mart_cms_bid_history_report b
 
-        INNER JOIN auction_store s
-          ON b.auction_number = s.auction_number
+          INNER JOIN auction_store s
+            ON b.auction_number = s.auction_number
 
-        WHERE b.bid_created_at >= toDateTime(
+          WHERE b.bid_created_at >= toDateTime(
     concat({from:String}, ' 00:00:00'),
     'Asia/Manila'
   )
@@ -465,12 +474,23 @@ export default async function handler(req, res) {
     1
   )
 
-          AND (
-            {store:String} = ''
-            OR s.store_name = {store:String}
-          )
+            AND (
+              {store:String} = ''
+              OR s.store_name = {store:String}
+            )
 
-        GROUP BY s.store_name
+          GROUP BY
+            b.auction_number,
+            b.lot_number
+        )
+
+        SELECT
+          store_name AS branch,
+          sum(latest_bid_amount) AS bid_amount
+
+        FROM lot_latest_bid
+
+        GROUP BY store_name
         ORDER BY bid_amount DESC
       `,
       query_params: queryParams,
@@ -481,6 +501,13 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // BID AMOUNT BY CATEGORY
+    //
+    // Same latest-per-lot definition as TOTAL BID AMOUNT. lot_category is
+    // joined with LEFT JOIN + coalesce to 'Uncategorized' (not INNER JOIN)
+    // so a lot with bid history but no matching vendor_analysis row still
+    // contributes its bid somewhere, rather than being silently dropped —
+    // required so sum(categories.bid_amount) is guaranteed to equal
+    // total_bid_amount's raw baseline exactly, the same way branch does.
     // ---------------------------------------------------------
     const categoryResult = await client.query({
       query: `
@@ -531,22 +558,20 @@ export default async function handler(req, res) {
           GROUP BY
             auction_number,
             lot_number
-        )
+        ),
 
-        SELECT
-          lc.auction_tags AS category,
-          sum(b.bid_amount) AS bid_amount
+        lot_latest_bid AS (
+          SELECT
+            b.auction_number AS auction_number,
+            b.lot_number AS lot_number,
+            argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
 
-        FROM cms.mart_cms_bid_history_report b
+          FROM cms.mart_cms_bid_history_report b
 
-        INNER JOIN auction_store s
-          ON b.auction_number = s.auction_number
+          INNER JOIN auction_store s
+            ON b.auction_number = s.auction_number
 
-        INNER JOIN lot_category lc
-          ON b.auction_number = lc.auction_number
-         AND b.lot_number = lc.lot_number
-
-      WHERE b.bid_created_at >= toDateTime(
+          WHERE b.bid_created_at >= toDateTime(
     concat({from:String}, ' 00:00:00'),
     'Asia/Manila'
   )
@@ -558,12 +583,27 @@ export default async function handler(req, res) {
     1
   )
 
-          AND (
-            {store:String} = ''
-            OR s.store_name = {store:String}
-          )
+            AND (
+              {store:String} = ''
+              OR s.store_name = {store:String}
+            )
 
-        GROUP BY lc.auction_tags
+          GROUP BY
+            b.auction_number,
+            b.lot_number
+        )
+
+        SELECT
+          coalesce(lc.auction_tags, 'Uncategorized') AS category,
+          sum(l.latest_bid_amount) AS bid_amount
+
+        FROM lot_latest_bid l
+
+        LEFT JOIN lot_category lc
+          ON l.auction_number = lc.auction_number
+         AND l.lot_number = lc.lot_number
+
+        GROUP BY category
         ORDER BY bid_amount DESC
       `,
       query_params: queryParams,
@@ -710,6 +750,16 @@ export default async function handler(req, res) {
     let liveBidCorrectionDelta = 0;
     let liveCorrectedAuctions = [];
 
+    // Branch/category corrections piggyback on the same per-auction
+    // rangeDelta/liveAmount computed below — branch because one auction
+    // maps to exactly one store, category because a lot's classification
+    // never depends on which system (ClickHouse or cms.hmr.ph) reported
+    // its bid. Both are keyed maps of name -> delta, applied to the raw
+    // branchRows/categoryRows after the loop.
+    let branchCorrectionDeltas = new Map();
+    let categoryCorrectionDeltas = new Map();
+    let unmappedLiveLots = [];
+
     const todayManila = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Manila",
     }).format(new Date());
@@ -718,7 +768,7 @@ export default async function handler(req, res) {
     try {
       const activeAuctionListResult = await client.query({
         query: `
-          SELECT DISTINCT auction_number
+          SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
           WHERE starting_time <= now()
             AND ending_time >= now()
@@ -731,8 +781,10 @@ export default async function handler(req, res) {
         format: "JSONEachRow",
       });
 
-      const activeAuctionNumbers = (await activeAuctionListResult.json()).map(
-        (row) => row.auction_number,
+      const activeAuctionRowsList = await activeAuctionListResult.json();
+      const activeAuctionNumbers = activeAuctionRowsList.map((row) => row.auction_number);
+      const activeAuctionBranchMap = Object.fromEntries(
+        activeAuctionRowsList.map((row) => [row.auction_number, row.store_name]),
       );
 
       if (activeAuctionNumbers.length > 0) {
@@ -804,6 +856,90 @@ export default async function handler(req, res) {
           (await chTodayResult.json()).map((r) => [r.auction_number, Number(r.ch_amount ?? 0)]),
         );
 
+        // Per-lot data needed for CATEGORY correction only — branch needs
+        // no extra query since it reuses chRangeAmount/liveAmount below
+        // (one auction = one store). Category needs per-lot granularity
+        // because one auction can span multiple categories.
+        const [lotCategoryResult, activeLotLatestBidResult] = await Promise.all([
+          client.query({
+            query: `
+              SELECT
+                auction_number,
+                lot_number,
+
+                any(
+                  CASE
+                    WHEN name ILIKE '%bulk%'
+                      OR name ILIKE '%pallet%'
+                      THEN 'Bulk Auction'
+
+                    WHEN name ILIKE '%vehicle%'
+                      OR name ILIKE '%motorcycle%'
+                      OR name ILIKE '%car%'
+                      OR name ILIKE '%truck%'
+                      OR name ILIKE '%van%'
+                      OR name ILIKE '%electric vehicle%'
+                      THEN 'Vehicles and Automotive'
+
+                    WHEN name ILIKE '%equipment%'
+                      OR name ILIKE '%industrial%'
+                      OR name ILIKE '%generator%'
+                      OR name ILIKE '%backhoe%'
+                      OR name ILIKE '%excavator%'
+                      OR name ILIKE '%construction%'
+                      THEN 'Equipment and Industrial'
+
+                    ELSE 'General Merchandise'
+                  END
+                ) AS category
+
+              FROM xv3.mart_auction_vendor_analysis
+
+              WHERE auction_number IN {activeAuctionNumbers:Array(String)}
+                AND lot_number IS NOT NULL
+
+              GROUP BY auction_number, lot_number
+            `,
+            query_params: { activeAuctionNumbers },
+            format: "JSONEachRow",
+          }),
+          client.query({
+            query: `
+              WITH auction_store AS (
+                SELECT DISTINCT auction_number, store_name
+                FROM xv3.mart_auction_productivity_report
+                WHERE auction_number IS NOT NULL
+              )
+              SELECT
+                b.auction_number AS auction_number,
+                b.lot_number AS lot_number,
+                argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
+              FROM cms.mart_cms_bid_history_report b
+              INNER JOIN auction_store s ON b.auction_number = s.auction_number
+              WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR s.store_name = {store:String})
+                AND b.auction_number IN {activeAuctionNumbers:Array(String)}
+              GROUP BY b.auction_number, b.lot_number
+            `,
+            query_params: { from, to, store, activeAuctionNumbers },
+            format: "JSONEachRow",
+          }),
+        ]);
+
+        const lotCategoryMap = new Map(
+          (await lotCategoryResult.json()).map((r) => [`${r.auction_number}::${r.lot_number}`, r.category]),
+        );
+
+        const chLotsByAuction = new Map();
+        for (const row of await activeLotLatestBidResult.json()) {
+          if (!chLotsByAuction.has(row.auction_number)) chLotsByAuction.set(row.auction_number, []);
+          chLotsByAuction.get(row.auction_number).push({
+            lot_number: row.lot_number,
+            latest_bid_amount: Number(row.latest_bid_amount ?? 0),
+          });
+        }
+
         const liveResults = await Promise.all(
           activeAuctionNumbers.map((auctionNumber) => getLiveLotsSafe(auctionNumber)),
         );
@@ -864,13 +1000,61 @@ export default async function handler(req, res) {
 
           // total_bid_amount only reflects "now" when the selected range
           // actually includes today — otherwise a historical period is
-          // left untouched by the live snapshot.
+          // left untouched by the live snapshot. Branch/category follow
+          // the exact same gate, for the exact same reason.
           if (rangeIncludesToday) {
             correctedTotalBidAmount += rangeDelta;
             liveBidCorrectionDelta += rangeDelta;
+
+            // BRANCH: one auction maps to exactly one store, so its full
+            // ClickHouse contribution (chRangeAmount) and full live
+            // contribution (liveAmount) both move as a single unit —
+            // reuses the values already computed above, no extra query.
+            const branch = activeAuctionBranchMap[auctionNumber];
+            if (branch) {
+              branchCorrectionDeltas.set(
+                branch,
+                (branchCorrectionDeltas.get(branch) ?? 0) + rangeDelta,
+              );
+            }
+
+            // CATEGORY: different lots in the same auction can belong to
+            // different categories, so this must happen per lot. Remove
+            // every one of this auction's stale ClickHouse per-lot
+            // contributions from their categories, then add every live
+            // per-lot contribution to its category — using the SAME
+            // lot -> category mapping on both sides, so a given lot's
+            // stale and live amounts always land in the same bucket.
+            for (const chLot of chLotsByAuction.get(auctionNumber) ?? []) {
+              const category =
+                lotCategoryMap.get(`${auctionNumber}::${chLot.lot_number}`) ?? "Uncategorized";
+              categoryCorrectionDeltas.set(
+                category,
+                (categoryCorrectionDeltas.get(category) ?? 0) - chLot.latest_bid_amount,
+              );
+            }
+
+            for (const [lotNumber, currentBid] of uniqueLots) {
+              const mappedCategory = lotCategoryMap.get(`${auctionNumber}::${lotNumber}`);
+              const category = mappedCategory ?? "Uncategorized";
+              if (!mappedCategory) {
+                unmappedLiveLots.push({
+                  auction_number: auctionNumber,
+                  lot_number: lotNumber,
+                  current_bid: toFiniteNumber(currentBid),
+                  fallback_category: "Uncategorized",
+                });
+              }
+              categoryCorrectionDeltas.set(
+                category,
+                (categoryCorrectionDeltas.get(category) ?? 0) + toFiniteNumber(currentBid),
+              );
+            }
           }
           // todays_bid_amount is always "today" by definition, so it is
-          // always eligible for correction.
+          // always eligible for correction. (Branch/category breakdowns
+          // are range-scoped, like total_bid_amount, so they have no
+          // separate "today" variant to correct.)
           correctedTodaysBidAmount += todayDelta;
 
           liveCorrectedAuctions.push({
@@ -891,7 +1075,34 @@ export default async function handler(req, res) {
       correctedTodaysBidAmount = Number(todayBid.todays_bid_amount ?? 0);
       liveBidCorrectionDelta = 0;
       liveCorrectedAuctions = [];
+      branchCorrectionDeltas = new Map();
+      categoryCorrectionDeltas = new Map();
+      unmappedLiveLots = [];
     }
+
+    // Apply the accumulated branch/category deltas on top of the raw
+    // ClickHouse rows. Any branch/category that only exists because of a
+    // live correction (e.g. a brand-new active auction with zero
+    // ClickHouse rows yet) is added here even though it had no raw row.
+    const branchTotals = new Map(
+      branchRows.map((row) => [row.branch, Number(row.bid_amount ?? 0)]),
+    );
+    for (const [branch, delta] of branchCorrectionDeltas) {
+      branchTotals.set(branch, (branchTotals.get(branch) ?? 0) + delta);
+    }
+    const correctedBranches = [...branchTotals.entries()]
+      .map(([branch, bid_amount]) => ({ branch, bid_amount }))
+      .sort((a, b) => b.bid_amount - a.bid_amount);
+
+    const categoryTotals = new Map(
+      categoryRows.map((row) => [row.category, Number(row.bid_amount ?? 0)]),
+    );
+    for (const [category, delta] of categoryCorrectionDeltas) {
+      categoryTotals.set(category, (categoryTotals.get(category) ?? 0) + delta);
+    }
+    const correctedCategories = [...categoryTotals.entries()]
+      .map(([category, bid_amount]) => ({ category, bid_amount }))
+      .sort((a, b) => b.bid_amount - a.bid_amount);
 
     // =========================================================
     // SUMMARY RESPONSE
@@ -909,20 +1120,15 @@ export default async function handler(req, res) {
       sell_through_rate: sellThroughRate,
       unsold_value: Number(lotStatus.unsold_value ?? 0),
 
-      branches: branchRows.map((row) => ({
-        branch: row.branch,
-        bid_amount: Number(row.bid_amount ?? 0),
-      })),
+      branches: correctedBranches,
 
-      categories: categoryRows.map((row) => ({
-        category: row.category,
-        bid_amount: Number(row.bid_amount ?? 0),
-      })),
+      categories: correctedCategories,
 
       // Temporary diagnostic fields for validating the live bid
       // correction — not for permanent frontend consumption yet.
       live_bid_correction_delta: liveBidCorrectionDelta,
       live_corrected_auctions: liveCorrectedAuctions,
+      unmapped_live_lots: unmappedLiveLots,
     });
   } catch (err) {
     console.error("Overview API error:", err);
