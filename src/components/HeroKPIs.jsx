@@ -138,16 +138,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         sparkline={trend}
         methodology={METHODOLOGY.serviceIncome}
       />
-      <StatTile
-        icon={ICONS.backlog}
-        eyebrow="Vendor Payables"
-        value={formatPeso(vendorPayablesBacklog.totalBacklog)}
-        sub="unremitted to vendors"
-        pill={{ label: "Follow Up", tone: "critical" }}
-        sparkline={trend}
-        methodology={METHODOLOGY.vendorPayables}
-      />
-
       <BranchTallyModal
         open={drilldown === "totalBidAmount"}
         onClose={() => setDrilldown(null)}
