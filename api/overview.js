@@ -630,6 +630,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       total_bid_amount: Number(total.total_bid_amount ?? 0),
 
+      todays_bid_amount: Number(todayBid.todays_bid_amount ?? 0),
+
       active_auctions: Number(activeAuction.active_auctions ?? 0),
 
       listed_lots: listedLots,
