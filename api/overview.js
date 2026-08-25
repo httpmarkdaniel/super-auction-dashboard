@@ -50,6 +50,14 @@ const STATUS_PRIORITY_SQL = `
   END
 `;
 
+// Overview is now ClickHouse/warehouse-only by design — it must never call
+// cms.hmr.ph. The LIVE BID CORRECTION block below is kept in place (not
+// deleted) because its cms.hmr.ph plumbing (getLiveLotsSafe et al.) is
+// reserved for the Online Bidding feature, but it must not execute from
+// this endpoint. Do not flip this to true without moving Overview off
+// warehouse-only first.
+const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
+
 export default async function handler(req, res) {
   try {
     const { from, to, store = "", type = "summary" } = req.query;
@@ -728,58 +736,11 @@ export default async function handler(req, res) {
     const settledTotalRows = await settledTotalResult.json();
     const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
 
-    // ---------------------------------------------------------
-    // TODAY'S BID AMOUNT (SETTLED)
-    // Same definition as above, fixed to today's Asia/Manila calendar
-    // day regardless of the selected range — mirrors how the old
-    // todays_bid_amount always meant "today" independent of the picker.
-    // ---------------------------------------------------------
-    const settledTodayResult = await client.query({
-      query: `
-        WITH selected_auctions AS (
-          SELECT DISTINCT
-            auction_number,
-            store_name
-          FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({today:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({today:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-            AND (
-              {store:String} = ''
-              OR store_name = {store:String}
-            )
-        ),
-
-        settled_lots AS (
-          SELECT
-            v.auction_number AS auction_number,
-            v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount
-
-          FROM xv3.mart_auction_vendor_analysis v
-
-          INNER JOIN selected_auctions a
-            ON v.auction_number = a.auction_number
-
-          WHERE v.status IN ('Paid', 'Released')
-            AND v.auction_number IS NOT NULL
-            AND v.lot_number IS NOT NULL
-
-          GROUP BY
-            v.auction_number,
-            v.lot_number
-        )
-
-        SELECT
-          sum(ifNull(lot_bid_amount, 0)) AS settled_today_bid_amount
-
-        FROM settled_lots
-      `,
-      query_params: { today: todayManila, store },
-      format: "JSONEachRow",
-    });
-
-    const settledTodayRows = await settledTodayResult.json();
-    const settledTodayBidAmount = Number(settledTodayRows[0]?.settled_today_bid_amount ?? 0);
+    // NOTE: Today's Bid Amount no longer uses a settled (Paid/Released)
+    // definition — see todayBidResult above (warehouse-only, latest bid
+    // per lot from cms.mart_cms_bid_history_report for today's Asia/Manila
+    // calendar day), wired into the response as todays_bid_amount below.
+    // Total Bid Amount (settled, range-scoped) is unaffected by this.
 
     // ---------------------------------------------------------
     // BID VALUE BY BRANCH (SETTLED)
@@ -1282,6 +1243,7 @@ export default async function handler(req, res) {
 
     const rangeIncludesToday = from <= todayManila && todayManila <= to;
 
+    if (OVERVIEW_LIVE_CORRECTION_ENABLED) {
     try {
       const activeAuctionListResult = await client.query({
         query: `
@@ -1596,6 +1558,7 @@ export default async function handler(req, res) {
       categoryCorrectionDeltas = new Map();
       unmappedLiveLots = [];
     }
+    }
 
     // Apply the accumulated branch/category deltas on top of the raw
     // ClickHouse rows. Any branch/category that only exists because of a
@@ -1629,7 +1592,14 @@ export default async function handler(req, res) {
       // bid_amount only. See the SETTLED query comments above.
       total_bid_amount: settledTotalBidAmount,
 
-      todays_bid_amount: settledTodayBidAmount,
+      // Today's Bid Amount: warehouse-only "latest bid placed today" — NOT
+      // the settled Paid/Released definition used by Total Bid Amount
+      // above. See todayBidResult: argMax(bid_amount, bid_created_at) per
+      // auction_number + lot_number, scoped to today's Asia/Manila
+      // calendar day, from cms.mart_cms_bid_history_report. These are
+      // intentionally different business metrics and are not expected to
+      // reconcile with each other.
+      todays_bid_amount: Number(todayBid.todays_bid_amount ?? 0),
 
       // The previous "Total Bid Amount" definition — current/standing bid
       // value across active + recently-bid lots, live-corrected against
