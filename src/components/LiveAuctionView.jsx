@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLiveAuctionEvents, useAuctionLotDetail } from "../useOnlineBidding";
 import { formatPeso } from "../utils/format";
 import { formatManila, timeRemainingLabel, isEndingSoon } from "../utils/manilaTime";
+import { ALL_STORES } from "../mockData";
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 import BidActivityBar from "./primitives/BidActivityBar";
@@ -33,7 +34,12 @@ function SourceBadge({ source }) {
 }
 
 function AuctionEventsTable({ store, onSelectAuction }) {
-  const { auctions, loading, error } = useLiveAuctionEvents(store);
+  // "All Stores" is a mock-only sentinel, not a real branch value (same
+  // conversion useLiveOverview's caller already applies in App.jsx) — it
+  // must never be sent to /api/live-auctions as a literal store filter,
+  // or the backend's store_name = {store:String} predicate matches zero
+  // real branches and the auction list silently comes back empty.
+  const { auctions, loading, error } = useLiveAuctionEvents(store === ALL_STORES ? undefined : store);
 
   return (
     <StorySection
