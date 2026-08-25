@@ -50,6 +50,24 @@ const STATUS_PRIORITY_SQL = `
   END
 `;
 
+// for_approval_status (xv3.mart_auction_vendor_analysis) is a real warehouse
+// field, not a frontend derivation — verified against real data: 1,409,706
+// rows 'Approved', 20,864 'For Approval', 70,572 genuinely NULL (no blank
+// values found). Deduped the same way as status: item_barcode fan-out rows
+// within a lot agree 99.7%+ of the time (150/55,918 multi-row lots
+// disagree); for that rare remainder, argMax picks the more-advanced state
+// of the approval workflow ('Approved' over 'For Approval') by the same
+// "most-advanced-state-wins" logic as STATUS_PRIORITY_SQL, rather than an
+// arbitrary any(). A genuinely NULL warehouse value is preserved as NULL
+// (displayed as "—"), never fabricated.
+const APPROVAL_PRIORITY_SQL = `
+  CASE for_approval_status
+    WHEN 'Approved' THEN 2
+    WHEN 'For Approval' THEN 1
+    ELSE 0
+  END
+`;
+
 // Overview is now ClickHouse/warehouse-only by design — it must never call
 // cms.hmr.ph. The LIVE BID CORRECTION block below is kept in place (not
 // deleted) because its cms.hmr.ph plumbing (getLiveLotsSafe et al.) is
@@ -155,6 +173,7 @@ export default async function handler(req, res) {
               any(v.name) AS name,
               any(v.vendor) AS vendor,
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
               any(v.bid_amount) AS bid_amount,
@@ -179,6 +198,7 @@ export default async function handler(req, res) {
             name,
             vendor,
             status,
+            for_approval_status,
             reserved_price,
             sold_price,
             bid_amount,
@@ -213,7 +233,13 @@ export default async function handler(req, res) {
         name: row.name,
         vendor: row.vendor,
         store_name: row.store_name,
+        // status: the REAL resolved warehouse lifecycle status (Paid,
+        // Released, Outstanding, Unpaid, Unsold, Refunded, Returned) — NOT
+        // the Sold/Unsold disposition. disposition is kept separately below
+        // for tab-bucket membership only (Lots Sold/Listed's Sold/Unsold
+        // split), never as a displayed "status".
         status: row.status,
+        for_approval_status: row.for_approval_status ?? null,
         disposition: row.disposition,
         reserved_price: Number(row.reserved_price ?? 0),
         sold_price: Number(row.sold_price ?? 0),
@@ -287,6 +313,7 @@ export default async function handler(req, res) {
               any(v.name) AS name,
               any(v.vendor) AS vendor,
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
               any(a.store_name) AS store_name
@@ -310,6 +337,7 @@ export default async function handler(req, res) {
             name,
             vendor,
             status,
+            for_approval_status,
             reserved_price,
             sold_price,
             store_name
@@ -336,6 +364,7 @@ export default async function handler(req, res) {
         vendor: row.vendor,
         store_name: row.store_name,
         status: row.status,
+        for_approval_status: row.for_approval_status ?? null,
         reserved_price: Number(row.reserved_price ?? 0),
         sold_price: Number(row.sold_price ?? 0),
       }));
@@ -405,7 +434,8 @@ export default async function handler(req, res) {
               any(a.store_name) AS store_name,
               any(v.name) AS name,
               any(v.vendor) AS vendor,
-              any(v.status) AS status,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               any(v.bid_amount) AS bid_amount,
 
               any(
@@ -469,6 +499,7 @@ export default async function handler(req, res) {
             sl.name AS name,
             sl.vendor AS vendor,
             sl.status AS status,
+            sl.for_approval_status AS for_approval_status,
             sl.bid_amount AS bid_amount,
             sl.store_name AS store_name,
             sl.category AS category,
@@ -502,6 +533,7 @@ export default async function handler(req, res) {
           name: row.name,
           vendor: row.vendor,
           status: row.status,
+          for_approval_status: row.for_approval_status ?? null,
           store_name: row.store_name,
           category: row.category,
           bidder_name: bidderName,
@@ -517,6 +549,132 @@ export default async function handler(req, res) {
         summary: {
           count: mappedRows.length,
           total_bid_amount: totalBidAmount,
+        },
+
+        rows: mappedRows,
+      });
+    }
+
+    // =========================================================
+    // SERVICE INCOME DRILL-DOWN
+    //
+    // The exact lot-level population behind the Service Income KPI: the
+    // SAME settled_lots CTE as the Total Bid Amount / settled-lots
+    // drilldown above (status IN ('Paid','Released'), deduped by
+    // auction_number + lot_number, same date/store scoping), with
+    // buyers_premium_income (sold_price - bid_amount) and commission_income
+    // (bid_amount * commission / 100) computed per row. Structurally
+    // guaranteed: sum(rows.total_service_income) == service_income_total,
+    // sum(rows.buyers_premium_income) == service_income_buyers_premium,
+    // sum(rows.commission_income) == service_income_commission.
+    // =========================================================
+    if (type === "service-income") {
+      const result = await client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT
+              auction_number,
+              store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(a.store_name) AS store_name,
+              any(v.name) AS name,
+              any(v.vendor) AS vendor,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
+              any(v.bid_amount) AS bid_amount,
+              any(v.sold_price) AS sold_price,
+              any(v.buyers_premium) AS buyers_premium_pct,
+              any(v.commission) AS commission_pct,
+
+              any(
+                CASE
+                  WHEN v.name ILIKE '%bulk%' OR v.name ILIKE '%pallet%' THEN 'Bulk Auction'
+                  WHEN v.name ILIKE '%vehicle%' OR v.name ILIKE '%motorcycle%' OR v.name ILIKE '%car%'
+                    OR v.name ILIKE '%truck%' OR v.name ILIKE '%van%' OR v.name ILIKE '%electric vehicle%'
+                    THEN 'Vehicles and Automotive'
+                  WHEN v.name ILIKE '%equipment%' OR v.name ILIKE '%industrial%' OR v.name ILIKE '%generator%'
+                    OR v.name ILIKE '%backhoe%' OR v.name ILIKE '%excavator%' OR v.name ILIKE '%construction%'
+                    THEN 'Equipment and Industrial'
+                  ELSE 'General Merchandise'
+                END
+              ) AS category
+
+            FROM xv3.mart_auction_vendor_analysis v
+
+            INNER JOIN selected_auctions a
+              ON v.auction_number = a.auction_number
+
+            WHERE v.status IN ('Paid', 'Released')
+              AND v.auction_number IS NOT NULL
+              AND v.lot_number IS NOT NULL
+
+            GROUP BY v.auction_number, v.lot_number
+          )
+
+          SELECT
+            auction_number,
+            lot_number,
+            vendor,
+            status,
+            for_approval_status,
+            store_name,
+            category,
+            ifNull(bid_amount, 0) AS bid_amount,
+            ifNull(buyers_premium_pct, 0) AS buyers_premium_pct,
+            ifNull(commission_pct, 0) AS commission_pct,
+            ifNull(sold_price, 0) - ifNull(bid_amount, 0) AS buyers_premium_income,
+            ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100 AS commission_income
+
+          FROM settled_lots
+
+          ORDER BY auction_number, lot_number
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      });
+
+      const rows = await result.json();
+
+      const mappedRows = rows.map((row) => {
+        const buyersPremiumIncome = Number(row.buyers_premium_income ?? 0);
+        const commissionIncome = Number(row.commission_income ?? 0);
+        return {
+          auction_number: row.auction_number,
+          lot_number: row.lot_number,
+          store_name: row.store_name,
+          category: row.category,
+          vendor: row.vendor,
+          status: row.status,
+          for_approval_status: row.for_approval_status ?? null,
+          bid_amount: Number(row.bid_amount ?? 0),
+          buyers_premium_pct: Number(row.buyers_premium_pct ?? 0),
+          buyers_premium_income: buyersPremiumIncome,
+          commission_pct: Number(row.commission_pct ?? 0),
+          commission_income: commissionIncome,
+          total_service_income: buyersPremiumIncome + commissionIncome,
+        };
+      });
+
+      const summaryBuyersPremium = mappedRows.reduce((sum, row) => sum + row.buyers_premium_income, 0);
+      const summaryCommission = mappedRows.reduce((sum, row) => sum + row.commission_income, 0);
+
+      return res.status(200).json({
+        type: "service-income",
+
+        summary: {
+          count: mappedRows.length,
+          service_income_buyers_premium: summaryBuyersPremium,
+          service_income_commission: summaryCommission,
+          service_income_total: summaryBuyersPremium + summaryCommission,
         },
 
         rows: mappedRows,
@@ -741,6 +899,78 @@ export default async function handler(req, res) {
     // per lot from cms.mart_cms_bid_history_report for today's Asia/Manila
     // calendar day), wired into the response as todays_bid_amount below.
     // Total Bid Amount (settled, range-scoped) is unaffected by this.
+
+    // ---------------------------------------------------------
+    // SERVICE INCOME (SETTLED)
+    //
+    // Same population as Total Bid Amount above: status IN ('Paid',
+    // 'Released'), deduped by auction_number + lot_number, same
+    // starting_time/date-range/store scoping. Two components:
+    //
+    // - Buyer's Premium Income = sold_price - bid_amount. buyers_premium is
+    //   a PERCENTAGE RATE, not a peso amount (proven: sold_price =
+    //   bid_amount * (1 + buyers_premium/100) exactly, 0 mismatches across
+    //   511 real settled rows) — so the peso figure is the difference, not
+    //   sum(buyers_premium) directly.
+    // - Commission Income = bid_amount * commission / 100. commission is
+    //   also a percentage rate (varies by vendor/auction agreement — 0, 10,
+    //   17, 18, 20, 25, 29, 30, 35 observed), a vendor-side commission rate,
+    //   not a peso Service Fee — same reasoning as buyers_premium above.
+    //
+    // Both rate fields are consistent across a lot's item_barcode fan-out
+    // rows (verified: 0 lots with >1 distinct value for either field across
+    // 484 settled lots), so any() is a safe dedup here, same as bid_amount.
+    // ---------------------------------------------------------
+    const settledServiceIncomeResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount,
+            any(v.sold_price) AS lot_sold_price,
+            any(v.commission) AS lot_commission_pct
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS service_income_buyers_premium,
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission
+
+        FROM settled_lots
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const settledServiceIncomeRows = await settledServiceIncomeResult.json();
+    const serviceIncomeBuyersPremium = Number(settledServiceIncomeRows[0]?.service_income_buyers_premium ?? 0);
+    const serviceIncomeCommission = Number(settledServiceIncomeRows[0]?.service_income_commission ?? 0);
 
     // ---------------------------------------------------------
     // BID VALUE BY BRANCH (SETTLED)
@@ -1600,6 +1830,15 @@ export default async function handler(req, res) {
       // intentionally different business metrics and are not expected to
       // reconcile with each other.
       todays_bid_amount: Number(todayBid.todays_bid_amount ?? 0),
+
+      // Service Income: real warehouse revenue from the SAME settled
+      // Paid/Released population as Total Bid Amount — Buyer's Premium
+      // Income (sold_price - bid_amount) + Commission Income (bid_amount *
+      // commission / 100). See the SERVICE INCOME (SETTLED) query comments
+      // above for why buyers_premium/commission are rates, not pesos.
+      service_income_buyers_premium: serviceIncomeBuyersPremium,
+      service_income_commission: serviceIncomeCommission,
+      service_income_total: serviceIncomeBuyersPremium + serviceIncomeCommission,
 
       // The previous "Total Bid Amount" definition — current/standing bid
       // value across active + recently-bid lots, live-corrected against

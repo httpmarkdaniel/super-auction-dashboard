@@ -608,7 +608,7 @@ export default async function handler(req, res) {
     });
 
     // =========================================================
-    // TOP VENDORS (settled) — same Paid/Released settled population as
+    // TOP 10 VENDORS (settled) — same Paid/Released settled population as
     // Total Bid Amount. vendor comes directly off vendor_analysis's own
     // row (verified 0% missing across 1.43M Paid/Released rows sampled),
     // no identity bridge needed.
@@ -651,14 +651,14 @@ export default async function handler(req, res) {
 
         GROUP BY vendor
         ORDER BY settled_bid_amount DESC
-        LIMIT 5
+        LIMIT 10
       `,
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
     // =========================================================
-    // TOP BIDDERS (settled, winning bidders only) — uses the same
+    // TOP 10 BIDDERS (settled, winning bidders only) — uses the same
     // deterministic identity bridge as settled Bidder Composition. No
     // fuzzy matching. INNER JOINs through every bridge hop, so a settled
     // lot that can't fully resolve an identity simply contributes to no
@@ -762,7 +762,7 @@ export default async function handler(req, res) {
 
         GROUP BY cb_email
         ORDER BY settled_bid_amount DESC
-        LIMIT 5
+        LIMIT 10
       `,
       query_params: queryParams,
       format: "JSONEachRow",

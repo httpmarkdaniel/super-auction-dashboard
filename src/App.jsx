@@ -59,6 +59,8 @@ const EMPTY_OVERVIEW = {
     sellThroughRate: 0,
     sellThroughDeltaPct: undefined,
     serviceIncome: 0,
+    serviceIncomeBuyersPremium: 0,
+    serviceIncomeCommission: 0,
     serviceIncomeDeltaPct: undefined,
     lotsSold: 0,
     lotsListed: 0,
@@ -93,6 +95,7 @@ const EMPTY_OVERVIEW = {
   settledLots: [],
   activeAuctionRows: [],
   unsoldLotRows: [],
+  serviceIncomeLots: [],
   moneyFlow: [
     { stage: "Bid Amount", value: 0, type: "total" },
     { stage: "Commission", value: 0, type: "deduction" },
@@ -115,6 +118,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     settledLots,
     activeAuctionRows,
     unsoldLotRows,
+    serviceIncomeLots,
   } = live;
   const totalLots = Number(kpis.total_lots) || 0;
   const totalPaid = Number(kpis.total_paid) || 0;
@@ -253,7 +257,9 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       activeAuctionsNow: Number(kpis.total_auctions) || 0,
       sellThroughRate: endedLotsListed > 0 ? Math.round((endedLotsSold / endedLotsListed) * 100) : 0,
       sellThroughDeltaPct: undefined,
-      serviceIncome: (Number(kpis.service_income_buyers_premium) || 0) + (Number(kpis.service_income_service_fee) || 0),
+      serviceIncome: Number(kpis.service_income_total) || 0,
+      serviceIncomeBuyersPremium: Number(kpis.service_income_buyers_premium) || 0,
+      serviceIncomeCommission: Number(kpis.service_income_commission) || 0,
       serviceIncomeDeltaPct: undefined,
       lotsSold: endedLotsSold,
       lotsListed: endedLotsListed,
@@ -327,6 +333,10 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // why this is kept separate from operationsDetail's disposition-based
     // Unsold bucket.
     unsoldLotRows: unsoldLotRows || [],
+    // Settled (Paid/Released) lots behind Service Income — sums exactly
+    // to heroKPIs.serviceIncome (and each component to its own KPI) for
+    // the same range/store.
+    serviceIncomeLots: serviceIncomeLots || [],
     moneyFlow,
   };
 }

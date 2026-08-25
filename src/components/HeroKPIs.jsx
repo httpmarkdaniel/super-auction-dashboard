@@ -3,6 +3,7 @@ import StatTile from "./primitives/StatTile";
 import Modal from "./primitives/Modal";
 import BranchTallyModal from "./primitives/BranchTallyModal";
 import ActiveAuctionsModal from "./primitives/ActiveAuctionsModal";
+import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import OperationsTable from "./OperationsTable";
 import { formatPeso } from "../utils/format";
 
@@ -38,7 +39,7 @@ const METHODOLOGY = {
   withReservePrice:
     "Of the unsold lots above, how many have a reserve price set (and their combined reserve value) — lots with no reserve on file don't contribute a comparable value figure. Click to see them.",
   serviceIncome:
-    "Buyer's premium plus service fee, scoped to lots with status Paid or Released only — HMR's realized revenue share on lots actually settled, not just won, within the selected date range."
+    "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots."
 };
 
 function LotDrilldownModal({ open, onClose, title, subtitle, data, initialTab }) {
@@ -60,6 +61,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
     settledLots,
     activeAuctionRows,
     unsoldLotRows,
+    serviceIncomeLots,
   } = overview;
   const trend = hourlyTrend.map((h) => h.bidAmount);
   const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
@@ -142,6 +144,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         sub="HMR revenue · Paid & Released"
         sparkline={trend}
         methodology={METHODOLOGY.serviceIncome}
+        onClick={() => setDrilldown("serviceIncome")}
       />
       <BranchTallyModal
         open={drilldown === "totalBidAmount"}
@@ -187,6 +190,12 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         subtitle={`${rangeLabel} · up to 200 most recent lot rows`}
         data={operationsDetail}
         initialTab="For Approval"
+      />
+      <ServiceIncomeModal
+        open={drilldown === "serviceIncome"}
+        onClose={() => setDrilldown(null)}
+        rows={serviceIncomeLots}
+        rangeLabel={rangeLabel}
       />
     </div>
   );

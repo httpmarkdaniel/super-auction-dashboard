@@ -20,6 +20,7 @@ function LotsTable({ rows }) {
             <th className="text-left font-medium pb-2 pr-4">Category</th>
             <th className="text-left font-medium pb-2 pr-4">Vendor</th>
             <th className="text-left font-medium pb-2 pr-4">Status</th>
+            <th className="text-left font-medium pb-2 pr-4">Approval</th>
             <th className="text-left font-medium pb-2 pr-4">Bidder</th>
             <th className="text-right font-medium pb-2">Bid Amount</th>
           </tr>
@@ -36,13 +37,14 @@ function LotsTable({ rows }) {
               <td className="py-2.5 pr-4 text-ink">{r.category || "—"}</td>
               <td className="py-2.5 pr-4 text-ink">{r.vendor || "—"}</td>
               <td className="py-2.5 pr-4 text-ink">{r.status || "—"}</td>
+              <td className="py-2.5 pr-4 text-ink">{r.approval || "—"}</td>
               <td className="py-2.5 pr-4 text-ink">{r.bidderName || "—"}</td>
               <td className="py-2.5 text-right tabular text-ink">{formatPeso(r.bidAmount)}</td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={9} className="py-6 text-center text-muted text-[15.5px]">
+              <td colSpan={10} className="py-6 text-center text-muted text-[15.5px]">
                 No settled lots in this range yet.
               </td>
             </tr>
@@ -51,7 +53,7 @@ function LotsTable({ rows }) {
         {rows.length > 0 && (
           <tfoot>
             <tr className="border-t border-gridline font-semibold">
-              <td colSpan={8} className="py-2.5 pr-4 text-ink">Total</td>
+              <td colSpan={9} className="py-2.5 pr-4 text-ink">Total</td>
               <td className="py-2.5 text-right tabular text-ink">{formatPeso(total)}</td>
             </tr>
           </tfoot>

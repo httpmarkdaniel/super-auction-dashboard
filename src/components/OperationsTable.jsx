@@ -1,10 +1,18 @@
 import { useMemo, useState } from "react";
 import { formatPeso } from "../utils/format";
 
+// Real warehouse lifecycle status (xv3.mart_auction_vendor_analysis.status,
+// deterministically resolved — see api/overview.js's STATUS_PRIORITY_SQL),
+// NOT the Sold/Unsold tab bucket. Styled by how far along the lifecycle
+// each real status represents.
 const statusStyle = {
-  Sold: "text-toneGreenText bg-good/10",
-  "For Approval": "text-toneAmberText bg-warning/10",
+  Released: "text-toneGreenText bg-good/10",
+  Paid: "text-toneGreenText bg-good/10",
+  Outstanding: "text-toneAmberText bg-warning/10",
+  Unpaid: "text-toneAmberText bg-warning/10",
   Unsold: "text-toneRedText bg-critical/10",
+  Refunded: "text-toneRedText bg-critical/10",
+  Returned: "text-toneRedText bg-critical/10",
 };
 
 const TABS = ["All", "Sold", "For Approval", "Unsold"];
@@ -50,10 +58,19 @@ export default function OperationsTable({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "lotNumber", dir: "asc" });
 
+  // Tab bucket: Sold/Unsold (disposition) for the Lots Sold/Listed dataset,
+  // falling back to the row's own status for datasets that don't carry a
+  // separate disposition field (e.g. the strict Unsold Lots / With Reserve
+  // Price rows, which are already 100% "Unsold"). Deliberately NOT the
+  // same field as the displayed Status column below — see useLiveOverview.js's
+  // comment on why those two concepts were split apart.
+  const bucketOf = (r) => r.disposition ?? r.status;
+
   const counts = useMemo(() => {
     const c = { All: operationsDetail.length, Sold: 0, "For Approval": 0, Unsold: 0 };
     operationsDetail.forEach((r) => {
-      c[r.status] = (c[r.status] || 0) + 1;
+      const bucket = bucketOf(r);
+      c[bucket] = (c[bucket] || 0) + 1;
     });
     return c;
   }, [operationsDetail]);
@@ -61,7 +78,7 @@ export default function OperationsTable({
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let filtered = operationsDetail.filter((r) => {
-      if (tab !== "All" && r.status !== tab) return false;
+      if (tab !== "All" && bucketOf(r) !== tab) return false;
       if (!q) return true;
       return (
         r.lotNumber.toLowerCase().includes(q) ||
@@ -138,13 +155,13 @@ export default function OperationsTable({
                   <SortHeader label="Vendor" sortKey="vendor" sort={sort} onSort={handleSort} />
                   <SortHeader label="Category" sortKey="category" sort={sort} onSort={handleSort} />
                   <th className="text-left font-medium pb-2 pr-4">Status</th>
+                  <th className="text-left font-medium pb-2 pr-4">Approval</th>
                   <SortHeader label="Total Bid Amount" sortKey="totalBidAmount" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Reserved Price" sortKey="reservedPrice" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Sold Price" sortKey="soldPrice" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Buyer's Premium" sortKey="buyersPremium" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Service Fee" sortKey="serviceFee" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Service Income (BP+SF)" sortKey="serviceIncome" sort={sort} onSort={handleSort} align="right" />
-                  <th className="text-left font-medium pb-2">Approval</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +184,7 @@ export default function OperationsTable({
                         {r.status}
                       </span>
                     </td>
+                    <td className="py-2.5 pr-4 text-ink">{r.approval || "—"}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalBidAmount)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">
                       {r.reservedPrice > 0 ? formatPeso(r.reservedPrice) : <span className="text-muted">No Reserve</span>}
@@ -177,7 +195,6 @@ export default function OperationsTable({
                     <td className="py-2.5 pr-4 text-right tabular text-ink">
                       {formatPeso((r.buyersPremium ?? 0) + (r.serviceFee ?? 0))}
                     </td>
-                    <td className="py-2.5 text-ink">{r.approval || "—"}</td>
                   </tr>
                 ))}
                 {rows.length === 0 && (

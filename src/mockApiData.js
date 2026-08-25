@@ -21,8 +21,11 @@ export const MOCK_OVERVIEW = {
   pending_payment_value: 1_120_000,
   vendor_paid_count: 2196,
   total_commission: 923_000,
+  // Error/loading fallback only — real Service Income comes from
+  // api/overview.js's service_income_* fields (see useLiveOverview.js).
   service_income_buyers_premium: 2_010_000,
-  service_income_service_fee: 845_000,
+  service_income_commission: 845_000,
+  service_income_total: 2_855_000,
   unsold_count: 480,
   unsold_value: 2_650_000,
   total_inventory: 3180,

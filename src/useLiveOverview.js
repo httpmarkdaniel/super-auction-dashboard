@@ -40,6 +40,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       settledLots: [],
       activeAuctionRows: [],
       unsoldLotRows: [],
+      serviceIncomeLots: [],
     },
     loading: true,
     error: null,
@@ -59,6 +60,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           lotsResult,
           unsoldLotsResult,
           activeAuctionsResult,
+          serviceIncomeResult,
         ] = await Promise.all([
           fetchJson("/api/overview", { from, to, store }),
           fetchJson("/api/leaderboards", { from, to, store }),
@@ -77,6 +79,10 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           // ACTIVE AUCTIONS DRILLDOWN — "right now", independent of the
           // selected date range, but still store-scoped.
           fetchJson("/api/overview", { store, type: "active-auctions" }),
+
+          // SERVICE INCOME DRILLDOWN — the exact settled lots behind
+          // Service Income, same population as Total Bid Amount above.
+          fetchJson("/api/overview", { from, to, store, type: "service-income" }),
         ]);
 
         if (cancelled) return;
@@ -92,6 +98,15 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               total_bid_amount: liveOverview.total_bid_amount,
 
               todays_bid_amount: liveOverview.todays_bid_amount ?? 0,
+
+              // LIVE SERVICE INCOME — real warehouse revenue (Buyer's
+              // Premium Income + Commission Income) from the SAME settled
+              // Paid/Released population as Total Bid Amount. Replaces the
+              // mock service_income_buyers_premium/service_income_service_fee
+              // spread above.
+              service_income_buyers_premium: liveOverview.service_income_buyers_premium ?? 0,
+              service_income_commission: liveOverview.service_income_commission ?? 0,
+              service_income_total: liveOverview.service_income_total ?? 0,
 
               // LIVE BRANCH BREAKDOWN
               branches: liveOverview.branches ?? [],
@@ -143,15 +158,26 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             // double-count lots appearing in both (type=lots' disposition
             // bucket is a superset of strict status='Unsold' — see
             // implementation report re Refunded/Returned lots).
+            //
+            // status vs disposition: `status` is the REAL resolved
+            // warehouse lifecycle status (Paid/Released/Outstanding/
+            // Unpaid/Unsold/Refunded/Returned) — shown as-is, never
+            // relabeled. `disposition` is the separate Sold/Unsold tab
+            // bucket OperationsTable uses for its Sold/Unsold tab
+            // filtering/counts — kept distinct so the real status is never
+            // overwritten by that binary bucket (see 545O-N lot 10
+            // investigation: status='Unpaid' was previously displayed as
+            // "Sold" because both concepts shared one field).
             lots: {
               lots: (lotsResult.rows ?? []).map((row) => ({
                 lotNumber: row.lot_number,
                 item: row.name,
                 vendor: row.vendor ?? "—",
                 category: row.category ?? "—",
-                status: row.disposition,
+                status: row.status,
+                disposition: row.disposition,
                 soldPrice: Number(row.sold_price ?? 0),
-                approval: "",
+                approval: row.for_approval_status ?? null,
                 totalBidAmount: Number(row.bid_amount ?? 0),
                 buyersPremium: 0,
                 serviceFee: 0,
@@ -174,6 +200,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               vendor: row.vendor ?? "—",
               category: "—",
               status: "Unsold",
+              approval: row.for_approval_status ?? null,
               totalBidAmount: 0,
               reservedPrice: Number(row.reserved_price ?? 0),
               soldPrice: Number(row.sold_price ?? 0),
@@ -191,8 +218,28 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               category: row.category,
               vendor: row.vendor,
               status: row.status,
+              approval: row.for_approval_status ?? null,
               bidderName: row.bidder_name,
               bidAmount: Number(row.bid_amount ?? 0),
+            })),
+
+            // LIVE SERVICE INCOME DRILLDOWN — the settled lots summing
+            // exactly to service_income_total (and each component summing
+            // exactly to its own KPI).
+            serviceIncomeLots: (serviceIncomeResult.rows ?? []).map((row) => ({
+              auctionNumber: row.auction_number,
+              lotNumber: row.lot_number,
+              branch: row.store_name,
+              category: row.category,
+              vendor: row.vendor,
+              status: row.status,
+              approval: row.for_approval_status ?? null,
+              bidAmount: Number(row.bid_amount ?? 0),
+              buyersPremiumPct: Number(row.buyers_premium_pct ?? 0),
+              buyersPremiumIncome: Number(row.buyers_premium_income ?? 0),
+              commissionPct: Number(row.commission_pct ?? 0),
+              commissionIncome: Number(row.commission_income ?? 0),
+              totalServiceIncome: Number(row.total_service_income ?? 0),
             })),
 
             // LIVE ACTIVE AUCTIONS DRILLDOWN — auction-level, not lot-level.
@@ -226,6 +273,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             settledLots: [],
             activeAuctionRows: [],
             unsoldLotRows: [],
+            serviceIncomeLots: [],
           },
           loading: false,
           error: err.message,
