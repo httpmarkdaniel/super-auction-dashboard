@@ -1,10 +1,5 @@
 import logo from "../assets/auctions-logo.png";
 
-// Real top-level item categories from ClickHouse (ranked by all-time bid
-// value), replacing what used to be a hardcoded mock list that didn't
-// match the real taxonomy at all.
-const CATEGORY_TABS = ["AUTOMOTIVE", "GENERAL MERCHANDISE", "VEHICLE", "INDUSTRIAL"];
-
 function NavItem({ label, active, onClick }) {
   return (
     <button
@@ -23,8 +18,17 @@ function NavItem({ label, active, onClick }) {
 // One dropdown instead of one nav row per category — saves 3 rows of
 // vertical space in the sidebar, reinvested into a bigger nav font size
 // elsewhere rather than every category getting its own full-width button.
-function CategoryDropdown({ active, onChange }) {
-  const isActive = CATEGORY_TABS.includes(active);
+//
+// `options` is Overview's own live categoryBreakdown category names,
+// passed down from App.jsx — not a second hardcoded list. This is the
+// exact same category taxonomy (names, spelling, capitalization, order)
+// Overview displays, so the two can never drift apart again the way the
+// old hardcoded CATEGORY_TABS array did (it read "AUTOMOTIVE, GENERAL
+// MERCHANDISE, VEHICLE, INDUSTRIAL" while the real warehouse categories
+// are "Bulk Auction, Vehicles and Automotive, Equipment and Industrial,
+// General Merchandise" — wrong names AND a missing category).
+function CategoryDropdown({ active, onChange, options }) {
+  const isActive = options.includes(active);
   return (
     <div
       className={`flex items-center gap-2 pl-3 pr-2 py-2 rounded-lg border-l-2 ${
@@ -45,7 +49,7 @@ function CategoryDropdown({ active, onChange }) {
         <option value="" disabled>
           Select category…
         </option>
-        {CATEGORY_TABS.map((c) => (
+        {options.map((c) => (
           <option key={c} value={c}>
             {c}
           </option>
@@ -66,7 +70,7 @@ function NavGroup({ label, children }) {
   );
 }
 
-export default function Sidebar({ active, onChange, onLogoClick, open, onClose }) {
+export default function Sidebar({ active, onChange, onLogoClick, open, onClose, categoryOptions = [] }) {
   const go = (value) => {
     onChange(value);
     onClose();
@@ -106,7 +110,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
         </NavGroup>
 
         <NavGroup label="Categories">
-          <CategoryDropdown active={active} onChange={go} />
+          <CategoryDropdown active={active} onChange={go} options={categoryOptions} />
         </NavGroup>
 
         <NavGroup label="Insights">
@@ -128,5 +132,3 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
     </>
   );
 }
-
-export { CATEGORY_TABS };

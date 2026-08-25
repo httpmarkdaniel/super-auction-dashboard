@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Sidebar, { CATEGORY_TABS } from "./components/Sidebar";
+import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import StoryHeader from "./components/StoryHeader";
 import StorySection from "./components/primitives/StorySection";
@@ -513,6 +513,16 @@ export default function App() {
     return buildLiveOverview(live, bidCorrectionDelta);
   }, [live, bidCorrectionDelta]);
 
+  // The Sidebar's Categories dropdown must show exactly the categories
+  // Overview itself knows about — same names, same order (categoryBreakdown
+  // already comes back ordered by bid_amount DESC from the API) — derived
+  // from this one live source rather than a second hardcoded list, so the
+  // two can never drift out of sync again.
+  const categoryOptions = useMemo(
+    () => overview.categoryBreakdown.map((c) => c.category),
+    [overview]
+  );
+
   const searchPool = useMemo(
     () =>
       overview.operationsDetail.map((o) => ({
@@ -532,6 +542,7 @@ export default function App() {
         onLogoClick={goHome}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        categoryOptions={categoryOptions}
       />
       <main className="flex-1 flex flex-col min-w-0">
         <Topbar
@@ -566,7 +577,7 @@ export default function App() {
               error={overviewError}
             />
           )}
-          {CATEGORY_TABS.includes(tab) && (
+          {categoryOptions.includes(tab) && (
             <CategoryView category={tab} store={store} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
           )}
           {tab === "Online Bidding" && <LiveAuctionView store={store} />}
