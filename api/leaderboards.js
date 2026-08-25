@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -9,7 +10,7 @@ const client = createClient({
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "" } = req.query;
+    const { from, to, store = "", category = "" } = req.query;
 
     if (!from || !to) {
       return res.status(400).json({
@@ -17,10 +18,15 @@ export default async function handler(req, res) {
       });
     }
 
+    // category is OPTIONAL and additive-only, same convention as
+    // api/overview.js: queries that don't reference {category:String} in
+    // their SQL simply ignore it, so passing it through the shared
+    // queryParams cannot change any existing behavior when category is ''.
     const queryParams = {
       from,
       to,
       store,
+      category,
     };
 
     // =========================================================
@@ -628,7 +634,8 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
-            any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor
+            any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -640,6 +647,14 @@ export default async function handler(req, res) {
             AND v.lot_number IS NOT NULL
 
           GROUP BY v.auction_number, v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category
+          -- (any() of a single dedup'd name), matching api/overview.js's
+          -- identical any()-based classification exactly — never filtered
+          -- on raw pre-GROUP BY rows, which could disagree with the
+          -- canonical per-lot category when a lot has multiple underlying
+          -- vendor_analysis rows with different name values.
+          HAVING ({category:String} = '' OR lot_category = {category:String})
         )
 
         SELECT
@@ -684,7 +699,8 @@ export default async function handler(req, res) {
           SELECT
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount
+            any(v.bid_amount) AS lot_bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -696,6 +712,10 @@ export default async function handler(req, res) {
             AND v.lot_number IS NOT NULL
 
           GROUP BY v.auction_number, v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category —
+          -- see settledVendorsResult's identical comment above.
+          HAVING ({category:String} = '' OR lot_category = {category:String})
         ),
 
         posting_customer AS (

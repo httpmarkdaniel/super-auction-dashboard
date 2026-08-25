@@ -75,7 +75,7 @@ function buildLiveCategoryData(live) {
     moneyFlow: [
       { stage: "Bid Amount", value: totalBidAmount, type: "total" },
       { stage: "Buyer's Premium", value: -buyersPremium, type: "deduction" },
-      { stage: "Service Fee", value: -serviceFee, type: "deduction" },
+      { stage: "Commission", value: -serviceFee, type: "deduction" },
       { stage: "Net Vendor Payable", value: netVendorPayable, type: "result" },
     ],
     operationsDetail: (lots.lots || []).map((l) => ({ ...l, status: STATUS_MAP[l.status] ?? l.status })),
@@ -160,7 +160,16 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
         </div>
       </StorySection>
 
-      <VendorPayablesBreakdown data={live.payables} scopeLabel={category} isLastSection={false} />
+      {live.payables ? (
+        <VendorPayablesBreakdown data={live.payables} scopeLabel={category} isLastSection={false} />
+      ) : (
+        <StorySection title="Vendor Payables" insight="Category-scoped vendor payables are not available yet." last={false}>
+          <div className="text-center text-muted text-[15.5px] py-8">
+            Vendor Payables by category is deferred — there is no real payables data source
+            (no /api/payables endpoint) to scope by category yet.
+          </div>
+        </StorySection>
+      )}
 
       <StorySection title="Revenue & Payout Breakdown" insight="How the total bid amount splits between buyer's premium, service fees, and what's left for the vendor.">
         <MoneyFlowWaterfall data={d.moneyFlow} rangeLabel={rangeLabel} />

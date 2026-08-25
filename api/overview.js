@@ -1,5 +1,6 @@
 import { createClient } from "@clickhouse/client";
 import { getLiveLotsSafe } from "./_liveBids.js";
+import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -68,6 +69,7 @@ const APPROVAL_PRIORITY_SQL = `
   END
 `;
 
+
 // Overview is now ClickHouse/warehouse-only by design — it must never call
 // cms.hmr.ph. The LIVE BID CORRECTION block below is kept in place (not
 // deleted) because its cms.hmr.ph plumbing (getLiveLotsSafe et al.) is
@@ -78,7 +80,7 @@ const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "", type = "summary" } = req.query;
+    const { from, to, store = "", category = "", type = "summary" } = req.query;
 
     if (type === "active-auctions") {
       const result = await client.query({
@@ -132,7 +134,12 @@ export default async function handler(req, res) {
       });
     }
 
-    const queryParams = { from, to, store };
+    // category is OPTIONAL and additive-only: every existing query below
+    // that doesn't reference {category:String} in its SQL text simply
+    // ignores this param (ClickHouse tolerates unreferenced named
+    // parameters), so passing it through the shared queryParams object
+    // cannot change any existing Overview behavior when category is ''.
+    const queryParams = { from, to, store, category };
 
     // ...rest of your existing code
 
@@ -177,7 +184,8 @@ export default async function handler(req, res) {
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
               any(v.bid_amount) AS bid_amount,
-              any(a.store_name) AS store_name
+              any(a.store_name) AS store_name,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
 
             FROM xv3.mart_auction_vendor_analysis v
 
@@ -190,6 +198,18 @@ export default async function handler(req, res) {
             GROUP BY
               v.auction_number,
               v.lot_number
+
+            -- Filtered post-aggregation on the SAME per-lot canonical
+            -- category computed above (any() of a single dedup'd name),
+            -- never on raw pre-GROUP BY rows — a lot with multiple
+            -- underlying vendor_analysis rows could otherwise match a
+            -- category filter on a row whose name differs from the lot's
+            -- own canonical any(name), silently disagreeing with
+            -- settledCategoryResult's identical any()-based classification.
+            HAVING (
+              {category:String} = ''
+              OR category = {category:String}
+            )
           )
 
           SELECT
@@ -203,6 +223,7 @@ export default async function handler(req, res) {
             sold_price,
             bid_amount,
             store_name,
+            category,
 
             if(
               status IN (
@@ -233,6 +254,7 @@ export default async function handler(req, res) {
         name: row.name,
         vendor: row.vendor,
         store_name: row.store_name,
+        category: row.category,
         // status: the REAL resolved warehouse lifecycle status (Paid,
         // Released, Outstanding, Unpaid, Unsold, Refunded, Returned) — NOT
         // the Sold/Unsold disposition. disposition is kept separately below
@@ -316,7 +338,8 @@ export default async function handler(req, res) {
               argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
               max(ifNull(v.sold_price, 0)) AS sold_price,
-              any(a.store_name) AS store_name
+              any(a.store_name) AS store_name,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
             FROM xv3.mart_auction_vendor_analysis v
 
@@ -329,6 +352,13 @@ export default async function handler(req, res) {
             GROUP BY
               v.auction_number,
               v.lot_number
+
+            -- Post-aggregation filter on the per-lot canonical
+            -- lot_category — see type=lots' identical comment.
+            HAVING (
+              {category:String} = ''
+              OR lot_category = {category:String}
+            )
           )
 
           SELECT
@@ -438,18 +468,7 @@ export default async function handler(req, res) {
               argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               any(v.bid_amount) AS bid_amount,
 
-              any(
-                CASE
-                  WHEN v.name ILIKE '%bulk%' OR v.name ILIKE '%pallet%' THEN 'Bulk Auction'
-                  WHEN v.name ILIKE '%vehicle%' OR v.name ILIKE '%motorcycle%' OR v.name ILIKE '%car%'
-                    OR v.name ILIKE '%truck%' OR v.name ILIKE '%van%' OR v.name ILIKE '%electric vehicle%'
-                    THEN 'Vehicles and Automotive'
-                  WHEN v.name ILIKE '%equipment%' OR v.name ILIKE '%industrial%' OR v.name ILIKE '%generator%'
-                    OR v.name ILIKE '%backhoe%' OR v.name ILIKE '%excavator%' OR v.name ILIKE '%construction%'
-                    THEN 'Equipment and Industrial'
-                  ELSE 'General Merchandise'
-                END
-              ) AS category
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
 
             FROM xv3.mart_auction_vendor_analysis v
 
@@ -461,6 +480,13 @@ export default async function handler(req, res) {
               AND v.lot_number IS NOT NULL
 
             GROUP BY v.auction_number, v.lot_number
+
+            -- Post-aggregation filter on the per-lot canonical category —
+            -- see type=lots' identical comment.
+            HAVING (
+              {category:String} = ''
+              OR category = {category:String}
+            )
           ),
 
           posting_customer AS (
@@ -595,18 +621,7 @@ export default async function handler(req, res) {
               any(v.buyers_premium) AS buyers_premium_pct,
               any(v.commission) AS commission_pct,
 
-              any(
-                CASE
-                  WHEN v.name ILIKE '%bulk%' OR v.name ILIKE '%pallet%' THEN 'Bulk Auction'
-                  WHEN v.name ILIKE '%vehicle%' OR v.name ILIKE '%motorcycle%' OR v.name ILIKE '%car%'
-                    OR v.name ILIKE '%truck%' OR v.name ILIKE '%van%' OR v.name ILIKE '%electric vehicle%'
-                    THEN 'Vehicles and Automotive'
-                  WHEN v.name ILIKE '%equipment%' OR v.name ILIKE '%industrial%' OR v.name ILIKE '%generator%'
-                    OR v.name ILIKE '%backhoe%' OR v.name ILIKE '%excavator%' OR v.name ILIKE '%construction%'
-                    THEN 'Equipment and Industrial'
-                  ELSE 'General Merchandise'
-                END
-              ) AS category
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
 
             FROM xv3.mart_auction_vendor_analysis v
 
@@ -618,6 +633,13 @@ export default async function handler(req, res) {
               AND v.lot_number IS NOT NULL
 
             GROUP BY v.auction_number, v.lot_number
+
+            -- Post-aggregation filter on the per-lot canonical category —
+            -- see type=lots' identical comment.
+            HAVING (
+              {category:String} = ''
+              OR category = {category:String}
+            )
           )
 
           SELECT
@@ -727,7 +749,8 @@ export default async function handler(req, res) {
               argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
               any(v.bid_amount) AS bid_amount,
               max(ifNull(v.reserved_price, 0)) AS reserved_price,
-              any(a.store_name) AS store_name
+              any(a.store_name) AS store_name,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
             FROM xv3.mart_auction_vendor_analysis v
 
@@ -740,6 +763,13 @@ export default async function handler(req, res) {
             GROUP BY
               v.auction_number,
               v.lot_number
+
+            -- Post-aggregation filter on the per-lot canonical
+            -- lot_category — see type=lots' identical comment.
+            HAVING (
+              {category:String} = ''
+              OR lot_category = {category:String}
+            )
           )
 
           SELECT
@@ -978,7 +1008,8 @@ export default async function handler(req, res) {
           SELECT
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount
+            any(v.bid_amount) AS lot_bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -992,10 +1023,20 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category
+          -- (any() of a single dedup'd name) — never on raw pre-GROUP BY
+          -- rows, so this always agrees with settledCategoryResult's
+          -- identical any()-based classification. See type=lots' comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
         )
 
         SELECT
-          sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount
+          sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount,
+          countDistinct(auction_number) AS settled_auction_count
 
         FROM settled_lots
       `,
@@ -1005,6 +1046,14 @@ export default async function handler(req, res) {
 
     const settledTotalRows = await settledTotalResult.json();
     const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
+    // "Total Auctions" for CategoryView: no existing Overview definition
+    // scopes "auction count" by date range + category (Active Auctions is
+    // a "right now" concept, unrelated to either) — this is a natural
+    // derived count from the SAME settled population as Total Bid Amount
+    // above, not a fabricated new business metric, but it is a judgment
+    // call rather than an already-validated definition. Flagged in the
+    // implementation report.
+    const settledAuctionCount = Number(settledTotalRows[0]?.settled_auction_count ?? 0);
 
     // NOTE: Today's Bid Amount no longer uses a settled (Paid/Released)
     // definition — see todayBidResult above (warehouse-only, latest bid
@@ -1054,7 +1103,9 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
             any(v.sold_price) AS lot_sold_price,
-            any(v.commission) AS lot_commission_pct
+            any(v.commission) AS lot_commission_pct,
+            max(ifNull(v.reserved_price, 0)) AS lot_reserved_price,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1068,11 +1119,38 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category —
+          -- see type=lots' identical comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
         )
 
         SELECT
           sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS service_income_buyers_premium,
-          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission,
+          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount_for_rates,
+
+          -- Reserve Price Performance — CategoryView only, computed here to
+          -- reuse the exact same settled_lots population rather than a
+          -- separate query. A lot only has a meaningful reserve comparison
+          -- when reserved_price > 0 (many settled lots never had a reserve
+          -- set at all) — lots with reserved_price = 0 are excluded from
+          -- this specific classification entirely, never treated as "at or
+          -- below" a reserve that doesn't exist.
+          countIf(lot_reserved_price > 0 AND lot_bid_amount <= lot_reserved_price) AS sold_at_or_below_reserve,
+          countIf(lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS sold_above_reserve,
+
+          -- Average premium over reserve, for the sold-above-reserve subset
+          -- only: SUM(excess) / SUM(reserve), a value-weighted ratio — NOT
+          -- a naive average of each lot's own percentage, which would let a
+          -- single tiny-reserve lot with a huge % skew the result. 0 when
+          -- no lot in scope sold above its reserve (avoids a division by
+          -- zero producing a meaningless percentage).
+          sumIf(lot_bid_amount - lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_excess,
+          sumIf(lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_base
 
         FROM settled_lots
       `,
@@ -1083,6 +1161,25 @@ export default async function handler(req, res) {
     const settledServiceIncomeRows = await settledServiceIncomeResult.json();
     const serviceIncomeBuyersPremium = Number(settledServiceIncomeRows[0]?.service_income_buyers_premium ?? 0);
     const serviceIncomeCommission = Number(settledServiceIncomeRows[0]?.service_income_commission ?? 0);
+
+    // Weighted-average rates for CategoryView's Commission & Fees section:
+    // SUM(income component) / SUM(bid_amount) — a value-weighted blended
+    // rate, deliberately NOT an AVG() of each lot's own buyers_premium/
+    // commission percentage field. A naive per-lot average would weight a
+    // ₱200 lot the same as a ₱200,000 lot, which misrepresents "what % of
+    // this category's real money became premium/commission." 0 when there
+    // is no settled bid amount in scope (avoids a division by zero).
+    const settledBidAmountForRates = Number(settledServiceIncomeRows[0]?.settled_bid_amount_for_rates ?? 0);
+    const avgBuyersPremiumPct =
+      settledBidAmountForRates > 0 ? (serviceIncomeBuyersPremium / settledBidAmountForRates) * 100 : 0;
+    const avgCommissionPct =
+      settledBidAmountForRates > 0 ? (serviceIncomeCommission / settledBidAmountForRates) * 100 : 0;
+
+    const soldAtOrBelowReserve = Number(settledServiceIncomeRows[0]?.sold_at_or_below_reserve ?? 0);
+    const soldAboveReserve = Number(settledServiceIncomeRows[0]?.sold_above_reserve ?? 0);
+    const aboveReserveExcess = Number(settledServiceIncomeRows[0]?.above_reserve_excess ?? 0);
+    const aboveReserveBase = Number(settledServiceIncomeRows[0]?.above_reserve_base ?? 0);
+    const avgPremiumOverReservePct = aboveReserveBase > 0 ? (aboveReserveExcess / aboveReserveBase) * 100 : 0;
 
     // ---------------------------------------------------------
     // FOR APPROVAL
@@ -1116,7 +1213,8 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
-            any(v.bid_amount) AS bid_amount
+            any(v.bid_amount) AS bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1129,6 +1227,13 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category —
+          -- see type=lots' identical comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
         )
 
         SELECT
@@ -1238,31 +1343,7 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
 
-            any(
-              CASE
-                WHEN v.name ILIKE '%bulk%'
-                  OR v.name ILIKE '%pallet%'
-                  THEN 'Bulk Auction'
-
-                WHEN v.name ILIKE '%vehicle%'
-                  OR v.name ILIKE '%motorcycle%'
-                  OR v.name ILIKE '%car%'
-                  OR v.name ILIKE '%truck%'
-                  OR v.name ILIKE '%van%'
-                  OR v.name ILIKE '%electric vehicle%'
-                  THEN 'Vehicles and Automotive'
-
-                WHEN v.name ILIKE '%equipment%'
-                  OR v.name ILIKE '%industrial%'
-                  OR v.name ILIKE '%generator%'
-                  OR v.name ILIKE '%backhoe%'
-                  OR v.name ILIKE '%excavator%'
-                  OR v.name ILIKE '%construction%'
-                  THEN 'Equipment and Industrial'
-
-                ELSE 'General Merchandise'
-              END
-            ) AS category
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1537,7 +1618,8 @@ export default async function handler(req, res) {
             v.auction_number,
             v.lot_number,
             argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
-            max(ifNull(v.reserved_price, 0)) AS reserved_price
+            max(ifNull(v.reserved_price, 0)) AS reserved_price,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1550,6 +1632,13 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category —
+          -- see type=lots' identical comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
         )
 
         SELECT
@@ -2014,6 +2103,42 @@ export default async function handler(req, res) {
       service_income_buyers_premium: serviceIncomeBuyersPremium,
       service_income_commission: serviceIncomeCommission,
       service_income_total: serviceIncomeBuyersPremium + serviceIncomeCommission,
+
+      // CategoryView-only fields below (harmless when category is '' —
+      // nothing in the main Overview UI reads them). Same settled
+      // Paid/Released population as Total Bid Amount/Service Income above.
+      //
+      // buyers_premium_amount/service_fee_amount: peso totals for
+      // CategoryView's Money Flow waterfall — service_fee_amount here is
+      // actually Commission Income (bid_amount * commission / 100), kept
+      // under this existing field name so CategoryView.jsx's read doesn't
+      // need to change; only its displayed label does (see that file).
+      buyers_premium_amount: serviceIncomeBuyersPremium,
+      service_fee_amount: serviceIncomeCommission,
+
+      // avg_buyers_premium_pct/avg_commission_pct: value-weighted blended
+      // rates (SUM(income component) / SUM(bid_amount) * 100) — see the
+      // SERVICE INCOME (SETTLED) query comments above for why this is
+      // deliberately NOT a naive AVG() of each lot's own rate field.
+      avg_buyers_premium_pct: avgBuyersPremiumPct,
+      avg_commission_pct: avgCommissionPct,
+
+      // Reserve Price Performance: settled lots with reserved_price > 0
+      // only (a lot with no reserve set has nothing to compare against —
+      // never classified as "at/below" a reserve that doesn't exist).
+      // avg_premium_over_reserve_pct is a value-weighted ratio over the
+      // sold-above-reserve subset (SUM(excess)/SUM(reserve)), not a naive
+      // per-lot average — see the query comments above.
+      sold_at_or_below: soldAtOrBelowReserve,
+      sold_above: soldAboveReserve,
+      avg_premium_over_reserve_pct: avgPremiumOverReservePct,
+
+      // "Total Auctions" for CategoryView — a derived distinct-auction
+      // count over the same settled population as Total Bid Amount, not an
+      // already-validated Overview definition (Active Auctions is a
+      // "right now" concept unrelated to date range/category) — see the
+      // TOTAL BID AMOUNT (SETTLED) query comment above.
+      total_auctions: settledAuctionCount,
 
       // For Approval: lots whose resolved for_approval_status is exactly
       // 'For Approval', independent of lifecycle status (Unsold/Outstanding/
