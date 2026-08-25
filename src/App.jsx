@@ -96,6 +96,7 @@ const EMPTY_OVERVIEW = {
   activeAuctionRows: [],
   unsoldLotRows: [],
   serviceIncomeLots: [],
+  forApprovalLots: [],
   moneyFlow: [
     { stage: "Bid Amount", value: 0, type: "total" },
     { stage: "Commission", value: 0, type: "deduction" },
@@ -119,6 +120,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     activeAuctionRows,
     unsoldLotRows,
     serviceIncomeLots,
+    forApprovalLots,
   } = live;
   const totalLots = Number(kpis.total_lots) || 0;
   const totalPaid = Number(kpis.total_paid) || 0;
@@ -263,8 +265,14 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       serviceIncomeDeltaPct: undefined,
       lotsSold: endedLotsSold,
       lotsListed: endedLotsListed,
-      pendingApprovalCount: Number(kpis.pending_payment_count) || 0,
-      pendingApprovalValue: Number(kpis.pending_payment_value) || 0,
+      // For Approval — real warehouse-backed (for_approval_status =
+      // 'For Approval', independent of lifecycle status), replacing the
+      // old mock-only pending_payment_count/pending_payment_value. Kept
+      // under the existing pendingApprovalCount/Value prop names to avoid
+      // an unnecessary UI-interface rename; the API field names
+      // (for_approval_lots/for_approval_bid_amount) are the source of truth.
+      pendingApprovalCount: Number(kpis.for_approval_lots) || 0,
+      pendingApprovalValue: Number(kpis.for_approval_bid_amount) || 0,
     },
     unsoldLots: {
       count: Number(kpis.unsold_count) || 0,
@@ -337,6 +345,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // to heroKPIs.serviceIncome (and each component to its own KPI) for
     // the same range/store.
     serviceIncomeLots: serviceIncomeLots || [],
+    // Lots behind For Approval (for_approval_status='For Approval',
+    // independent of lifecycle status) — count matches
+    // heroKPIs.pendingApprovalCount, sum(bidAmount) matches
+    // heroKPIs.pendingApprovalValue, for the same range/store.
+    forApprovalLots: forApprovalLots || [],
     moneyFlow,
   };
 }

@@ -4,6 +4,7 @@ import Modal from "./primitives/Modal";
 import BranchTallyModal from "./primitives/BranchTallyModal";
 import ActiveAuctionsModal from "./primitives/ActiveAuctionsModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
+import ForApprovalModal from "./primitives/ForApprovalModal";
 import OperationsTable from "./OperationsTable";
 import { formatPeso } from "../utils/format";
 
@@ -33,7 +34,7 @@ const METHODOLOGY = {
   lotsSoldListed:
     "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the sold lots.",
   forApproval:
-    "Lots that won at auction but haven't cleared payment or vendor sign-off yet (status Unpaid or Outstanding), within the selected date range. Click to see them.",
+    "Count: lots whose resolved approval status is \"For Approval\" (independent of lifecycle status — Unsold, Outstanding, Unpaid, Paid, Released, Returned, or Refunded lots can all appear), within the selected date range. Value: sum of bid amount for those lots — a lot with no bid yet legitimately contributes ₱0. Click to see them.",
   unsoldLots:
     "Lots created in the selected date range that are still sitting Unsold as of today. Value is the sum of reserve price across these lots. Click to see them.",
   withReservePrice:
@@ -62,6 +63,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
     activeAuctionRows,
     unsoldLotRows,
     serviceIncomeLots,
+    forApprovalLots,
   } = overview;
   const trend = hourlyTrend.map((h) => h.bidAmount);
   const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
@@ -183,13 +185,11 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         data={unsoldWithReserveLots}
         initialTab="All"
       />
-      <LotDrilldownModal
+      <ForApprovalModal
         open={drilldown === "forApproval"}
         onClose={() => setDrilldown(null)}
-        title="For Approval · Lot Detail"
-        subtitle={`${rangeLabel} · up to 200 most recent lot rows`}
-        data={operationsDetail}
-        initialTab="For Approval"
+        rows={forApprovalLots}
+        rangeLabel={rangeLabel}
       />
       <ServiceIncomeModal
         open={drilldown === "serviceIncome"}

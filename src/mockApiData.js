@@ -17,8 +17,10 @@ export const MOCK_OVERVIEW = {
   total_buyers_premium: 2_214_000,
   total_service_fee: 923_000,
   ended_lots_listed: 2890,
-  pending_payment_count: 214,
-  pending_payment_value: 1_120_000,
+  // Error/loading fallback only — real For Approval comes from
+  // api/overview.js's for_approval_* fields (see useLiveOverview.js).
+  for_approval_lots: 214,
+  for_approval_bid_amount: 1_120_000,
   vendor_paid_count: 2196,
   total_commission: 923_000,
   // Error/loading fallback only — real Service Income comes from

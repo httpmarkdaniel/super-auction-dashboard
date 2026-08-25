@@ -682,6 +682,118 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
+    // FOR APPROVAL DRILL-DOWN
+    //
+    // Population: lots whose deterministically-resolved for_approval_status
+    // (argMax with APPROVAL_PRIORITY_SQL, same dedup already validated
+    // elsewhere) is exactly 'For Approval' — completely independent of
+    // lifecycle status. NOT restricted to any status: Unsold, Outstanding,
+    // Unpaid, Paid, Released, Returned, and Refunded lots can all
+    // legitimately appear here, since approval and status are separate
+    // dimensions. Same auction_number+lot_number dedup and status
+    // resolution as the "lots" drilldown above — just filtered down.
+    //
+    // Bid Amount is the KPI's monetary value; Reserve Price is exposed as
+    // a separate informational column only, never blended into Bid Amount.
+    // A lot with bid_amount = 0 (e.g. still Unsold) is a valid, correct
+    // ₱0 contribution — never backfilled from reserved_price.
+    // =========================================================
+    if (type === "for-approval") {
+      const result = await client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT
+              auction_number,
+              store_name
+
+            FROM xv3.mart_auction_productivity_report
+
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+
+              AND (
+                {store:String} = ''
+                OR store_name = {store:String}
+              )
+          ),
+
+          lots AS (
+            SELECT
+              v.auction_number,
+              v.lot_number,
+              any(v.name) AS name,
+              any(v.vendor) AS vendor,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
+              any(v.bid_amount) AS bid_amount,
+              max(ifNull(v.reserved_price, 0)) AS reserved_price,
+              any(a.store_name) AS store_name
+
+            FROM xv3.mart_auction_vendor_analysis v
+
+            INNER JOIN selected_auctions a
+              ON v.auction_number = a.auction_number
+
+            WHERE v.auction_number IS NOT NULL
+              AND v.lot_number IS NOT NULL
+
+            GROUP BY
+              v.auction_number,
+              v.lot_number
+          )
+
+          SELECT
+            auction_number,
+            lot_number,
+            name,
+            vendor,
+            status,
+            for_approval_status,
+            ifNull(bid_amount, 0) AS bid_amount,
+            reserved_price,
+            store_name
+
+          FROM lots
+
+          WHERE for_approval_status = 'For Approval'
+
+          ORDER BY
+            auction_number,
+            lot_number
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      });
+
+      const rows = await result.json();
+
+      const mappedRows = rows.map((row) => ({
+        auction_number: row.auction_number,
+        lot_number: row.lot_number,
+        name: row.name,
+        vendor: row.vendor,
+        store_name: row.store_name,
+        status: row.status,
+        for_approval_status: row.for_approval_status,
+        bid_amount: Number(row.bid_amount ?? 0),
+        reserved_price: Number(row.reserved_price ?? 0),
+      }));
+
+      const forApprovalBidAmount = mappedRows.reduce((sum, row) => sum + row.bid_amount, 0);
+
+      return res.status(200).json({
+        type: "for-approval",
+
+        summary: {
+          count: mappedRows.length,
+          for_approval_bid_amount: forApprovalBidAmount,
+        },
+
+        rows: mappedRows,
+      });
+    }
+
+    // =========================================================
     // SUMMARY
     // =========================================================
 
@@ -971,6 +1083,69 @@ export default async function handler(req, res) {
     const settledServiceIncomeRows = await settledServiceIncomeResult.json();
     const serviceIncomeBuyersPremium = Number(settledServiceIncomeRows[0]?.service_income_buyers_premium ?? 0);
     const serviceIncomeCommission = Number(settledServiceIncomeRows[0]?.service_income_commission ?? 0);
+
+    // ---------------------------------------------------------
+    // FOR APPROVAL
+    //
+    // Count + Bid Amount for the same population as the "for-approval"
+    // drilldown above — see that block's comment for the full population
+    // definition (for_approval_status = 'For Approval', independent of
+    // lifecycle status, no restriction to Paid/Released). This is a
+    // scalar-aggregate version of the identical lots CTE, so
+    // count(rows) == for_approval_lots and sum(rows.bid_amount) ==
+    // for_approval_bid_amount are structurally guaranteed for the same
+    // from/to/store.
+    // ---------------------------------------------------------
+    const forApprovalResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            argMax(v.for_approval_status, ${APPROVAL_PRIORITY_SQL}) AS for_approval_status,
+            any(v.bid_amount) AS bid_amount
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+        )
+
+        SELECT
+          count() AS for_approval_lots,
+          sum(ifNull(bid_amount, 0)) AS for_approval_bid_amount
+
+        FROM lots
+
+        WHERE for_approval_status = 'For Approval'
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const forApprovalRows = await forApprovalResult.json();
+    const forApprovalLots = Number(forApprovalRows[0]?.for_approval_lots ?? 0);
+    const forApprovalBidAmount = Number(forApprovalRows[0]?.for_approval_bid_amount ?? 0);
 
     // ---------------------------------------------------------
     // BID VALUE BY BRANCH (SETTLED)
@@ -1839,6 +2014,17 @@ export default async function handler(req, res) {
       service_income_buyers_premium: serviceIncomeBuyersPremium,
       service_income_commission: serviceIncomeCommission,
       service_income_total: serviceIncomeBuyersPremium + serviceIncomeCommission,
+
+      // For Approval: lots whose resolved for_approval_status is exactly
+      // 'For Approval', independent of lifecycle status (Unsold/Outstanding/
+      // Unpaid/Paid/Released/Returned/Refunded can all appear). Value is
+      // SUM(bid_amount) only — never backfilled from reserved_price; a lot
+      // with bid_amount = 0 (e.g. still Unsold) legitimately contributes
+      // ₱0. This replaces the old mock-only pending_payment_count/
+      // pending_payment_value definition (see METHODOLOGY.forApproval in
+      // HeroKPIs.jsx for the prior "pending payment" framing being retired).
+      for_approval_lots: forApprovalLots,
+      for_approval_bid_amount: forApprovalBidAmount,
 
       // The previous "Total Bid Amount" definition — current/standing bid
       // value across active + recently-bid lots, live-corrected against

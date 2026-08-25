@@ -41,6 +41,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       activeAuctionRows: [],
       unsoldLotRows: [],
       serviceIncomeLots: [],
+      forApprovalLots: [],
     },
     loading: true,
     error: null,
@@ -61,6 +62,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           unsoldLotsResult,
           activeAuctionsResult,
           serviceIncomeResult,
+          forApprovalResult,
         ] = await Promise.all([
           fetchJson("/api/overview", { from, to, store }),
           fetchJson("/api/leaderboards", { from, to, store }),
@@ -83,6 +85,10 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           // SERVICE INCOME DRILLDOWN — the exact settled lots behind
           // Service Income, same population as Total Bid Amount above.
           fetchJson("/api/overview", { from, to, store, type: "service-income" }),
+
+          // FOR APPROVAL DRILLDOWN — lots resolved for_approval_status =
+          // 'For Approval', independent of lifecycle status.
+          fetchJson("/api/overview", { from, to, store, type: "for-approval" }),
         ]);
 
         if (cancelled) return;
@@ -107,6 +113,12 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               service_income_buyers_premium: liveOverview.service_income_buyers_premium ?? 0,
               service_income_commission: liveOverview.service_income_commission ?? 0,
               service_income_total: liveOverview.service_income_total ?? 0,
+
+              // LIVE FOR APPROVAL — lots resolved for_approval_status =
+              // 'For Approval', independent of lifecycle status. Replaces
+              // the mock pending_payment_count/pending_payment_value.
+              for_approval_lots: liveOverview.for_approval_lots ?? 0,
+              for_approval_bid_amount: liveOverview.for_approval_bid_amount ?? 0,
 
               // LIVE BRANCH BREAKDOWN
               branches: liveOverview.branches ?? [],
@@ -242,6 +254,21 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               totalServiceIncome: Number(row.total_service_income ?? 0),
             })),
 
+            // LIVE FOR APPROVAL DRILLDOWN — lots summing exactly to
+            // for_approval_lots (count) / for_approval_bid_amount (sum).
+            // Not restricted by lifecycle status — status is shown as-is.
+            forApprovalLots: (forApprovalResult.rows ?? []).map((row) => ({
+              auctionNumber: row.auction_number,
+              lotNumber: row.lot_number,
+              item: row.name,
+              branch: row.store_name,
+              vendor: row.vendor,
+              status: row.status,
+              approval: row.for_approval_status ?? null,
+              bidAmount: Number(row.bid_amount ?? 0),
+              reservedPrice: Number(row.reserved_price ?? 0),
+            })),
+
             // LIVE ACTIVE AUCTIONS DRILLDOWN — auction-level, not lot-level.
             activeAuctionRows: (activeAuctionsResult.rows ?? []).map((row) => ({
               auctionNumber: row.auction_number,
@@ -274,6 +301,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
             activeAuctionRows: [],
             unsoldLotRows: [],
             serviceIncomeLots: [],
+            forApprovalLots: [],
           },
           loading: false,
           error: err.message,
