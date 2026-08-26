@@ -107,13 +107,8 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose, 
             active={active === "Upcoming Auctions"}
             onClick={() => go("Upcoming Auctions")}
           />
-        </NavGroup>
-
-        <NavGroup label="Categories">
+          <NavItem label="Stores" active={active === "Stores"} onClick={() => go("Stores")} />
           <CategoryDropdown active={active} onChange={go} options={categoryOptions} />
-        </NavGroup>
-
-        <NavGroup label="Insights">
           <NavItem label="Vendor Payables" active={active === "Vendor Payables"} onClick={() => go("Vendor Payables")} />
           <NavItem label="Full Auction Detail" active={active === "Full Auction Detail"} onClick={() => go("Full Auction Detail")} />
           <NavItem label="Bidding Pace" active={active === "Bidding Pace"} onClick={() => go("Bidding Pace")} />
