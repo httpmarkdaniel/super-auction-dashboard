@@ -620,7 +620,7 @@ export default function App() {
             <FullAuctionDetailView store={store} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
           )}
           {tab === "Bidding Pace" && (
-            <BiddingPaceView store={store} overview={overview} rangeLabel={rangeLabel} isLive={Boolean(live)} />
+            <BiddingPaceView store={store} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
           )}
           {tab === "Revenue Breakdown" && (
             <RevenueBreakdownView store={store} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
