@@ -1,19 +1,11 @@
-// MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
-import { useState } from "react";
-import { MOCK_PAYABLES } from "./mockApiData";
-
-export function useVendorPayables(store, refreshNonce = 0) {
-  const [state] = useState({ data: MOCK_PAYABLES, loading: false, error: null });
-  return state;
-}
-
-/* Original live implementation:
 import { useEffect, useState } from "react";
 import { ALL_STORES } from "./mockData";
 
 // Vendor payables is a running balance (a stock, not a per-period flow), so
 // this deliberately ignores the date-range picker — same reasoning as
-// api/payables.js itself. Store filter still applies.
+// api/payables.js itself. Store filter still applies. No category param:
+// category allocation isn't mathematically safe for this table (see
+// api/payables.js and VendorPayablesBreakdown.jsx for the evidence).
 export function useVendorPayables(store, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
@@ -41,4 +33,3 @@ export function useVendorPayables(store, refreshNonce = 0) {
 
   return state;
 }
-*/

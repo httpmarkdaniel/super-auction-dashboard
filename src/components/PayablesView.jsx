@@ -18,21 +18,26 @@ export default function PayablesView({ store, refreshNonce }) {
     return <div className="text-center text-ink text-[15.5px] py-12">Loading vendor payables…</div>;
   }
 
-  const totalBacklog = Number(live.total_backlog) || 0;
+  const paidAmount = Number(live.paid_amount) || 0;
+  const outstandingAmount = Number(live.outstanding_amount) || 0;
   const pendingCount = Number(live.pending_count) || 0;
-  const avgAgeDays = Math.round(Number(live.avg_age_days) || 0);
 
   const headline =
     pendingCount > 0
-      ? `${formatPeso(totalBacklog)} owed to vendors ${scopeAdverb(store)} across ${pendingCount} pending payable${
+      ? `${formatPeso(outstandingAmount)} still owed to vendors ${scopeAdverb(store)} across ${pendingCount} outstanding payable${
           pendingCount === 1 ? "" : "s"
-        }, averaging ${avgAgeDays} day${avgAgeDays === 1 ? "" : "s"} outstanding.`
-      : `No outstanding vendor payables ${scopeAdverb(store)} right now.`;
+        }, with ${formatPeso(paidAmount)} already paid or remitted.`
+      : `No outstanding vendor payables ${scopeAdverb(store)} right now — ${formatPeso(paidAmount)} paid or remitted.`;
 
   return (
     <div>
       <div className="mb-8">
-        <StoryHeader eyebrow={`${store} · Vendor Payables · Live`} headline={headline} amount={formatPeso(totalBacklog)} />
+        <StoryHeader
+          eyebrow={`${store} · Vendor Payables · Live`}
+          headline={headline}
+          amount={formatPeso(outstandingAmount)}
+          amountLabel="Outstanding Payables"
+        />
       </div>
 
       <VendorPayablesBreakdown data={live} scopeLabel={store} />
