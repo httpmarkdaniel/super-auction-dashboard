@@ -18,13 +18,13 @@ function fetchJson(path, params = {}) {
   });
 }
 
-// Real category-scoped data for CategoryView — reuses /api/overview and
-// /api/leaderboards (same routes the main Overview tab calls, see
-// useLiveOverview.js) with an added `category` param, plus
-// /api/overview?type=lots for the Full Auction Detail drilldown. No
-// /api/payables call: that endpoint doesn't exist, so Vendor Payables is
-// surfaced as `payables: null` — see CategoryView.jsx's explicit
-// unavailable/deferred rendering for that field, never a mock fallback.
+// Real category-scoped data for CategoryView — reuses /api/overview (same
+// route the main Overview tab calls, see useLiveOverview.js) with an added
+// `category` param. CategoryView now renders only the top summary (story +
+// Sell-Through/Lots Sold/Avg Bid/Total Auctions), so this only needs the
+// single summary call — no /api/leaderboards (Top Vendors/Bidders) or
+// /api/overview?type=lots (Full Auction Detail) fetch, since neither backs
+// anything CategoryView still renders.
 export function useCategoryOverview(category, store, dateRangeKey, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
@@ -39,11 +39,7 @@ export function useCategoryOverview(category, store, dateRangeKey, refreshNonce 
         const storeParam = store === ALL_STORES ? undefined : store;
         const params = { category, from, to, store: storeParam };
 
-        const [overviewResult, leaderboardsResult, lotsResult] = await Promise.all([
-          fetchJson("/api/overview", params),
-          fetchJson("/api/leaderboards", params),
-          fetchJson("/api/overview", { ...params, type: "lots" }),
-        ]);
+        const overviewResult = await fetchJson("/api/overview", params);
 
         if (cancelled) return;
 
@@ -52,63 +48,14 @@ export function useCategoryOverview(category, store, dateRangeKey, refreshNonce 
             // Real category-scoped KPIs. A few fields are renamed to match
             // what CategoryView.jsx's buildLiveCategoryData already reads —
             // the same remap useLiveOverview.js applies for the main
-            // Overview tab (listed_lots -> ended_lots_listed, etc.). Every
-            // other field (total_bid_amount, buyers_premium_amount,
-            // service_fee_amount, avg_buyers_premium_pct, avg_commission_pct,
-            // sold_at_or_below, sold_above, avg_premium_over_reserve_pct,
-            // total_auctions, unsold_value) already matches the raw
+            // Overview tab (listed_lots -> ended_lots_listed, etc.).
+            // total_bid_amount and total_auctions already match the raw
             // api/overview.js response field name directly.
             overview: {
               ...overviewResult,
               ended_lots_listed: overviewResult.listed_lots ?? 0,
               ended_lots_sold: overviewResult.sold_lots ?? 0,
               unsold_count: overviewResult.unsold_lots ?? 0,
-            },
-
-            // api/leaderboards.js names these settled_bid_amount/
-            // settled_lots/settled_wins (see App.jsx's identical remap for
-            // the main Overview's Top Vendors/Bidders) — renamed here to
-            // the bid_amount/lots/wins CategoryView.jsx already reads.
-            leaderboards: {
-              vendors: (leaderboardsResult.vendors ?? []).map((v) => ({
-                vendor: v.vendor,
-                bid_amount: Number(v.settled_bid_amount) || 0,
-                lots: Number(v.settled_lots) || 0,
-              })),
-              bidders: (leaderboardsResult.bidders ?? []).map((b) => ({
-                bidder_name: b.bidder_name,
-                bid_amount: Number(b.settled_bid_amount) || 0,
-                wins: Number(b.settled_wins) || 0,
-              })),
-            },
-
-            // No real Vendor Payables source exists (/api/payables doesn't
-            // exist) — explicitly null, never mock data standing in as if
-            // real. See CategoryView.jsx's deferred/unavailable rendering.
-            payables: null,
-
-            // Same row shape useLiveOverview.js builds from the identical
-            // /api/overview?type=lots endpoint, so AuctionSummaryTable
-            // (fed via CategoryView's operationsDetail) sees the fields it
-            // expects (auctionNumber, branch, category, totalBidAmount,
-            // reservedPrice, etc.).
-            lots: {
-              lots: (lotsResult.rows ?? []).map((row) => ({
-                lotNumber: row.lot_number,
-                item: row.name,
-                vendor: row.vendor ?? "—",
-                category: row.category ?? "—",
-                status: row.status,
-                disposition: row.disposition,
-                soldPrice: Number(row.sold_price ?? 0),
-                approval: row.for_approval_status ?? null,
-                totalBidAmount: Number(row.bid_amount ?? 0),
-                buyersPremium: 0,
-                serviceFee: 0,
-                reservedPrice: Number(row.reserved_price ?? 0),
-                branch: row.store_name ?? "—",
-                auctionNumber: row.auction_number,
-              })),
             },
           },
           loading: false,
