@@ -465,6 +465,11 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
       </Modal>
 
       <BidderBreakdownModal
+        // Remounts (and so resets each card's expand/collapse state to
+        // collapsed) whenever a different auction's Total Bidders cell is
+        // clicked — without this, expanding a card for one auction would
+        // leak into the next auction's modal still showing expanded.
+        key={bidderModalAuction ?? "none"}
         open={bidderModalAuction != null}
         onClose={() => setBidderModalAuction(null)}
         auctionNumber={bidderModalAuction}
