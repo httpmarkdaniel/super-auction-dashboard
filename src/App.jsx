@@ -623,7 +623,7 @@ export default function App() {
             <BiddingPaceView store={store} overview={overview} rangeLabel={rangeLabel} isLive={Boolean(live)} />
           )}
           {tab === "Revenue Breakdown" && (
-            <RevenueBreakdownView store={store} overview={overview} rangeLabel={rangeLabel} isLive={Boolean(live)} />
+            <RevenueBreakdownView store={store} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
           )}
           {tab === "Export" && <ExportView store={store} overview={overview} rangeLabel={rangeLabel} />}
 
