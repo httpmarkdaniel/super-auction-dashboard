@@ -7,7 +7,7 @@ import { useVendorPayables } from "../useVendorPayables";
 export default function PayablesView({ store, refreshNonce }) {
   const { data: live, loading, error } = useVendorPayables(store, refreshNonce);
 
-  if (error) {
+  if (error && !live) {
     return (
       <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
         Couldn't load vendor payables: {error}
@@ -31,6 +31,12 @@ export default function PayablesView({ store, refreshNonce }) {
 
   return (
     <div>
+      {error && (
+        <div className="mb-4 px-4 py-2 rounded-lg bg-critical/10 text-toneRedText text-[13.5px]">
+          Couldn't refresh vendor payables: {error} — showing last loaded data.
+        </div>
+      )}
+
       <div className="mb-8">
         <StoryHeader
           eyebrow={`${store} · Vendor Payables · Live`}
