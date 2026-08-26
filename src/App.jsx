@@ -29,6 +29,7 @@ import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection, useMarqueeSummary } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange } from "./utils/dateRange";
+import { HOUR_LABELS, mapHourlyRows } from "./utils/hourlyBidderDetail";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -41,12 +42,6 @@ const AUTO_REFRESH_MS = 30000;
 function formatUpdatedAt(date) {
   return date.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
 }
-
-const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => {
-  const period = h < 12 ? "AM" : "PM";
-  const displayHour = h % 12 === 0 ? 12 : h % 12;
-  return `${displayHour}${period}`;
-});
 
 // Zeroed placeholder shown only before the first real fetch resolves (or if
 // it fails) — an honest "nothing yet" shape, never a fabricated number.
@@ -77,6 +72,7 @@ const EMPTY_OVERVIEW = {
   auctionNumbersInRange: new Set(),
   channelBreakdown: [],
   hourlyTrend: [],
+  hourlyDetail: {},
   bidderComposition: { newBidders: 0, returningBidders: 0, newBiddersBidAmount: 0, returningBiddersBidAmount: 0, newBidderTrend: [], byAuction: [] },
   topVendors: [],
   topBidders: [],
@@ -168,9 +164,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 
   // Pace by hour-of-day — whatever hours actually have activity in this
   // range, in order; null bid_amount (rows exist but none carry a value)
-  // reads as 0 rather than a gap.
+  // reads as 0 rather than a gap. The chart line itself still comes from
+  // kpis.hourly (api/overview.js's own hourlyResult, unchanged) — only the
+  // hover tooltip's Participating/Winning breakdown comes from the shared
+  // hourlyBidderRows (api/bidding-pace.js), keyed by the same hour label.
   const hourlyRows = (kpis.hourly || []).filter((h) => h.hour != null);
   const hourlyTrend = hourlyRows.map((h) => ({ hour: HOUR_LABELS[Number(h.hour)], bidAmount: Number(h.bid_amount) || 0 }));
+  const { hourlyDetail } = mapHourlyRows(kpis.hourlyBidderRows);
 
   // New vs returning bidders — an honest zero (no bidder activity in this
   // scope) is a real, valid state, not a reason to fall back to mock; see
@@ -315,6 +315,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     auctionNumbersInRange: new Set((kpis.auctions || []).map((a) => a.auction_number)),
     channelBreakdown,
     hourlyTrend,
+    hourlyDetail,
     bidderComposition,
     topVendors,
     topBidders,
@@ -386,7 +387,7 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, cate
       </div>
 
       <StorySection title="Bidding Activity by Hour" insight="How bidding activity is spread across the hours of the day.">
-        <HourlyTrend data={overview.hourlyTrend} rangeLabel={rangeLabel} />
+        <HourlyTrend data={overview.hourlyTrend} rangeLabel={rangeLabel} hourlyDetail={overview.hourlyDetail} />
       </StorySection>
 
       <div className="mb-8">
@@ -422,7 +423,7 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, cate
             </div>
 
             <div className="text-[14px] text-muted mt-2">
-              All bid activity · regardless of status
+              Current bid value · regardless of settlement status
             </div>
           </div>
 

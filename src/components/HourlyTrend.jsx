@@ -1,20 +1,29 @@
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
-import { formatPeso } from "../utils/format";
+import HourlyBidderTooltip from "./primitives/HourlyBidderTooltip";
 
-function CustomTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div className="floating px-3.5 py-2.5 text-[15.5px]">
-      <div className="text-ink mb-0.5">{label}</div>
-      <div className="tabular text-series1">{formatPeso(payload[0].value)}</div>
-    </div>
-  );
+// hourlyDetail is optional: a lookup (src/utils/hourlyBidderDetail.js) of
+// per-hour Participating/Winning bidder breakdown, keyed by the same hour
+// label used on the x-axis. When absent, the tooltip falls back to a plain
+// Bid Amount line — CategoryView's usage is unaffected by this file's
+// richer Overview/Bidding Pace tooltip.
+function makeCustomTooltip(hourlyDetail) {
+  return function CustomTooltip({ active, payload, label }) {
+    if (!active || !payload?.length) return null;
+    return (
+      <HourlyBidderTooltip
+        label={label}
+        bidAmount={payload[0].value}
+        detail={hourlyDetail?.[label]}
+      />
+    );
+  };
 }
 
-export default function HourlyTrend({ data: hourlyTrend, rangeLabel = "Today" }) {
+export default function HourlyTrend({ data: hourlyTrend, rangeLabel = "Today", hourlyDetail }) {
   const palette = usePalette();
+  const CustomTooltip = makeCustomTooltip(hourlyDetail);
   return (
     <Card title={`${rangeLabel} Pace · Bid Amount by Hour`} subtitle="All bid events · regardless of status">
       {hourlyTrend.length === 0 ? (

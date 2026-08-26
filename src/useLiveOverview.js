@@ -63,6 +63,7 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
           activeAuctionsResult,
           serviceIncomeResult,
           forApprovalResult,
+          biddingPaceResult,
         ] = await Promise.all([
           fetchJson("/api/overview", { from, to, store, category }),
           fetchJson("/api/leaderboards", { from, to, store, category }),
@@ -94,6 +95,16 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
           // FOR APPROVAL DRILLDOWN — lots resolved for_approval_status =
           // 'For Approval', independent of lifecycle status.
           fetchJson("/api/overview", { from, to, store, category, type: "for-approval" }),
+
+          // HOURLY BIDDER BREAKDOWN — the ONE authoritative per-hour
+          // Participating/Winning breakdown (src/utils/hourlyBidderDetail.js),
+          // reused unmodified from the Bidding Pace tab's own endpoint, for
+          // the "Bidding Activity by Hour" hover tooltip. Category-scoped
+          // (unlike Bidding Pace's own call, which never passes one) so the
+          // tooltip narrows exactly like every other Overview figure when a
+          // category is selected. Does NOT replace liveOverview.hourly
+          // above, which still drives the chart's own Bid Amount line.
+          fetchJson("/api/bidding-pace", { from, to, store, category }),
         ]);
 
         if (cancelled) return;
@@ -154,6 +165,11 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               // total_bid_amount above. See api/overview.js's BIDDING
               // ACTIVITY BY HOUR query comment.
               hourly: liveOverview.hourly ?? [],
+
+              // Per-hour Participating/Winning bidder breakdown for the
+              // same "Bidding Activity by Hour" chart's hover tooltip —
+              // see the fetchJson call above.
+              hourlyBidderRows: biddingPaceResult.hourly ?? [],
             },
 
             leaderboards: {
