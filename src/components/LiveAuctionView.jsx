@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useLiveAuctionEvents, useAuctionLotDetail } from "../useOnlineBidding";
-import { formatPeso } from "../utils/format";
-import { formatManila, timeRemainingLabel, isEndingSoon } from "../utils/manilaTime";
+import { formatPeso, formatCompactPeso } from "../utils/format";
+import { formatManila, isEndingSoon } from "../utils/manilaTime";
 import { ALL_STORES } from "../mockData";
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 import BidActivityBar from "./primitives/BidActivityBar";
+import AuctionProgressBar from "./primitives/AuctionProgressBar";
 
 // Every displayed field's source, at a glance:
 // - Auction metadata (name, branch, start/end, lot count) and everything
@@ -33,80 +34,39 @@ function SourceBadge({ source }) {
   return <span className="text-[12px] font-medium text-muted">Warehouse sync</span>;
 }
 
-function AuctionEventsTable({ store, onSelectAuction }) {
-  // "All Stores" is a mock-only sentinel, not a real branch value (same
-  // conversion useLiveOverview's caller already applies in App.jsx) — it
-  // must never be sent to /api/live-auctions as a literal store filter,
-  // or the backend's store_name = {store:String} predicate matches zero
-  // real branches and the auction list silently comes back empty.
-  const { auctions, loading, error } = useLiveAuctionEvents(store === ALL_STORES ? undefined : store);
-
+// Auction-level Participating/Leading bidder breakdown card — same visual
+// language as every other bidder-composition card in this dashboard
+// (Bidding Pace, Full Auction Detail), kept local to Online Bidding since
+// the two populations here (bid ACTIVITY vs CURRENT leaders) are specific
+// to this ongoing-auction context. Not a new classifier: New/Returning
+// still comes from api/live-auctions.js's reuse of the same first-ever-bid
+// rule already validated elsewhere.
+function BidderBreakdownCard({ title, amountLabel, total, newCount, returningCount, amount, newAmount, returningAmount, unresolvedAmount, unresolvedLabel }) {
+  if (total === 0 && (!unresolvedAmount || unresolvedAmount === 0)) {
+    return (
+      <div className="border border-gridline rounded-lg p-4 bg-plane">
+        <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+        <div className="text-[14px] text-muted">No bids yet.</div>
+      </div>
+    );
+  }
   return (
-    <StorySection
-      title="Auction Events"
-      insight="Currently active Online Bidding auctions — independent of the Overview date range, since an auction's own open/close window is what matters here."
-      last
-    >
-      {error && (
-        <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load live auctions: {error}</div>
-      )}
-      {!error && loading && auctions.length === 0 && (
-        <div className="text-center text-ink text-[15.5px] py-12">Loading auction events…</div>
-      )}
-      {!loading && !error && auctions.length === 0 && (
-        <div className="text-center text-ink text-[15.5px] py-12">No Online Bidding auctions currently active at {store}.</div>
-      )}
-      {auctions.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-[15.5px]">
-            <thead>
-              <tr className="text-ink text-[13.5px] uppercase tracking-wide">
-                <th className="text-left font-medium pb-2 pr-4">Auction #</th>
-                <th className="text-left font-medium pb-2 pr-4">Auction Name</th>
-                <th className="text-left font-medium pb-2 pr-4">Branch</th>
-                <th className="text-left font-medium pb-2 pr-4">Starting Time</th>
-                <th className="text-left font-medium pb-2 pr-4">Ending Time</th>
-                <th className="text-right font-medium pb-2 pr-4">Total Lots</th>
-                <th className="text-right font-medium pb-2 pr-4">Lots With Bids</th>
-                <th className="text-right font-medium pb-2 pr-4">Current Bid Value</th>
-                <th className="text-left font-medium pb-2">Time Remaining</th>
-              </tr>
-            </thead>
-            <tbody>
-              {auctions.map((a) => {
-                const endingSoon = isEndingSoon(a.ending_time);
-                return (
-                  <tr
-                    key={a.auction_number}
-                    className="border-t border-gridline cursor-pointer hover:bg-plane"
-                    onClick={() => onSelectAuction(a.auction_number)}
-                  >
-                    <td className="py-2.5 pr-4 tabular text-ink font-medium">{a.auction_number}</td>
-                    <td className="py-2.5 pr-4 text-ink max-w-[240px] truncate" title={a.name}>
-                      {a.name || "—"}
-                    </td>
-                    <td className="py-2.5 pr-4 text-ink">{a.store_name || "—"}</td>
-                    <td className="py-2.5 pr-4 tabular text-ink">{formatManila(a.starting_time)}</td>
-                    <td className="py-2.5 pr-4 tabular text-ink">{formatManila(a.ending_time)}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{a.lot_count}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">{a.lots_with_bids}</td>
-                    <td className="py-2.5 pr-4 text-right tabular text-ink">
-                      {formatPeso(a.current_bid_value)}
-                      <div>
-                        <SourceBadge source={a.current_bid_source} />
-                      </div>
-                    </td>
-                    <td className={`py-2.5 tabular ${endingSoon ? "text-toneRedText font-semibold" : "text-ink"}`}>
-                      {timeRemainingLabel(a.ending_time)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+    <div className="border border-gridline rounded-lg p-4 bg-plane">
+      <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+      <div className="font-display text-[26px] leading-none text-ink mb-1">{total}</div>
+      <div className="text-[13.5px] text-ink mb-2">
+        {newCount} New · {returningCount} Returning
+      </div>
+      <div className="text-[14px] tabular text-series1">{formatCompactPeso(amount)} {amountLabel}</div>
+      <div className="text-[12.5px] tabular text-muted mt-0.5">
+        {formatCompactPeso(newAmount)} New · {formatCompactPeso(returningAmount)} Returning
+      </div>
+      {unresolvedAmount > 0 && (
+        <div className="text-[12px] text-muted mt-1">
+          + {formatCompactPeso(unresolvedAmount)} {unresolvedLabel}
         </div>
       )}
-    </StorySection>
+    </div>
   );
 }
 
@@ -215,83 +175,161 @@ function LotRow({ lot, auction }) {
         onClick={() => setExpanded((v) => !v)}
         className="mt-2 text-[14px] font-semibold text-series1 hover:underline"
       >
-        {expanded ? "Hide bid history" : `View bid history (${lot.bid_events.length})`}
+        {expanded ? "Hide bid history" : `Show bid history (${lot.bid_events.length})`}
       </button>
       {expanded && <BidHistoryTable events={lot.bid_events} />}
     </div>
   );
 }
 
-function AuctionLotDetail({ auctionNumber, onBack }) {
+// Level 2 content, nested under "Show Detailed Bidding Per Lot" — only
+// mounted (and only polling) while a given auction card is expanded.
+function DetailedLotsSection({ auctionNumber }) {
   const { auction, lots, loading, error } = useAuctionLotDetail(auctionNumber);
 
+  if (error) {
+    return <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load lot detail: {error}</div>;
+  }
+  if (loading && !auction) {
+    return <div className="text-center text-ink text-[15.5px] py-8">Loading lots…</div>;
+  }
+  if (!auction) return null;
+
   return (
-    <div>
-      <button
-        type="button"
-        onClick={onBack}
-        className="mb-4 text-[14.5px] font-semibold text-series1 hover:underline"
-      >
-        ← Back to Auctions
-      </button>
-
-      {error && <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load auction detail: {error}</div>}
-      {!error && loading && !auction && (
-        <div className="text-center text-ink text-[15.5px] py-12">Loading auction…</div>
-      )}
-
-      {auction && (
-        <>
-          <div className="mb-6">
-            <StoryHeader
-              eyebrow={`${auction.auction_number} · ${auction.store_name}${isEndingSoon(auction.ending_time) ? " · Ending Soon" : ""}`}
-              headline={auction.name || auction.auction_number}
-              amount={formatPeso(auction.current_bid_value)}
-            />
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-1 mt-2 text-[14px] text-muted">
-              <span>Starts {formatManila(auction.starting_time)}</span>
-              <span>Ends {formatManila(auction.ending_time)}</span>
-              <span className={isEndingSoon(auction.ending_time) ? "text-toneRedText font-semibold" : ""}>
-                {timeRemainingLabel(auction.ending_time)}
-              </span>
-              <span>{auction.lot_count} lots</span>
-              <SourceBadge source={auction.current_bid_source} />
-            </div>
-          </div>
-
-          <StorySection title="Lots" insight="Every lot in this auction, including ones with no bids yet." last>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {lots.map((lot) => (
-                <LotRow key={lot.lot_number} lot={lot} auction={auction} />
-              ))}
-            </div>
-            {lots.length === 0 && !loading && (
-              <div className="text-center text-ink text-[15.5px] py-12">No lots found for this auction.</div>
-            )}
-          </StorySection>
-        </>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+      {lots.map((lot) => (
+        <LotRow key={lot.lot_number} lot={lot} auction={auction} />
+      ))}
+      {lots.length === 0 && !loading && (
+        <div className="text-center text-ink text-[15.5px] py-8 lg:col-span-2">No lots found for this auction.</div>
       )}
     </div>
   );
 }
 
-export default function LiveAuctionView({ store }) {
-  const [selectedAuction, setSelectedAuction] = useState(null);
+function AuctionCard({ auction }) {
+  const [detailExpanded, setDetailExpanded] = useState(false);
+  const endingSoon = isEndingSoon(auction.ending_time);
+  const p = auction.participating;
+  const l = auction.leading;
 
   return (
-    <div>
-      <div className="mb-8">
-        <StoryHeader
-          eyebrow={`${store} · Online Bidding`}
-          headline={selectedAuction ? "Auction Lot Detail" : "Active Auction Events"}
+    <div className="tile px-6 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <div className="text-[14.5px] tabular text-ink mb-0.5">{auction.auction_number}</div>
+          <div className="text-[19px] text-ink font-medium">{auction.name || auction.auction_number}</div>
+          <div className="text-[14px] text-muted mt-0.5">{auction.store_name || "—"}</div>
+        </div>
+        <div className="text-right">
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-toneGreenText uppercase tracking-wide">
+            <span className="w-1.5 h-1.5 rounded-full bg-good pulse-dot" /> Live
+          </span>
+          {endingSoon && <div className="text-[12.5px] font-semibold text-toneRedText mt-1">Ending Soon</div>}
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <AuctionProgressBar
+          timelineStart={auction.timeline_start}
+          officialStartTime={auction.starting_time}
+          endingTime={auction.ending_time}
         />
       </div>
 
-      {selectedAuction ? (
-        <AuctionLotDetail auctionNumber={selectedAuction} onBack={() => setSelectedAuction(null)} />
-      ) : (
-        <AuctionEventsTable store={store} onSelectAuction={setSelectedAuction} />
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-5">
+        <div>
+          <div className="text-[13.5px] text-muted mb-0.5">Current Bid Value</div>
+          <div className="text-[26px] leading-none text-series1 font-semibold">{formatPeso(auction.current_bid_value)}</div>
+        </div>
+        <div className="text-right text-[13px] text-muted">
+          {auction.lot_count} lots · {auction.lots_with_bids} with bids
+          <div className="mt-0.5"><SourceBadge source={auction.current_bid_source} /></div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <BidderBreakdownCard
+          title="Participating Bidders"
+          amountLabel="activity"
+          total={p.total}
+          newCount={p.new}
+          returningCount={p.returning}
+          amount={p.total_activity}
+          newAmount={p.new_activity}
+          returningAmount={p.returning_activity}
+          unresolvedAmount={p.unclassified_activity}
+          unresolvedLabel="unclassified activity (no email on record)"
+        />
+        <BidderBreakdownCard
+          title="Leading Bidders"
+          amountLabel="current leading value"
+          total={l.total}
+          newCount={l.new}
+          returningCount={l.returning}
+          amount={l.new_value + l.returning_value}
+          newAmount={l.new_value}
+          returningAmount={l.returning_value}
+          unresolvedAmount={l.unresolved_value}
+          unresolvedLabel="unresolved leading value"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setDetailExpanded((v) => !v)}
+        className="text-[14.5px] font-semibold text-series1 hover:underline"
+      >
+        {detailExpanded ? "Hide Detailed Bidding Per Lot" : "Show Detailed Bidding Per Lot"}
+      </button>
+
+      {detailExpanded && <DetailedLotsSection auctionNumber={auction.auction_number} />}
+    </div>
+  );
+}
+
+function AuctionEventsList({ store }) {
+  // "All Stores" is a mock-only sentinel, not a real branch value (same
+  // conversion useLiveOverview's caller already applies in App.jsx) — it
+  // must never be sent to /api/live-auctions as a literal store filter,
+  // or the backend's store_name = {store:String} predicate matches zero
+  // real branches and the auction list silently comes back empty.
+  const { auctions, loading, error } = useLiveAuctionEvents(store === ALL_STORES ? undefined : store);
+
+  return (
+    <StorySection
+      title="Auction Events"
+      insight="Currently active Online Bidding auctions — independent of the Overview date range, since an auction's own open/close window is what matters here."
+      last
+    >
+      {error && (
+        <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load live auctions: {error}</div>
       )}
+      {!error && loading && auctions.length === 0 && (
+        <div className="text-center text-ink text-[15.5px] py-12">Loading auction events…</div>
+      )}
+      {!loading && !error && auctions.length === 0 && (
+        <div className="text-center text-ink text-[15.5px] py-12">No Online Bidding auctions currently active at {store}.</div>
+      )}
+      {auctions.length > 0 && (
+        <div className="flex flex-col gap-5">
+          {auctions.map((a) => (
+            <AuctionCard key={a.auction_number} auction={a} />
+          ))}
+        </div>
+      )}
+    </StorySection>
+  );
+}
+
+export default function LiveAuctionView({ store }) {
+  return (
+    <div>
+      <div className="mb-8">
+        <StoryHeader eyebrow={`${store} · Online Bidding`} headline="Ongoing Online Bidding" />
+      </div>
+
+      <AuctionEventsList store={store} />
     </div>
   );
 }
