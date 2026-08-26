@@ -22,6 +22,7 @@ import BiddingPaceView from "./components/BiddingPaceView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
+import { CATEGORY_NAMES } from "../api/_category.js";
 import { formatPeso } from "./utils/format";
 import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection, useMarqueeSummary } from "./useLiveBidding";
@@ -513,15 +514,14 @@ export default function App() {
     return buildLiveOverview(live, bidCorrectionDelta);
   }, [live, bidCorrectionDelta]);
 
-  // The Sidebar's Categories dropdown must show exactly the categories
-  // Overview itself knows about — same names, same order (categoryBreakdown
-  // already comes back ordered by bid_amount DESC from the API) — derived
-  // from this one live source rather than a second hardcoded list, so the
-  // two can never drift out of sync again.
-  const categoryOptions = useMemo(
-    () => overview.categoryBreakdown.map((c) => c.category),
-    [overview]
-  );
+  // The Sidebar's Categories dropdown always exposes the full canonical
+  // business taxonomy (api/_category.js's CATEGORY_NAMES — the same list
+  // CATEGORY_CLASSIFICATION_SQL can ever classify a lot into), not just
+  // whichever categories happen to have activity in the current
+  // date/store scope — overview.categoryBreakdown drops a category
+  // entirely when its value is zero for the current selection, which
+  // would otherwise make it disappear from the dropdown.
+  const categoryOptions = CATEGORY_NAMES;
 
   const searchPool = useMemo(
     () =>

@@ -1375,6 +1375,109 @@ export default async function handler(req, res) {
     const settledCategoryRows = await settledCategoryResult.json();
 
     // ---------------------------------------------------------
+    // BIDDING ACTIVITY BY HOUR (Asia/Manila local hour)
+    //
+    // For CategoryView's "Bidding Activity by Hour" — the main Overview UI
+    // doesn't currently render this, but the field is harmless when
+    // category is '' (same additive convention as every other
+    // CategoryView-only field in this response).
+    //
+    // Source: cms.mart_cms_bid_history_report, the same table
+    // api/leaderboards.js already uses for its "activity-based" bidder
+    // composition. Investigated against real data before writing this:
+    // bid_amount here is the STANDING/leading bid value at each row, not a
+    // per-bid delta (a lot's rows climb 500 -> 550 -> 600 -> ... as
+    // successive bidders outbid each other) — confirmed by inspecting a
+    // real multi-bid lot's full history ordered by bid_created_at.
+    // sum(bid_amount) therefore does NOT equal settled/final value; it's
+    // the same "sum of every bid EVENT" activity definition
+    // api/leaderboards.js already ships as bidding_activity_composition
+    // (see its comment: "sum of every bid EVENT per bidder, not settled
+    // value"). Reused here rather than inventing a new formula, per that
+    // same already-established convention — this section is an activity
+    // signal, not a settled-value one.
+    //
+    // Category: derived from the SAME xv3.mart_auction_vendor_analysis ->
+    // CATEGORY_CLASSIFICATION_SQL(name) classification every other
+    // category-scoped query in this file uses (never re-derived from
+    // bid_history's own `description` field), joined in by
+    // (auction_number, lot_number) so it can never disagree with Overview's
+    // category definition.
+    //
+    // Store: resolved via xv3.mart_auction_productivity_report, the same
+    // auction_number -> store_name lookup api/leaderboards.js's
+    // compositionResult already uses for this exact table — deliberately
+    // NOT date-scoped itself (only used for the store name), matching that
+    // existing query's convention. Date range is applied directly on
+    // bid_created_at (an absolute-instant comparison against a
+    // Asia/Manila-tagged boundary — timezone-correct regardless of the
+    // column's own stored zone), also matching that existing convention.
+    //
+    // Hour bucket: bid_created_at is stored in server-local (UTC) time —
+    // confirmed empirically (a raw toHour() clusters activity at UTC
+    // 2-7, i.e. 10am-3pm Manila, which only makes sense once shifted;
+    // toHour(bid_created_at, 'Asia/Manila') produces the expected
+    // business-hours-shaped distribution instead), so the explicit
+    // timezone argument is required here even though the date-range
+    // comparison above doesn't need one.
+    // ---------------------------------------------------------
+    const hourlyResult = await client.query({
+      query: `
+        WITH auction_store AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE auction_number IS NOT NULL
+        ),
+
+        lot_category AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          WHERE v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        )
+
+        SELECT
+          toHour(b.bid_created_at, 'Asia/Manila') AS hour,
+          sum(ifNull(b.bid_amount, 0)) AS bid_amount
+
+        FROM cms.mart_cms_bid_history_report b
+
+        INNER JOIN auction_store s
+          ON b.auction_number = s.auction_number
+
+        LEFT JOIN lot_category lc
+          ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+
+        WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+
+          AND (
+            {store:String} = ''
+            OR s.store_name = {store:String}
+          )
+
+          AND (
+            {category:String} = ''
+            OR lc.lot_category = {category:String}
+          )
+
+        GROUP BY hour
+        ORDER BY hour
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const hourlyRows = await hourlyResult.json();
+
+    // ---------------------------------------------------------
     // CURRENT BID VALUE BY BRANCH (live-corrected, current-standing) —
     // preserved under its own name, no longer exposed as "branches".
     //
@@ -2181,6 +2284,13 @@ export default async function handler(req, res) {
 
       categories: settledCategoryRows.map((row) => ({
         category: row.category,
+        bid_amount: Number(row.bid_amount ?? 0),
+      })),
+
+      // Bidding Activity by Hour (CategoryView-only today) — see the
+      // BIDDING ACTIVITY BY HOUR query comment above for source/definition.
+      hourly: hourlyRows.map((row) => ({
+        hour: Number(row.hour),
         bid_amount: Number(row.bid_amount ?? 0),
       })),
 

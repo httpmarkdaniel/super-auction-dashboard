@@ -9,6 +9,23 @@
 // Takes the exact SQL expression for the name column as a parameter, since
 // different queries reference it via different aliases (`v.name`, bare
 // `name` inside a CTE, etc.).
+// The four possible outputs of CATEGORY_CLASSIFICATION_SQL below, as a
+// single canonical list — imported directly by the frontend (Sidebar's
+// Categories dropdown) so the dropdown always exposes the full business
+// taxonomy instead of drifting from whatever categories happen to have
+// activity in the current date/store scope. This is a separate concern
+// from the CASE/WHEN order below: that order is classification PRIORITY
+// (which category wins when an item name matches multiple keyword sets,
+// e.g. "bulk" is checked before "vehicle"), never seen directly by users.
+// This list is DISPLAY order, unrelated to and never reordered to match
+// that priority — changing one must never change the other.
+export const CATEGORY_NAMES = [
+  "General Merchandise",
+  "Vehicles and Automotive",
+  "Equipment and Industrial",
+  "Bulk Auction",
+];
+
 export function CATEGORY_CLASSIFICATION_SQL(nameExpr) {
   return `
     CASE
