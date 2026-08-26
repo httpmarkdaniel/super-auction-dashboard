@@ -67,7 +67,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
   } = overview;
   const trend = hourlyTrend.map((h) => h.bidAmount);
   const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
-  const hasBidDelta = heroKPIs.totalBidAmountDeltaPct !== undefined;
   const [drilldown, setDrilldown] = useState(null);
 
   // Strict Unsold population (status='Unsold') — same rows used for both
@@ -82,7 +81,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         eyebrow={`Total Bid Amount · ${rangeLabel}`}
         value={formatPeso(heroKPIs.totalBidAmount)}
         delta={heroKPIs.totalBidAmountDeltaPct}
-        sub={hasBidDelta ? "vs yesterday" : undefined}
+        sub="Paid & Released only"
         sparkline={trend}
         methodology={METHODOLOGY.totalBidAmount}
         onClick={() => setDrilldown("totalBidAmount")}

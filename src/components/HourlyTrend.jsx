@@ -16,7 +16,7 @@ function CustomTooltip({ active, payload, label }) {
 export default function HourlyTrend({ data: hourlyTrend, rangeLabel = "Today" }) {
   const palette = usePalette();
   return (
-    <Card title={`${rangeLabel} Pace · Bid Amount by Hour`}>
+    <Card title={`${rangeLabel} Pace · Bid Amount by Hour`} subtitle="All bid events · regardless of status">
       {hourlyTrend.length === 0 ? (
         <div className="h-[160px] flex items-center justify-center text-center text-muted text-[15px]">
           No bidding activity in this period.

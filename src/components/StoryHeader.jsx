@@ -1,4 +1,4 @@
-export default function StoryHeader({ eyebrow, headline, amount, deltaPct, deltaLabel = "vs. yesterday", methodology, onAmountClick, extraDeltas }) {
+export default function StoryHeader({ eyebrow, headline, amount, amountLabel, deltaPct, deltaLabel = "vs. yesterday", methodology, onAmountClick, extraDeltas }) {
   const hasDelta = deltaPct !== undefined && deltaPct !== null;
   const up = hasDelta && deltaPct >= 0;
   const hasTip = Boolean(methodology);
@@ -25,6 +25,9 @@ export default function StoryHeader({ eyebrow, headline, amount, deltaPct, delta
                 </span>
               )}
             </div>
+            {amountLabel && (
+              <div className="text-[13.5px] text-muted mt-1">{amountLabel}</div>
+            )}
             {hasDelta && (
               <div className={`text-[15.5px] font-medium mt-1.5 ${up ? "text-toneGreenText" : "text-toneRedText"}`}>
                 {up ? "▲" : "▼"} {Math.abs(deltaPct).toFixed(1)}% {deltaLabel}

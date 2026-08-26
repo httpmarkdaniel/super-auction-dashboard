@@ -76,6 +76,7 @@ export default function CategoryView({ category, store, dateRange, rangeLabel = 
           eyebrow={`${category} · ${store} · ${rangeLabel}${live ? " · Live" : ""} · The Story`}
           headline={story.headline}
           amount={formatPeso(d.totalBidAmount)}
+          amountLabel="Paid & Released only"
         />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
           <StatTile eyebrow="Sell-Through Rate" value={`${d.sellThroughRate}%`} />

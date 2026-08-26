@@ -9,6 +9,7 @@ import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
 import BidderComposition from "./components/BidderComposition";
+import HourlyTrend from "./components/HourlyTrend";
 import CategoryView from "./components/CategoryView";
 import LiveAuctionView from "./components/LiveAuctionView";
 import UpcomingAuctionsView from "./components/UpcomingAuctionsView";
@@ -377,6 +378,11 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
       <div className="mb-8">
         <BidderComposition data={overview.bidderComposition} rangeLabel={rangeLabel} />
       </div>
+
+      <StorySection title="Bidding Activity by Hour" insight="How bidding activity is spread across the hours of the day.">
+        <HourlyTrend data={overview.hourlyTrend} rangeLabel={rangeLabel} />
+      </StorySection>
+
       <div className="mb-8">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">
           <div className="flex-1 min-w-0">
@@ -384,6 +390,7 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
               eyebrow={`${store} · ${rangeLabel}${isLive ? " · Live" : ""}`}
               headline={story.headline}
               amount={formatPeso(overview.heroKPIs.totalBidAmount)}
+              amountLabel="Paid & Released only"
               deltaPct={overview.heroKPIs.totalBidAmountDeltaPct}
               methodology={BID_AMOUNT_METHODOLOGY}
               onAmountClick={() => setShowBranchTally(true)}
@@ -409,7 +416,7 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
             </div>
 
             <div className="text-[14px] text-muted mt-2">
-              Total bid value placed today.
+              All bid activity · regardless of status
             </div>
           </div>
 

@@ -140,6 +140,14 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
 
               // Used as denominator for unsold calculations
               total_inventory: liveOverview.listed_lots ?? 0,
+
+              // BIDDING ACTIVITY BY HOUR — same field CategoryView already
+              // reads (category-scoped there), unscoped here since Overview
+              // has no category filter. Sum of every bid EVENT within the
+              // selected date range + store, regardless of settlement
+              // status — NOT the settled total_bid_amount above. See
+              // api/overview.js's BIDDING ACTIVITY BY HOUR query comment.
+              hourly: liveOverview.hourly ?? [],
             },
 
             leaderboards: {
