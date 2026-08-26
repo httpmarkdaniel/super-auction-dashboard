@@ -53,6 +53,7 @@ export default function BidderComposition({
   // any other section. "" means All Categories, the same convention every
   // category-scoped endpoint already uses to mean "no filter".
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
+  const [showByAuction, setShowByAuction] = useState(false);
   const { data: categoryData } = useBidderCompositionCategory(
     selectedCategory,
     store,
