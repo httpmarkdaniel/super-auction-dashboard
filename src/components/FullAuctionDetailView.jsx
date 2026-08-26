@@ -4,19 +4,20 @@ import AuctionSummaryTable from "./AuctionSummaryTable";
 import { useFullAuctionDetail } from "../useFullAuctionDetail";
 
 export default function FullAuctionDetailView({ store, dateRange, rangeLabel, refreshNonce }) {
-  const { data: lots, loading, error } = useFullAuctionDetail(store, dateRange, refreshNonce);
+  const { data, loading, error } = useFullAuctionDetail(store, dateRange, refreshNonce);
 
-  if (error && !lots) {
+  if (error && !data) {
     return (
       <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
         Couldn't load auction detail: {error}
       </div>
     );
   }
-  if (loading || !lots) {
+  if (loading || !data) {
     return <div className="text-center text-ink text-[15.5px] py-12">Loading auction detail…</div>;
   }
 
+  const { lots, bidderActivity } = data;
   const auctionCount = new Set(lots.map((l) => l.auction_number)).size;
 
   return (
@@ -40,7 +41,7 @@ export default function FullAuctionDetailView({ store, dateRange, rangeLabel, re
         insight="Every auction from the selected date range, rolled up from its individual lots — search by auction #, branch, or category."
         last
       >
-        <AuctionSummaryTable data={lots} />
+        <AuctionSummaryTable data={lots} bidderActivity={bidderActivity} />
       </StorySection>
     </div>
   );

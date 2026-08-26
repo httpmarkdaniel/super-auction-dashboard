@@ -1,9 +1,63 @@
 import { useMemo, useState } from "react";
-import { formatPeso } from "../utils/format";
+import { formatPeso, formatCompactPeso } from "../utils/format";
 import Modal from "./primitives/Modal";
 import AuctionLotDetailTable from "./AuctionLotDetailTable";
 
 const SETTLED_STATUSES = ["Paid", "Released"];
+
+// PARTICIPATING vs WINNING are deliberately separate, non-reconciling
+// metrics — see api/leaderboards.js's perAuctionBiddingActivity (every
+// real bid EVENT from cms.mart_cms_bid_history_report, including bids
+// that were later outbid) vs perAuctionComposition (only the settled
+// Paid/Released winning lots, via the canonical identity bridge). A
+// bidder who bid 5 times and lost still counts fully in "Participating"
+// but contributes nothing to "Winning". Never implied to sum to each
+// other.
+function BidderStatCard({ title, subtitle, stats }) {
+  if (!stats) {
+    return (
+      <div className="border border-gridline rounded-lg p-4 bg-plane">
+        <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+        <div className="text-[14px] text-muted">No data for this population.</div>
+      </div>
+    );
+  }
+  const total = Number(stats.total) || 0;
+  const newCount = Number(stats.new) || 0;
+  const returningCount = Number(stats.returning) || 0;
+  const totalAmount = Number(stats.totalAmount) || 0;
+  const newAmount = Number(stats.newAmount) || 0;
+  const returningAmount = Number(stats.returningAmount) || 0;
+  const unresolvedAmount = Number(stats.unresolvedAmount) || 0;
+
+  return (
+    <div className="border border-gridline rounded-lg p-4 bg-plane">
+      <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+      <div className="font-display text-[26px] leading-none text-ink mb-1">{total}</div>
+      <div className="text-[13.5px] text-ink mb-2">
+        {newCount} New · {returningCount} Returning
+      </div>
+      <div className="text-[14px] tabular text-series1">{formatCompactPeso(totalAmount)} {subtitle}</div>
+      <div className="text-[12.5px] tabular text-muted mt-0.5">
+        {formatCompactPeso(newAmount)} New · {formatCompactPeso(returningAmount)} Returning
+      </div>
+      {unresolvedAmount > 0 && (
+        <div className="text-[12px] text-muted mt-1">
+          + {formatCompactPeso(unresolvedAmount)} unresolved identity (not counted above)
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BidderActivityCards({ activity }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+      <BidderStatCard title="Participating Bidders" subtitle="activity" stats={activity?.participating} />
+      <BidderStatCard title="Winning Bidders" subtitle="winning value" stats={activity?.winning} />
+    </div>
+  );
+}
 
 const SORTERS = {
   auctionNumber: (r) => r.auctionNumber,
@@ -128,7 +182,7 @@ function mapLotForDetail(l) {
   };
 }
 
-export default function AuctionSummaryTable({ data: lots, title = "Order Workbench · Auction Detail" }) {
+export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, title = "Order Workbench · Auction Detail" }) {
   const [open, setOpen] = useState(true);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
@@ -266,6 +320,7 @@ export default function AuctionSummaryTable({ data: lots, title = "Order Workben
         title={`Auction ${selectedAuction}${selectedAuctionMeta?.auctionName ? ` · ${selectedAuctionMeta.auctionName}` : ""} · Lot Detail`}
         subtitle="Every individual lot in this auction."
       >
+        <BidderActivityCards activity={selectedAuction ? bidderActivity[selectedAuction] : null} />
         <AuctionLotDetailTable data={selectedLots} />
       </Modal>
     </div>
