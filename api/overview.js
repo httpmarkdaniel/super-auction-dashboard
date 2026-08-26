@@ -899,7 +899,13 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     // TODAY'S BID
     // Always uses the current Asia/Manila calendar day.
-    // Still respects the selected store.
+    // Still respects the selected store, and now the selected category —
+    // same additive-only convention as every other category-scoped query
+    // in this file (a no-op when category is ''). cms.mart_cms_bid_history_report
+    // has no category of its own, so it's joined to the same per-lot
+    // canonical classification (xv3.mart_auction_vendor_analysis ->
+    // CATEGORY_CLASSIFICATION_SQL(name)) every other category-scoped query
+    // uses — never re-derived from bid_history's own `description` field.
     //
     // Same latest-per-lot definition as TOTAL BID AMOUNT above — see that
     // comment for why sum(bid_amount) across events is the wrong metric.
@@ -914,16 +920,33 @@ export default async function handler(req, res) {
       WHERE auction_number IS NOT NULL
     ),
 
+    lot_category AS (
+      SELECT
+        v.auction_number AS auction_number,
+        v.lot_number AS lot_number,
+        any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+      FROM xv3.mart_auction_vendor_analysis v
+
+      WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+
+      GROUP BY v.auction_number, v.lot_number
+    ),
+
     lot_latest_bid AS (
       SELECT
         b.auction_number AS auction_number,
         b.lot_number AS lot_number,
-        argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount
+        argMax(b.bid_amount, b.bid_created_at) AS latest_bid_amount,
+        any(lc.lot_category) AS lot_category
 
       FROM cms.mart_cms_bid_history_report b
 
       INNER JOIN auction_store s
         ON b.auction_number = s.auction_number
+
+      LEFT JOIN lot_category lc
+        ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
 
       WHERE b.bid_created_at >= toStartOfDay(
         now('Asia/Manila')
@@ -942,6 +965,11 @@ export default async function handler(req, res) {
       GROUP BY
         b.auction_number,
         b.lot_number
+
+      HAVING (
+        {category:String} = ''
+        OR lot_category = {category:String}
+      )
     )
 
     SELECT
@@ -952,6 +980,7 @@ export default async function handler(req, res) {
 
       query_params: {
         store,
+        category,
       },
 
       format: "JSONEachRow",
@@ -1256,10 +1285,11 @@ export default async function handler(req, res) {
     // BID VALUE BY BRANCH (SETTLED)
     //
     // Same population/definition as TOTAL BID AMOUNT above — literally
-    // the same settled_lots CTE, just grouped by store_name instead of
-    // collapsed to a scalar. This structurally guarantees
+    // the same settled_lots CTE (now including the same category
+    // HAVING filter TOTAL BID AMOUNT uses), just grouped by store_name
+    // instead of collapsed to a scalar. This structurally guarantees
     // sum(branches.bid_amount) == total_bid_amount, since both are sums
-    // over the exact same rows.
+    // over the exact same rows, category filter included.
     // ---------------------------------------------------------
     const settledBranchResult = await client.query({
       query: `
@@ -1281,7 +1311,8 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             any(a.store_name) AS store_name,
-            any(v.bid_amount) AS lot_bid_amount
+            any(v.bid_amount) AS lot_bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1295,6 +1326,11 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
         )
 
         SELECT
@@ -1663,6 +1699,19 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // ACTIVE AUCTIONS RIGHT NOW
+    //
+    // Deliberately NOT category-scoped. This is an auction-level count
+    // (xv3.mart_auction_productivity_report has no lot/category
+    // information at all), and an auction can contain lots from multiple
+    // categories — "how many active auctions contain at least one lot in
+    // category X" is a definable rule (join to vendor_analysis, count
+    // distinct auction_number with a matching lot), but it's a genuinely
+    // different metric from today's plain "in progress right now" count,
+    // and mixing a real-time auction-level concept with a lot-level
+    // reporting filter needs an explicit product decision, not an
+    // assumption. Investigated and intentionally left global; category is
+    // not referenced in this query's SQL text, so passing it is a no-op
+    // even if a caller sent one.
     // ---------------------------------------------------------
     const activeAuctionResult = await client.query({
       query: `

@@ -359,7 +359,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 const BID_AMOUNT_METHODOLOGY =
   "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the branch/category tally or the underlying settled lots.";
 
-function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, dateRange, refreshNonce, categoryOptions }) {
+function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, categoryOptions, overviewCategory, onOverviewCategoryChange }) {
   const story = buildStoryline(overview, store);
   const [showBranchTally, setShowBranchTally] = useState(false);
 
@@ -379,10 +379,9 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, date
         <BidderComposition
           data={overview.bidderComposition}
           rangeLabel={rangeLabel}
-          store={store}
-          dateRange={dateRange}
-          refreshNonce={refreshNonce}
           categoryOptions={categoryOptions}
+          selectedCategory={overviewCategory}
+          onCategoryChange={onOverviewCategoryChange}
         />
       </div>
 
@@ -442,8 +441,13 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, date
       </div>
 
       <StorySection title="Bid Value by Category & Branch" insight="How this period's bid value splits across item categories and store branches.">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <CategoryStrip data={overview.categoryBreakdown} rangeLabel={rangeLabel} />
+        {/* A specific category is already the whole Overview's filter here,
+            so a "by category" breakdown of a single category is not a
+            useful chart — show only Branch in that case. No new dimension
+            invented; Branch stays visible and becomes category-scoped via
+            overview.branchBreakdown itself. */}
+        <div className={overviewCategory ? "grid grid-cols-1 gap-4" : "grid grid-cols-1 md:grid-cols-2 gap-4"}>
+          {!overviewCategory && <CategoryStrip data={overview.categoryBreakdown} rangeLabel={rangeLabel} />}
           <BranchStrip data={overview.branchBreakdown} rangeLabel={rangeLabel} />
         </div>
       </StorySection>
@@ -476,6 +480,13 @@ export default function App() {
   const [tab, setTab] = useState("Overview");
   const [store, setStore] = useState(ALL_STORES);
   const [dateRange, setDateRange] = useState(defaultDateRange);
+  // Overview-wide category filter — "" means All Categories (the same
+  // "no filter" convention every category-scoped endpoint already uses).
+  // Lives here, not inside BidderComposition, because it now scopes the
+  // whole Overview tab (Total Bid Amount, Service Income, For Approval,
+  // Lots Sold/Listed/Unsold, Branch breakdown, Hourly activity, Top
+  // Vendors/Bidders, and Bidder Composition), not just one section.
+  const [overviewCategory, setOverviewCategory] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const contentRef = useRef(null);
 
@@ -512,6 +523,7 @@ export default function App() {
   const { data: live, loading: overviewLoading, error: overviewError } = useLiveOverview(
     dateRange,
     store === ALL_STORES ? undefined : store,
+    overviewCategory,
     refreshNonce
   );
 
@@ -588,9 +600,9 @@ export default function App() {
               isLive={Boolean(live)}
               loading={overviewLoading}
               error={overviewError}
-              dateRange={dateRange}
-              refreshNonce={refreshNonce}
               categoryOptions={categoryOptions}
+              overviewCategory={overviewCategory}
+              onOverviewCategoryChange={setOverviewCategory}
             />
           )}
           {categoryOptions.includes(tab) && (

@@ -28,7 +28,7 @@ function fetchJson(path, params = {}) {
   });
 }
 
-export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
+export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce = 0) {
   const [state, setState] = useState({
     data: {
       overview: MOCK_OVERVIEW,
@@ -64,31 +64,36 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
           serviceIncomeResult,
           forApprovalResult,
         ] = await Promise.all([
-          fetchJson("/api/overview", { from, to, store }),
-          fetchJson("/api/leaderboards", { from, to, store }),
+          fetchJson("/api/overview", { from, to, store, category }),
+          fetchJson("/api/leaderboards", { from, to, store, category }),
 
           // TOTAL BID AMOUNT DRILLDOWN — the exact settled lots behind
           // total_bid_amount, sum(bid_amount) reconciles to it exactly.
-          fetchJson("/api/overview", { from, to, store, type: "settled-lots" }),
+          fetchJson("/api/overview", { from, to, store, category, type: "settled-lots" }),
 
           // LOTS SOLD / LISTED DRILLDOWN
-          fetchJson("/api/overview", { from, to, store, type: "lots" }),
+          fetchJson("/api/overview", { from, to, store, category, type: "lots" }),
 
           // UNSOLD LOTS + WITH RESERVE PRICE DRILLDOWN (same rows, the
           // With Reserve view filters client-side by reserved_price > 0)
-          fetchJson("/api/overview", { from, to, store, type: "unsold-lots" }),
+          fetchJson("/api/overview", { from, to, store, category, type: "unsold-lots" }),
 
           // ACTIVE AUCTIONS DRILLDOWN — "right now", independent of the
-          // selected date range, but still store-scoped.
+          // selected date range AND deliberately independent of category —
+          // an active auction can contain lots from multiple categories, so
+          // "how many auctions contain at least one lot in category X" is a
+          // different, not-yet-agreed metric from today's "auctions in
+          // progress right now" count. See api/overview.js's ACTIVE
+          // AUCTIONS comment for the same reasoning. Still store-scoped.
           fetchJson("/api/overview", { store, type: "active-auctions" }),
 
           // SERVICE INCOME DRILLDOWN — the exact settled lots behind
           // Service Income, same population as Total Bid Amount above.
-          fetchJson("/api/overview", { from, to, store, type: "service-income" }),
+          fetchJson("/api/overview", { from, to, store, category, type: "service-income" }),
 
           // FOR APPROVAL DRILLDOWN — lots resolved for_approval_status =
           // 'For Approval', independent of lifecycle status.
-          fetchJson("/api/overview", { from, to, store, type: "for-approval" }),
+          fetchJson("/api/overview", { from, to, store, category, type: "for-approval" }),
         ]);
 
         if (cancelled) return;
@@ -141,12 +146,13 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
               // Used as denominator for unsold calculations
               total_inventory: liveOverview.listed_lots ?? 0,
 
-              // BIDDING ACTIVITY BY HOUR — same field CategoryView already
-              // reads (category-scoped there), unscoped here since Overview
-              // has no category filter. Sum of every bid EVENT within the
-              // selected date range + store, regardless of settlement
-              // status — NOT the settled total_bid_amount above. See
-              // api/overview.js's BIDDING ACTIVITY BY HOUR query comment.
+              // BIDDING ACTIVITY BY HOUR — same field/query CategoryView
+              // already reads, now scoped by Overview's own category filter
+              // too (via the `category` param above). Sum of every bid
+              // EVENT within the selected date range + store + category,
+              // regardless of settlement status — NOT the settled
+              // total_bid_amount above. See api/overview.js's BIDDING
+              // ACTIVITY BY HOUR query comment.
               hourly: liveOverview.hourly ?? [],
             },
 
@@ -325,7 +331,7 @@ export function useLiveOverview(dateRangeKey, store, refreshNonce = 0) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [dateRangeKey, store, refreshNonce]);
+  }, [dateRangeKey, store, category, refreshNonce]);
 
   return state;
 }

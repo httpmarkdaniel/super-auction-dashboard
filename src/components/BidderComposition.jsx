@@ -10,7 +10,6 @@ import {
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso } from "../utils/format";
-import { useBidderCompositionCategory } from "../useBidderCompositionCategory";
 
 const ALL_CATEGORIES = "";
 
@@ -19,54 +18,47 @@ const ALL_CATEGORIES = "";
 // sized to sit in a Card's upper-right action slot.
 function CategoryChip({ value, onChange, options }) {
   return (
-    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted shrink-0">
-        <path d="M3 8l9-5 9 5-9 5-9-5z" />
-        <path d="M3 8v8l9 5 9-5V8" />
-      </svg>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="text-[14px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[160px]"
-      >
-        <option value={ALL_CATEGORIES}>All Categories</option>
-        {options.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold shrink-0">
+        Overview Category
+      </span>
+      <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-muted shrink-0">
+          <path d="M3 8l9-5 9 5-9 5-9-5z" />
+          <path d="M3 8v8l9 5 9-5V8" />
+        </svg>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="text-[14px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[160px]"
+        >
+          <option value={ALL_CATEGORIES}>All Categories</option>
+          {options.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
 
 export default function BidderComposition({
-  data: globalBidderComposition,
+  data: bidderComposition,
   rangeLabel = "Today",
-  store,
-  dateRange,
-  refreshNonce,
   categoryOptions = [],
+  selectedCategory = "",
+  onCategoryChange,
 }) {
-  // Local to this section only — never the global tab/category state, so
-  // selecting a category here can't navigate away from Overview or affect
-  // any other section. "" means All Categories, the same convention every
-  // category-scoped endpoint already uses to mean "no filter".
-  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
+  // The category filter itself is Overview-level state (owned by App.jsx,
+  // threaded into useLiveOverview so the WHOLE tab — Total Bid Amount,
+  // Service Income, For Approval, Branch breakdown, Top Vendors/Bidders,
+  // Hourly activity, and this section — is scoped consistently from one
+  // fetch. This component only renders the selector (visually anchored
+  // here per the product decision) and consumes whatever composition data
+  // its parent already resolved; it does not fetch anything itself.
   const [showByAuction, setShowByAuction] = useState(false);
-  const { data: categoryData } = useBidderCompositionCategory(
-    selectedCategory,
-    store,
-    dateRange,
-    refreshNonce
-  );
-
-  // All Categories: the existing global composition, exactly as before —
-  // zero behavior change, zero extra request. A specific category: the
-  // dedicated fetch's result once it arrives; until then (or on error),
-  // fall back to whatever's already on screen rather than blanking.
-  const bidderComposition =
-    selectedCategory && categoryData ? categoryData : globalBidderComposition;
   const byAuction = bidderComposition.byAuction || [];
   const palette = usePalette();
   const newAmount = bidderComposition.newBiddersBidAmount || 0;
@@ -112,7 +104,7 @@ export default function BidderComposition({
     <Card
       title={`Bidder Composition · ${rangeLabel}`}
       action={
-        <CategoryChip value={selectedCategory} onChange={setSelectedCategory} options={categoryOptions} />
+        <CategoryChip value={selectedCategory} onChange={onCategoryChange} options={categoryOptions} />
       }
     >
       <div className="flex flex-col lg:flex-row gap-6">
