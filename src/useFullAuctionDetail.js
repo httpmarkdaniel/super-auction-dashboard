@@ -37,7 +37,7 @@ function fetchJson(path, params = {}) {
 // leaderboards.js's already-validated bidder logic. auction_number is the
 // join key back to api/auction-detail.js's rows.
 export function useFullAuctionDetail(store, dateRangeKey, refreshNonce = 0) {
-  const [state, setState] = useState({ data: null, loading: true, error: null });
+  const [state, setState] = useState({ data: null, loading: true, error: null, unsupported: false });
 
   // Same inputs-changed pattern as useCategoryOverview.js/useVendorPayables.js:
   // only a real store/date-range change (or the very first load) blanks the
@@ -53,12 +53,43 @@ export function useFullAuctionDetail(store, dateRangeKey, refreshNonce = 0) {
     inputsRef.current = { store, dateRangeKey };
 
     async function load() {
+      // resolveDateRange("all") deliberately returns from:null/to:null as an
+      // "All Time" sentinel. Two real, confirmed problems with sending that
+      // straight through: (1) neither api/auction-detail.js nor
+      // api/leaderboards.js accept a missing/empty date range (the former
+      // errors trying to parse an empty-string datetime in ClickHouse, the
+      // latter explicitly 400s on a missing from/to); (2) substituting a
+      // wide concrete fallback range instead doesn't actually help — tested
+      // directly against the real warehouse, an unbounded scan across
+      // xv3.mart_auction_vendor_analysis's 1M+ rows (joined against
+      // postings/payments/customers/cms tables for identity resolution) did
+      // not return within 5 minutes. Rather than trade a fast error for a
+      // multi-minute hang, silently narrow "All Time" to some other bounded
+      // range while still labeling it "All Time", or touch either backend
+      // file's validation, this is treated as an explicit, honest,
+      // Full-Auction-Detail-only limitation: neither fetch ever fires, and
+      // any previously loaded rows from a real range are intentionally
+      // cleared rather than left on screen mislabeled as "All Time". This is
+      // a genuinely different state from an ordinary background-refresh
+      // failure on a VALID range (handled in the catch block below), where
+      // preserving the last good data is still correct — `unsupported` is
+      // the flag that tells FullAuctionDetailView.jsx which case it is.
+      const resolved = resolveDateRange(dateRangeKey);
+      if (resolved.from == null || resolved.to == null) {
+        if (!cancelled) {
+          setState({ data: null, loading: false, error: null, unsupported: true });
+        }
+        return;
+      }
+
       setState((s) =>
-        inputsChanged || !s.data ? { ...s, loading: true, error: null } : { ...s, error: null }
+        inputsChanged || !s.data
+          ? { ...s, loading: true, error: null, unsupported: false }
+          : { ...s, error: null, unsupported: false }
       );
 
       try {
-        const { from, to } = resolveDateRange(dateRangeKey);
+        const { from, to } = resolved;
         const storeParam = store === ALL_STORES ? undefined : store;
 
         const [auctionResult, leaderboardsResult] = await Promise.all([
@@ -103,10 +134,10 @@ export function useFullAuctionDetail(store, dateRangeKey, refreshNonce = 0) {
           };
         }
 
-        setState({ data: { lots: auctionResult.rows ?? [], bidderActivity }, loading: false, error: null });
+        setState({ data: { lots: auctionResult.rows ?? [], bidderActivity }, loading: false, error: null, unsupported: false });
       } catch (err) {
         if (!cancelled) {
-          setState((s) => ({ data: s.data, loading: false, error: err.message }));
+          setState((s) => ({ data: s.data, loading: false, error: err.message, unsupported: false }));
         }
       }
     }

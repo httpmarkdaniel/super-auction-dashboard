@@ -4,8 +4,20 @@ import AuctionSummaryTable from "./AuctionSummaryTable";
 import { useFullAuctionDetail } from "../useFullAuctionDetail";
 
 export default function FullAuctionDetailView({ store, dateRange, rangeLabel, refreshNonce }) {
-  const { data, loading, error } = useFullAuctionDetail(store, dateRange, refreshNonce);
+  const { data, loading, error, unsupported } = useFullAuctionDetail(store, dateRange, refreshNonce);
 
+  // A deliberate, expected state (unbounded "All Time" isn't currently
+  // executable for this tab — see useFullAuctionDetail.js) — never framed
+  // as a failure, and never shows stale rows from a previously-loaded
+  // range under the "All Time" label.
+  if (unsupported) {
+    return (
+      <div className="px-4 py-6 rounded-lg border border-gridline bg-plane text-center text-ink text-[15.5px]">
+        <div className="font-medium mb-1">All Time is not currently available for Full Auction Detail.</div>
+        <div className="text-muted text-[14px]">Select a specific date range to load auction and bidder details.</div>
+      </div>
+    );
+  }
   if (error && !data) {
     return (
       <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">
