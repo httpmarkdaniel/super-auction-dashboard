@@ -5,15 +5,25 @@ import AuctionLotDetailTable from "./AuctionLotDetailTable";
 
 const SETTLED_STATUSES = ["Paid", "Released"];
 
-// PARTICIPATING vs WINNING are deliberately separate, non-reconciling
-// metrics — see api/leaderboards.js's perAuctionBiddingActivity (every
-// real bid EVENT from cms.mart_cms_bid_history_report, including bids
-// that were later outbid) vs perAuctionComposition (only the settled
-// Paid/Released winning lots, via the canonical identity bridge). A
-// bidder who bid 5 times and lost still counts fully in "Participating"
-// but contributes nothing to "Winning". Never implied to sum to each
-// other.
-function BidderStatCard({ title, subtitle, stats }) {
+// Compact "N Participating · M Winning" label for the Total Bidders column.
+// Deliberately NOT a single combined count — see BidderBreakdownModal's
+// header comment for why a true union isn't safely computable from the
+// aggregate-only data this app has. "—" for a population means genuinely
+// no data (e.g. Negotiated auctions never have participating bid events),
+// never a fabricated zero.
+function totalBiddersLabel(activity) {
+  const p = activity?.participating;
+  const w = activity?.winning;
+  const pText = p ? `${p.total} Participating` : "— Participating";
+  const wText = w ? `${w.total} Winning` : "— Winning";
+  return `${pText} · ${wText}`;
+}
+
+// One bidder population (Participating or Winning) — collapsed by default
+// showing just the total and its amount; click to reveal the New/Returning
+// split. Progressive disclosure, not everything at once — see the parent
+// modal's requested UX.
+function BidderSummaryCard({ title, amountLabel, stats, expanded, onToggle }) {
   if (!stats) {
     return (
       <div className="border border-gridline rounded-lg p-4 bg-plane">
@@ -22,10 +32,122 @@ function BidderStatCard({ title, subtitle, stats }) {
       </div>
     );
   }
+
   const total = Number(stats.total) || 0;
+  const totalAmount = Number(stats.totalAmount) || 0;
   const newCount = Number(stats.new) || 0;
   const returningCount = Number(stats.returning) || 0;
+  const newAmount = Number(stats.newAmount) || 0;
+  const returningAmount = Number(stats.returningAmount) || 0;
+  const unresolvedAmount = Number(stats.unresolvedAmount) || 0;
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full text-left border border-gridline rounded-lg p-4 bg-plane hover:border-navy/40 transition-colors"
+    >
+      <div className="flex items-center justify-between">
+        <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+        <span className="text-[12.5px] text-muted">{expanded ? "Hide ▲" : "Show breakdown ▾"}</span>
+      </div>
+      <div className="font-display text-[26px] leading-none text-ink mb-1">{total}</div>
+      <div className="text-[14px] tabular text-series1">{formatCompactPeso(totalAmount)} {amountLabel}</div>
+
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-gridline space-y-2">
+          <div className="flex items-center justify-between text-[14.5px]">
+            <span className="text-ink">New</span>
+            <span className="tabular text-ink">
+              {newCount} · {formatPeso(newAmount)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[14.5px]">
+            <span className="text-ink">Returning</span>
+            <span className="tabular text-ink">
+              {returningCount} · {formatPeso(returningAmount)}
+            </span>
+          </div>
+          {unresolvedAmount > 0 && (
+            <div className="text-[12px] text-muted pt-1">
+              + {formatCompactPeso(unresolvedAmount)} unresolved identity (not counted above)
+            </div>
+          )}
+        </div>
+      )}
+    </button>
+  );
+}
+
+// PARTICIPATING vs WINNING are deliberately separate, non-reconciling
+// metrics — see api/leaderboards.js's perAuctionBiddingActivity (every
+// real bid EVENT from cms.mart_cms_bid_history_report, including bids
+// that were later outbid — "activity") vs perAuctionComposition (only the
+// settled Paid/Released winning lots, via the canonical identity bridge —
+// "winning value"). A bidder who bid 5 times and lost still counts fully
+// in Participating but contributes nothing to Winning.
+//
+// TOTAL BIDDERS UNION: investigated before implementing. Both source
+// arrays only carry pre-aggregated COUNTS per auction (participating_bidders,
+// new_bidders, etc.) — no per-bidder identity list. A winner is very likely
+// already counted once in Participating too (for competitive auctions), so
+// naively summing participating.total + winning.total would double-count
+// real people. Computing a true deduplicated union would require the raw
+// resolved-identity rows behind both aggregates, which neither existing
+// endpoint currently returns — adding that is a real backend change, not
+// "genuinely necessary" for this feature per the explicit instruction to
+// avoid a third bidder query. So Total Bidders is shown as two honest,
+// separately-labeled counts ("N Participating · M Winning"), never a
+// single fabricated combined number.
+function BidderBreakdownModal({ open, onClose, auctionNumber, auctionName, activity }) {
+  const [expanded, setExpanded] = useState(null); // 'participating' | 'winning' | null
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Auction ${auctionNumber}${auctionName ? ` · ${auctionName}` : ""}`}
+      subtitle="Bidder Breakdown"
+    >
+      <div className="space-y-4">
+        <BidderSummaryCard
+          title="Participating Bidders"
+          amountLabel="activity"
+          stats={activity?.participating}
+          expanded={expanded === "participating"}
+          onToggle={() => setExpanded((e) => (e === "participating" ? null : "participating"))}
+        />
+        <BidderSummaryCard
+          title="Winning Bidders"
+          amountLabel="winning value"
+          stats={activity?.winning}
+          expanded={expanded === "winning"}
+          onToggle={() => setExpanded((e) => (e === "winning" ? null : "winning"))}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+// Always-expanded variant (no click needed) — used inside the Lot Detail
+// modal, where bidder context should be visible immediately alongside the
+// lots, not tucked behind another interaction. Same data shape and same
+// underlying bidderActivity computation as BidderSummaryCard above — this
+// is presentational only, no separate calculation.
+function BidderStatCardStatic({ title, amountLabel, stats }) {
+  if (!stats) {
+    return (
+      <div className="border border-gridline rounded-lg p-4 bg-plane">
+        <div className="text-[13px] uppercase tracking-wide text-muted font-medium mb-1">{title}</div>
+        <div className="text-[14px] text-muted">No data for this population.</div>
+      </div>
+    );
+  }
+
+  const total = Number(stats.total) || 0;
   const totalAmount = Number(stats.totalAmount) || 0;
+  const newCount = Number(stats.new) || 0;
+  const returningCount = Number(stats.returning) || 0;
   const newAmount = Number(stats.newAmount) || 0;
   const returningAmount = Number(stats.returningAmount) || 0;
   const unresolvedAmount = Number(stats.unresolvedAmount) || 0;
@@ -37,7 +159,7 @@ function BidderStatCard({ title, subtitle, stats }) {
       <div className="text-[13.5px] text-ink mb-2">
         {newCount} New · {returningCount} Returning
       </div>
-      <div className="text-[14px] tabular text-series1">{formatCompactPeso(totalAmount)} {subtitle}</div>
+      <div className="text-[14px] tabular text-series1">{formatCompactPeso(totalAmount)} {amountLabel}</div>
       <div className="text-[12.5px] tabular text-muted mt-0.5">
         {formatCompactPeso(newAmount)} New · {formatCompactPeso(returningAmount)} Returning
       </div>
@@ -53,8 +175,8 @@ function BidderStatCard({ title, subtitle, stats }) {
 function BidderActivityCards({ activity }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-      <BidderStatCard title="Participating Bidders" subtitle="activity" stats={activity?.participating} />
-      <BidderStatCard title="Winning Bidders" subtitle="winning value" stats={activity?.winning} />
+      <BidderStatCardStatic title="Participating Bidders" amountLabel="activity" stats={activity?.participating} />
+      <BidderStatCardStatic title="Winning Bidders" amountLabel="winning value" stats={activity?.winning} />
     </div>
   );
 }
@@ -187,6 +309,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
   const [selectedAuction, setSelectedAuction] = useState(null);
+  const [bidderModalAuction, setBidderModalAuction] = useState(null);
 
   const auctions = useMemo(() => groupByAuction(lots), [lots]);
 
@@ -221,6 +344,8 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
     [lots, selectedAuction]
   );
 
+  const bidderModalMeta = auctions.find((a) => a.auctionNumber === bidderModalAuction);
+
   return (
     <div className="card overflow-hidden">
       <button onClick={() => setOpen(!open)} className="w-full flex items-center justify-between px-6 py-4 text-left">
@@ -241,7 +366,9 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
                 className="flex-1 min-w-0 text-[15px] text-ink bg-transparent outline-none placeholder:text-muted"
               />
             </div>
-            <div className="text-[13.5px] text-muted">Click an auction # for lot-level detail.</div>
+            <div className="text-[13.5px] text-muted">
+              Click an auction # for lot-level detail, or Total Bidders for bidder detail.
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -259,6 +386,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
                   <SortHeader label="Sold" sortKey="lotsSold" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Unsold" sortKey="lotsUnsold" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Settled" sortKey="lotsSettled" sort={sort} onSort={handleSort} align="right" />
+                  <th className="font-medium pb-2 pr-4 text-left">Total Bidders</th>
                   <SortHeader label="Total Bid Amount" sortKey="totalBidAmount" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Buyer's Premium" sortKey="totalBuyersPremium" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Commission" sortKey="totalCommission" sort={sort} onSort={handleSort} align="right" />
@@ -292,6 +420,15 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsSold}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsUnsold}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsSettled}</td>
+                    <td className="py-2.5 pr-4 whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setBidderModalAuction(r.auctionNumber)}
+                        className="text-orange-600 dark:text-orange-500 hover:underline font-medium text-[14px]"
+                      >
+                        {totalBiddersLabel(bidderActivity[r.auctionNumber])}
+                      </button>
+                    </td>
                     <td className="py-2.5 pr-4 text-right tabular text-series1">{formatPeso(r.totalBidAmount)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalBuyersPremium)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.totalCommission)}</td>
@@ -303,7 +440,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={15} className="py-6 text-center text-muted text-[15.5px]">
+                    <td colSpan={16} className="py-6 text-center text-muted text-[15.5px]">
                       No auctions match this filter.
                     </td>
                   </tr>
@@ -323,6 +460,14 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
         <BidderActivityCards activity={selectedAuction ? bidderActivity[selectedAuction] : null} />
         <AuctionLotDetailTable data={selectedLots} />
       </Modal>
+
+      <BidderBreakdownModal
+        open={bidderModalAuction != null}
+        onClose={() => setBidderModalAuction(null)}
+        auctionNumber={bidderModalAuction}
+        auctionName={bidderModalMeta?.auctionName}
+        activity={bidderModalAuction ? bidderActivity[bidderModalAuction] : null}
+      />
     </div>
   );
 }
