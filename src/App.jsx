@@ -359,7 +359,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 const BID_AMOUNT_METHODOLOGY =
   "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the branch/category tally or the underlying settled lots.";
 
-function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
+function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, dateRange, refreshNonce, categoryOptions }) {
   const story = buildStoryline(overview, store);
   const [showBranchTally, setShowBranchTally] = useState(false);
 
@@ -376,7 +376,14 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error }) {
         </div>
       )}
       <div className="mb-8">
-        <BidderComposition data={overview.bidderComposition} rangeLabel={rangeLabel} />
+        <BidderComposition
+          data={overview.bidderComposition}
+          rangeLabel={rangeLabel}
+          store={store}
+          dateRange={dateRange}
+          refreshNonce={refreshNonce}
+          categoryOptions={categoryOptions}
+        />
       </div>
 
       <StorySection title="Bidding Activity by Hour" insight="How bidding activity is spread across the hours of the day.">
@@ -549,7 +556,6 @@ export default function App() {
         onLogoClick={goHome}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        categoryOptions={categoryOptions}
       />
       <main className="flex-1 flex flex-col min-w-0">
         <Topbar
@@ -582,6 +588,9 @@ export default function App() {
               isLive={Boolean(live)}
               loading={overviewLoading}
               error={overviewError}
+              dateRange={dateRange}
+              refreshNonce={refreshNonce}
+              categoryOptions={categoryOptions}
             />
           )}
           {categoryOptions.includes(tab) && (

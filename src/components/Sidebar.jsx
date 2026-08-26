@@ -15,50 +15,6 @@ function NavItem({ label, active, onClick }) {
   );
 }
 
-// One dropdown instead of one nav row per category — saves 3 rows of
-// vertical space in the sidebar, reinvested into a bigger nav font size
-// elsewhere rather than every category getting its own full-width button.
-//
-// `options` is Overview's own live categoryBreakdown category names,
-// passed down from App.jsx — not a second hardcoded list. This is the
-// exact same category taxonomy (names, spelling, capitalization, order)
-// Overview displays, so the two can never drift apart again the way the
-// old hardcoded CATEGORY_TABS array did (it read "AUTOMOTIVE, GENERAL
-// MERCHANDISE, VEHICLE, INDUSTRIAL" while the real warehouse categories
-// are "Bulk Auction, Vehicles and Automotive, Equipment and Industrial,
-// General Merchandise" — wrong names AND a missing category).
-function CategoryDropdown({ active, onChange, options }) {
-  const isActive = options.includes(active);
-  return (
-    <div
-      className={`flex items-center gap-2 pl-3 pr-2 py-2 rounded-lg border-l-2 ${
-        isActive ? "bg-navySoft border-l-navy" : "border-l-transparent bg-plane"
-      }`}
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`shrink-0 ${isActive ? "text-navy" : "text-muted"}`}>
-        <path d="M3 8l9-5 9 5-9 5-9-5z" />
-        <path d="M3 8v8l9 5 9-5V8" />
-      </svg>
-      <select
-        value={isActive ? active : ""}
-        onChange={(e) => e.target.value && onChange(e.target.value)}
-        className={`flex-1 min-w-0 text-[15.5px] bg-transparent outline-none cursor-pointer ${
-          isActive ? "text-navy font-medium" : "text-ink"
-        }`}
-      >
-        <option value="" disabled>
-          Select category…
-        </option>
-        {options.map((c) => (
-          <option key={c} value={c}>
-            {c}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 function NavGroup({ label, children }) {
   return (
     <div className="mb-1">
@@ -70,7 +26,7 @@ function NavGroup({ label, children }) {
   );
 }
 
-export default function Sidebar({ active, onChange, onLogoClick, open, onClose, categoryOptions = [] }) {
+export default function Sidebar({ active, onChange, onLogoClick, open, onClose }) {
   const go = (value) => {
     onChange(value);
     onClose();
@@ -107,8 +63,6 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose, 
             active={active === "Upcoming Auctions"}
             onClick={() => go("Upcoming Auctions")}
           />
-          <NavItem label="Stores" active={active === "Stores"} onClick={() => go("Stores")} />
-          <CategoryDropdown active={active} onChange={go} options={categoryOptions} />
           <NavItem label="Vendor Payables" active={active === "Vendor Payables"} onClick={() => go("Vendor Payables")} />
           <NavItem label="Full Auction Detail" active={active === "Full Auction Detail"} onClick={() => go("Full Auction Detail")} />
           <NavItem label="Bidding Pace" active={active === "Bidding Pace"} onClick={() => go("Bidding Pace")} />

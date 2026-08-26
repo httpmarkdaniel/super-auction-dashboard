@@ -286,7 +286,11 @@ export default async function handler(req, res) {
     // ('Paid','Released'), deduped by (auction_number, lot_number),
     // authoritative amount = bid_amount, scoped by the auction's
     // starting_time (not any vendor_analysis-native date field — see
-    // overview.js for why).
+    // overview.js for why). Optionally further scoped by category —
+    // same additive-only convention as settledVendorsResult/
+    // settledBiddersResult below and every category-scoped query in
+    // api/overview.js: a post-aggregation HAVING on the per-lot canonical
+    // category, a no-op when category is '' (Overview's global default).
     //
     // Every settled lot's winning bidder identity is traced through
     // BIDDER_IDENTITY_CTES (api/_bidderIdentity.js) — the same
@@ -320,7 +324,8 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
             any(v.or_number) AS or_number,
-            any(v.date_time_paid) AS date_time_paid
+            any(v.date_time_paid) AS date_time_paid,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -332,6 +337,8 @@ export default async function handler(req, res) {
             AND v.lot_number IS NOT NULL
 
           GROUP BY v.auction_number, v.lot_number
+
+          HAVING ({category:String} = '' OR lot_category = {category:String})
         ),
 
         ${BIDDER_IDENTITY_CTES}
@@ -413,7 +420,8 @@ export default async function handler(req, res) {
             any(a.store_name) AS store_name,
             any(v.bid_amount) AS lot_bid_amount,
             any(v.or_number) AS or_number,
-            any(v.date_time_paid) AS date_time_paid
+            any(v.date_time_paid) AS date_time_paid,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -425,6 +433,8 @@ export default async function handler(req, res) {
             AND v.lot_number IS NOT NULL
 
           GROUP BY v.auction_number, v.lot_number
+
+          HAVING ({category:String} = '' OR lot_category = {category:String})
         ),
 
         ${BIDDER_IDENTITY_CTES}
