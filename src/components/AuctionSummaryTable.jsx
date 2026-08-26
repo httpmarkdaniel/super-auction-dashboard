@@ -100,7 +100,10 @@ function BidderSummaryCard({ title, amountLabel, stats, expanded, onToggle }) {
 // separately-labeled counts ("N Participating · M Winning"), never a
 // single fabricated combined number.
 function BidderBreakdownModal({ open, onClose, auctionNumber, auctionName, activity }) {
-  const [expanded, setExpanded] = useState(null); // 'participating' | 'winning' | null
+  // Independent toggles — Participating and Winning must be expandable at
+  // the same time, neither one collapsing the other.
+  const [participatingExpanded, setParticipatingExpanded] = useState(false);
+  const [winningExpanded, setWinningExpanded] = useState(false);
 
   return (
     <Modal
@@ -114,15 +117,15 @@ function BidderBreakdownModal({ open, onClose, auctionNumber, auctionName, activ
           title="Participating Bidders"
           amountLabel="activity"
           stats={activity?.participating}
-          expanded={expanded === "participating"}
-          onToggle={() => setExpanded((e) => (e === "participating" ? null : "participating"))}
+          expanded={participatingExpanded}
+          onToggle={() => setParticipatingExpanded((e) => !e)}
         />
         <BidderSummaryCard
           title="Winning Bidders"
           amountLabel="winning value"
           stats={activity?.winning}
-          expanded={expanded === "winning"}
-          onToggle={() => setExpanded((e) => (e === "winning" ? null : "winning"))}
+          expanded={winningExpanded}
+          onToggle={() => setWinningExpanded((e) => !e)}
         />
       </div>
     </Modal>
