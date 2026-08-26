@@ -1,5 +1,6 @@
 import { createClient } from "@clickhouse/client";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
+import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -287,34 +288,21 @@ export default async function handler(req, res) {
     // starting_time (not any vendor_analysis-native date field — see
     // overview.js for why).
     //
-    // vendor_analysis.email is Laravel-encrypted ciphertext and cannot be
-    // matched against bid_history's plaintext email — fuzzy bidder_name
-    // matching was tested and rejected (only ~44% of settled value
-    // matched in a real sample). Instead, each settled lot's winning
-    // bidder identity is traced through a deterministic ID bridge with
-    // no string/fuzzy matching anywhere:
+    // Every settled lot's winning bidder identity is traced through
+    // BIDDER_IDENTITY_CTES (api/_bidderIdentity.js) — the same
+    // deterministic, no-fuzzy-matching two-path bridge shared by every
+    // settled Bidder Composition query. There are only two business
+    // categories, New and Returning: a lot is "unclassified" ONLY when
+    // BOTH the primary (competitive) and fallback (negotiated) bridges
+    // fail to resolve any identity for it at all — kept here purely for
+    // internal reconciliation visibility (see the response mapping below),
+    // never surfaced as a normal third UI category, and never guessed
+    // into New or Returning.
     //
-    //   vendor_analysis (auction_number, lot_number)
-    //     -> xv3.auctions (auction_number -> auction_id)
-    //     -> xv3.postings (auction_id, lot_number -> customer_id)
-    //     -> xv3.customers (customer_id -> hmr_customer_id)
-    //     -> cms.mart_cms_bidder_registrations (customer_id -> plaintext email)
-    //     -> cms.mart_cms_bid_history_report (email -> first-ever bid time)
-    //
-    // A lot is Unclassified if ANY hop in that chain fails to resolve —
-    // confirmed this happens for auctions that never posted through
-    // xv3.postings at all (e.g. "AA114", an internal employee-bidding
-    // auction with zero posting rows), not as a general data-quality gap.
-    // Verified in a real sample: once a lot reaches a bidder email, it
-    // always finds a bid_history record (0 "bridged but no history"
-    // cases) — so f.first_ever_bid_at IS NULL is a safe single test for
-    // "the bridge did not fully resolve," covering every failure hop.
-    //
-    // New = bidder's first-ever bid (across all of bid_history, not just
-    // this period) falls on/after the selected range's start.
+    // New = bidder's first-ever auction participation (competitive bid OR
+    // negotiated purchase, whichever came first, across all history, not
+    // just this period) falls on/after the selected range's start.
     // Returning = it falls before the selected range's start.
-    // These are never guessed — an unresolved bidder is Unclassified,
-    // never assumed New or Returning.
     // =========================================================
     const settledCompositionResult = await client.query({
       query: `
@@ -330,7 +318,9 @@ export default async function handler(req, res) {
           SELECT
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount
+            any(v.bid_amount) AS lot_bid_amount,
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -344,125 +334,68 @@ export default async function handler(req, res) {
           GROUP BY v.auction_number, v.lot_number
         ),
 
-        posting_customer AS (
-          SELECT
-            au.auction_number AS pc_auction_number,
-            p.lot_number AS pc_lot_number,
-            any(p.customer_id) AS pc_customer_id
-
-          FROM xv3.postings p
-
-          INNER JOIN xv3.auctions au
-            ON p.auction_id = au.auction_id
-
-          WHERE p.customer_id IS NOT NULL
-            AND p.customer_id != 0
-
-          GROUP BY au.auction_number, p.lot_number
-        ),
-
-        customer_bridge AS (
-          SELECT
-            customer_id AS br_customer_id,
-            any(hmr_customer_id) AS br_hmr_customer_id
-
-          FROM xv3.customers
-
-          WHERE hmr_customer_id IS NOT NULL
-
-          GROUP BY customer_id
-        ),
-
-        cms_bidder_email AS (
-          SELECT
-            customer_id AS cb_customer_id,
-            any(lowerUTF8(trim(email))) AS cb_email
-
-          FROM cms.mart_cms_bidder_registrations
-
-          WHERE customer_id IS NOT NULL
-            AND email IS NOT NULL
-
-          GROUP BY customer_id
-        ),
-
-        bidder_first_ever_bid AS (
-          SELECT
-            lowerUTF8(trim(email)) AS bidder_key,
-            min(bid_created_at) AS first_ever_bid_at
-
-          FROM cms.mart_cms_bid_history_report
-
-          WHERE bid_created_at IS NOT NULL
-            AND email IS NOT NULL
-            AND trim(email) != ''
-
-          GROUP BY bidder_key
-        )
+        ${BIDDER_IDENTITY_CTES}
 
         SELECT
           count() AS total_lots,
           sum(ifNull(sl.lot_bid_amount, 0)) AS total_bid_amount,
 
-          countIf(f.first_ever_bid_at IS NULL) AS unclassified_lots,
-          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS unclassified_bid_amount,
+          countIf(fe.first_ever_at IS NULL) AS unclassified_lots,
+          sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NULL) AS unclassified_bid_amount,
 
           countIf(
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS new_bidder_lots,
           sumIf(
             ifNull(sl.lot_bid_amount, 0),
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS new_bidders_bid_amount,
 
-          -- Distinct bidder counts use the bridged plaintext email — the
+          -- Distinct bidder counts use the resolved canonical email — the
           -- same identity the classification itself is keyed on. Only
-          -- lots with a fully-resolved bridge (cb_email/f.first_ever_bid_at
-          -- non-null) ever contribute here, so an unclassified lot can
-          -- never be miscounted as a distinct New/Returning bidder.
+          -- lots with a fully-resolved identity (resolved_email/
+          -- fe.first_ever_at non-null) ever contribute here, so an
+          -- unresolved lot can never be miscounted as a distinct
+          -- New/Returning bidder.
           uniqExactIf(
-            cb_email,
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS new_bidders,
 
           countIf(
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS returning_bidder_lots,
           sumIf(
             ifNull(sl.lot_bid_amount, 0),
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS returning_bidders_bid_amount,
 
           uniqExactIf(
-            cb_email,
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS returning_bidders
 
         FROM settled_lots sl
 
-        LEFT JOIN posting_customer
-          ON sl.auction_number = pc_auction_number AND sl.lot_number = pc_lot_number
+        LEFT JOIN resolved_lot_identity rli
+          ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
 
-        LEFT JOIN customer_bridge
-          ON pc_customer_id = br_customer_id
-
-        LEFT JOIN cms_bidder_email
-          ON br_hmr_customer_id = cb_customer_id
-
-        LEFT JOIN bidder_first_ever_bid f
-          ON cb_email = f.bidder_key
+        LEFT JOIN bidder_first_ever fe
+          ON rli.resolved_email = fe.fe_key
       `,
       query_params: queryParams,
       format: "JSONEachRow",
     });
 
-    // Per-auction breakdown of the same settled/bridge classification.
+    // Per-auction breakdown of the same settled/bridge classification —
+    // uses the identical BIDDER_IDENTITY_CTES bridge as settledCompositionResult
+    // above, just grouped by auction instead of summed overall.
     const settledPerAuctionResult = await client.query({
       query: `
         WITH selected_auctions AS (
@@ -478,7 +411,9 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             any(a.store_name) AS store_name,
-            any(v.bid_amount) AS lot_bid_amount
+            any(v.bid_amount) AS lot_bid_amount,
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -492,61 +427,7 @@ export default async function handler(req, res) {
           GROUP BY v.auction_number, v.lot_number
         ),
 
-        posting_customer AS (
-          SELECT
-            au.auction_number AS pc_auction_number,
-            p.lot_number AS pc_lot_number,
-            any(p.customer_id) AS pc_customer_id
-
-          FROM xv3.postings p
-
-          INNER JOIN xv3.auctions au
-            ON p.auction_id = au.auction_id
-
-          WHERE p.customer_id IS NOT NULL
-            AND p.customer_id != 0
-
-          GROUP BY au.auction_number, p.lot_number
-        ),
-
-        customer_bridge AS (
-          SELECT
-            customer_id AS br_customer_id,
-            any(hmr_customer_id) AS br_hmr_customer_id
-
-          FROM xv3.customers
-
-          WHERE hmr_customer_id IS NOT NULL
-
-          GROUP BY customer_id
-        ),
-
-        cms_bidder_email AS (
-          SELECT
-            customer_id AS cb_customer_id,
-            any(lowerUTF8(trim(email))) AS cb_email
-
-          FROM cms.mart_cms_bidder_registrations
-
-          WHERE customer_id IS NOT NULL
-            AND email IS NOT NULL
-
-          GROUP BY customer_id
-        ),
-
-        bidder_first_ever_bid AS (
-          SELECT
-            lowerUTF8(trim(email)) AS bidder_key,
-            min(bid_created_at) AS first_ever_bid_at
-
-          FROM cms.mart_cms_bid_history_report
-
-          WHERE bid_created_at IS NOT NULL
-            AND email IS NOT NULL
-            AND trim(email) != ''
-
-          GROUP BY bidder_key
-        )
+        ${BIDDER_IDENTITY_CTES}
 
         SELECT
           sl.auction_number AS auction_number,
@@ -556,55 +437,49 @@ export default async function handler(req, res) {
 
           sumIf(
             ifNull(sl.lot_bid_amount, 0),
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_new_bid_amount,
 
           countIf(
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_new_lots,
 
           uniqExactIf(
-            cb_email,
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_new_bidders,
 
           sumIf(
             ifNull(sl.lot_bid_amount, 0),
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_returning_bid_amount,
 
           countIf(
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_returning_lots,
 
           uniqExactIf(
-            cb_email,
-            f.first_ever_bid_at IS NOT NULL
-            AND f.first_ever_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
           ) AS settled_returning_bidders,
 
-          sumIf(ifNull(sl.lot_bid_amount, 0), f.first_ever_bid_at IS NULL) AS settled_unclassified_bid_amount,
+          sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NULL) AS settled_unclassified_bid_amount,
 
-          countIf(f.first_ever_bid_at IS NULL) AS settled_unclassified_lots
+          countIf(fe.first_ever_at IS NULL) AS settled_unclassified_lots
 
         FROM settled_lots sl
 
-        LEFT JOIN posting_customer
-          ON sl.auction_number = pc_auction_number AND sl.lot_number = pc_lot_number
+        LEFT JOIN resolved_lot_identity rli
+          ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
 
-        LEFT JOIN customer_bridge
-          ON pc_customer_id = br_customer_id
-
-        LEFT JOIN cms_bidder_email
-          ON br_hmr_customer_id = cb_customer_id
-
-        LEFT JOIN bidder_first_ever_bid f
-          ON cb_email = f.bidder_key
+        LEFT JOIN bidder_first_ever fe
+          ON rli.resolved_email = fe.fe_key
 
         GROUP BY sl.auction_number
         ORDER BY sl.auction_number
@@ -856,12 +731,23 @@ export default async function handler(req, res) {
         };
       }),
 
-      // Same population/bridge as composition.unclassified_lots/
-      // unclassified_bid_amount above — deliberately reused rather than
-      // recomputed, so these can never independently drift from the
-      // Bidder Composition figures.
-      unattributed_bidder_lots: Number(settledComposition.unclassified_lots ?? 0),
-      unattributed_bidder_bid_amount: Number(settledComposition.unclassified_bid_amount ?? 0),
+      // Top Bidders (settledBiddersResult above) intentionally still uses
+      // only the primary competitive bridge — its ranking population is
+      // unchanged by the negotiated-fallback bridge added to Bidder
+      // Composition. So this gap is computed independently from
+      // settledComposition.unclassified_* (which now reflects the wider
+      // two-path bridge and is usually far smaller/zero) rather than reused
+      // from it, to avoid the two figures silently drifting apart.
+      unattributed_bidder_lots: Math.max(
+        0,
+        Number(settledComposition.total_lots ?? 0) -
+          settledBidderRows.reduce((sum, row) => sum + (Number(row.settled_lots) || 0), 0)
+      ),
+      unattributed_bidder_bid_amount: Math.max(
+        0,
+        Number(settledComposition.total_bid_amount ?? 0) -
+          settledBidderRows.reduce((sum, row) => sum + (Number(row.settled_bid_amount) || 0), 0)
+      ),
 
       perAuctionComposition: settledPerAuctionRows.map((row) => ({
         auction_number: row.auction_number,
