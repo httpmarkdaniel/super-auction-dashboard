@@ -25,7 +25,7 @@ import { ALL_STORES, STORE_OPTIONS } from "./mockData";
 import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
-import { resolveDateRange, defaultDateRange } from "./utils/dateRange";
+import { resolveDateRange, defaultDateRange, comparisonLabel } from "./utils/dateRange";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -108,7 +108,7 @@ const EMPTY_OVERVIEW = {
 
   auctionSummary: [],
   bidTrend: [],
-  bidTrendGrain: "day",
+  comparison: null,
 
   topVendors: [],
   topBidders: [],
@@ -172,6 +172,27 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   const categoryTotal =
     categoryRows.reduce((s, c) => s + Number(c.bid_amount), 0) || 1;
 
+  // Full financial-story fields for the Category & Branch hover detail —
+  // same settled population as bidAmount, see api/overview.js's SETTLED
+  // BRANCH/CATEGORY query comments (auction_count is DISTINCT auction_
+  // number, never a lot count).
+  function withHoverDetail(row) {
+    const auctionCount = Number(row.auction_count) || 0;
+    const lotsSold = Number(row.lots_sold) || 0;
+    const buyersPremium = Number(row.buyers_premium_income) || 0;
+    const commission = Number(row.commission_income) || 0;
+    const bidAmount = Number(row.bid_amount) || 0;
+    return {
+      auctionCount,
+      lotsSold,
+      buyersPremiumIncome: buyersPremium,
+      commissionIncome: commission,
+      serviceIncome: buyersPremium + commission,
+      avgBidPerAuction: auctionCount > 0 ? bidAmount / auctionCount : null,
+      avgBidPerSoldLot: lotsSold > 0 ? bidAmount / lotsSold : null,
+    };
+  }
+
   const categoryBreakdown = categoryRows
     .slice(0, 8)
     .map((c) => ({
@@ -180,6 +201,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       share: Number(
         ((Number(c.bid_amount) / categoryTotal) * 100).toFixed(1),
       ),
+      ...withHoverDetail(c),
     }));
 
   const channelRows = categories.channels || [];
@@ -207,14 +229,24 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     .slice(7)
     .reduce((s, b) => s + Number(b.bid_amount), 0);
 
+  const otherBranchesRows = branchRows.slice(7);
+  const otherBranchesRollup = {
+    auction_count: otherBranchesRows.reduce((s, b) => s + (Number(b.auction_count) || 0), 0),
+    lots_sold: otherBranchesRows.reduce((s, b) => s + (Number(b.lots_sold) || 0), 0),
+    buyers_premium_income: otherBranchesRows.reduce((s, b) => s + (Number(b.buyers_premium_income) || 0), 0),
+    commission_income: otherBranchesRows.reduce((s, b) => s + (Number(b.commission_income) || 0), 0),
+    bid_amount: otherBranchesTotal,
+  };
+
   const branchBreakdown = [
     ...topBranches.map((b) => ({
       branch: b.branch,
       bidAmount: Number(b.bid_amount),
+      ...withHoverDetail(b),
     })),
 
     ...(otherBranchesTotal > 0
-      ? [{ branch: "Others", bidAmount: otherBranchesTotal }]
+      ? [{ branch: "Others", bidAmount: otherBranchesTotal, ...withHoverDetail(otherBranchesRollup) }]
       : []),
   ].map((b) => ({
     ...b,
@@ -575,21 +607,60 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 
     // Auction-grain drilldown rows behind Total Bid Amount/Auctions
     // Concluded/Avg Bid per Auction/Avg Bid per Sold Lot/Lots Sold/Listed
-    // — see api/overview.js's AUCTION-LEVEL SUMMARY query comment.
-    auctionSummary: (kpis.auction_summary || []).map((a) => ({
-      auctionNumber: a.auction_number,
-      name: a.name,
-      storeName: a.store_name,
-      startingTime: a.starting_time,
-      lotsListed: Number(a.lots_listed) || 0,
-      lotsSold: Number(a.lots_sold) || 0,
-      lotsUnsold: Number(a.lots_unsold) || 0,
-      settledBidAmount: Number(a.settled_bid_amount) || 0,
-      settledLotCount: Number(a.settled_lot_count) || 0,
-    })),
+    // — see api/overview.js's AUCTION-LEVEL SUMMARY query comment, merged
+    // with the SAME per-auction Participating/Winning breakdowns
+    // api/leaderboards.js already computes (perAuctionBiddingActivity /
+    // perAuctionComposition) — reused, not refetched, so the Auctions
+    // Concluded drilldown's per-auction bidder composition costs zero
+    // extra requests.
+    auctionSummary: (() => {
+      const winningByAuction = new Map(
+        (leaderboards.perAuctionComposition || []).map((a) => [a.auction_number, a]),
+      );
+      const participatingByAuction = new Map(
+        (leaderboards.perAuctionBiddingActivity || []).map((a) => [a.auction_number, a]),
+      );
+      return (kpis.auction_summary || []).map((a) => {
+        const w = winningByAuction.get(a.auction_number) || {};
+        const p = participatingByAuction.get(a.auction_number) || {};
+        return {
+          auctionNumber: a.auction_number,
+          name: a.name,
+          storeName: a.store_name,
+          startingTime: a.starting_time,
+          lotsListed: Number(a.lots_listed) || 0,
+          lotsSold: Number(a.lots_sold) || 0,
+          lotsUnsold: Number(a.lots_unsold) || 0,
+          settledBidAmount: Number(a.settled_bid_amount) || 0,
+          settledLotCount: Number(a.settled_lot_count) || 0,
+          participating: {
+            total: Number(p.participating_bidders) || 0,
+            newBidders: Number(p.participating_new_bidders) || 0,
+            returningBidders: Number(p.participating_returning_bidders) || 0,
+            activity: Number(p.participating_bid_amount) || 0,
+            newActivity: Number(p.participating_new_bid_amount) || 0,
+            returningActivity: Number(p.participating_returning_bid_amount) || 0,
+          },
+          winning: {
+            total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),
+            newBidders: Number(w.new_bidders) || 0,
+            returningBidders: Number(w.returning_bidders) || 0,
+            amount:
+              (Number(w.new_bidders_bid_amount) || 0) +
+              (Number(w.returning_bidders_bid_amount) || 0) +
+              (Number(w.unclassified_bid_amount) || 0),
+            newAmount: Number(w.new_bidders_bid_amount) || 0,
+            returningAmount: (Number(w.returning_bidders_bid_amount) || 0) + (Number(w.unclassified_bid_amount) || 0),
+          },
+        };
+      });
+    })(),
 
     bidTrend: kpis.bid_trend || [],
-    bidTrendGrain: kpis.bid_trend_grain || "day",
+
+    // Dynamic period-over-period comparison — see api/overview.js's
+    // DYNAMIC COMPARISON PERIOD query comment. null when not computed.
+    comparison: kpis.comparison || null,
 
     topVendors,
 
@@ -655,11 +726,14 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 function OverviewTab({
   overview,
   rangeLabel,
+  compareLabel,
   loading,
   error,
   categoryOptions,
   selectedCategory,
   onCategoryChange,
+  onSelectBranch,
+  onSelectCategory,
 }) {
   const story = buildStoryline();
 
@@ -684,12 +758,13 @@ function OverviewTab({
         <HeroKPIs
           overview={overview}
           rangeLabel={rangeLabel}
+          compareLabel={compareLabel}
         />
       </div>
 
       <StorySection
         title="Bid Trend"
-        insight="Settled bid performance over the selected range, plus who's participating vs. who's winning."
+        insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
       >
         <div className="flex items-center justify-end gap-1.5 mb-3">
           <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold">Overview Category</span>
@@ -707,9 +782,14 @@ function OverviewTab({
           </div>
         </div>
 
-        <BidTrendChart data={overview.bidTrend} grain={overview.bidTrendGrain} rangeLabel={rangeLabel} />
+        <BidTrendChart data={overview.bidTrend} rangeLabel={rangeLabel} />
+      </StorySection>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+      <StorySection
+        title="Bidder Composition"
+        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <BidderPopulationCard
             title="Participating Bidders"
             total={overview.participatingComposition.total}
@@ -739,11 +819,13 @@ function OverviewTab({
           <CategoryStrip
             data={overview.categoryBreakdown}
             rangeLabel={rangeLabel}
+            onSelectCategory={onSelectCategory}
           />
 
           <BranchStrip
             data={overview.branchBreakdown}
             rangeLabel={rangeLabel}
+            onSelectBranch={onSelectBranch}
           />
         </div>
       </StorySection>
@@ -804,6 +886,13 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] =
     useState(false);
 
+  // Pre-applied Full Auction Detail search text when arriving from an
+  // Overview category click (see AuctionSummaryTable's own free-text
+  // "auction #, name, branch, or category" filter — reused as-is rather
+  // than building a second, parallel category-filter mechanism). Cleared
+  // whenever the user navigates to Full Auction Detail any other way.
+  const [fadInitialQuery, setFadInitialQuery] = useState("");
+
   const contentRef = useRef(null);
 
   function goHome() {
@@ -812,6 +901,21 @@ export default function App() {
     if (contentRef.current) {
       contentRef.current.scrollTop = 0;
     }
+  }
+
+  // Branch click: reuse the existing global Store filter — Full Auction
+  // Detail already scopes by it. Category click: pre-fill the existing
+  // free-text search with the canonical category name. Both preserve the
+  // currently selected global date range (untouched) and land on Full
+  // Auction Detail, never a duplicate page.
+  function goToFullAuctionDetailForBranch(branch) {
+    setStore(branch);
+    setFadInitialQuery("");
+    setTab("Full Auction Detail");
+  }
+  function goToFullAuctionDetailForCategory(category) {
+    setFadInitialQuery(category);
+    setTab("Full Auction Detail");
   }
 
   const [refreshNonce, setRefreshNonce] =
@@ -855,6 +959,8 @@ export default function App() {
 
   const rangeLabel =
     resolveDateRange(dateRange).label;
+
+  const compareLabel = comparisonLabel(dateRange);
 
   const bidCorrectionDelta =
     useLiveBidCorrection(
@@ -932,6 +1038,7 @@ export default function App() {
             <OverviewTab
               overview={overview}
               rangeLabel={rangeLabel}
+              compareLabel={compareLabel}
               loading={overviewLoading}
               error={overviewError}
               categoryOptions={CATEGORY_TABS}
@@ -939,6 +1046,8 @@ export default function App() {
               onCategoryChange={
                 setOverviewCategory
               }
+              onSelectBranch={goToFullAuctionDetailForBranch}
+              onSelectCategory={goToFullAuctionDetailForCategory}
             />
           )}
 
@@ -1002,6 +1111,7 @@ export default function App() {
               dateRange={dateRange}
               rangeLabel={rangeLabel}
               refreshNonce={refreshNonce}
+              initialQuery={fadInitialQuery}
             />
           )}
 

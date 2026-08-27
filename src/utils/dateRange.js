@@ -84,3 +84,74 @@ export function resolveDateRange(value) {
     label: preset.label,
   };
 }
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function daysInMonth(year, month) {
+  // month is 0-indexed; day 0 of the next month is the last day of this one.
+  return new Date(year, month + 1, 0).getDate();
+}
+
+// The comparable PREVIOUS period for a given date-range selection, using
+// the SAME elapsed-window rule the task requires per preset — never a
+// blanket "shift back N days" for every preset (that's only correct for
+// WTD/Custom; MTD and YTD need calendar-aware month/year shifting so a
+// partial current period compares against an equally partial previous
+// one, not a full one). Returns { from, to } only — no label; see
+// comparisonLabel() for the display string.
+export function resolveComparisonRange(value) {
+  const current = resolveDateRange(value);
+  const isCustom = value && typeof value === "object" && value.key === "custom";
+  const presetKey = isCustom ? null : (RANGE_PRESETS.find((p) => p.key === value)?.key ?? "wtd");
+
+  const from = new Date(`${current.from}T00:00:00`);
+  const to = new Date(`${current.to}T00:00:00`);
+
+  if (presetKey === "wtd") {
+    // Same weekday-elapsed window, 7 days earlier.
+    return { from: toLocalISODate(addDays(from, -7)), to: toLocalISODate(addDays(to, -7)) };
+  }
+
+  if (presetKey === "mtd") {
+    const prevMonthDate = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    const prevYear = prevMonthDate.getFullYear();
+    const prevMonth = prevMonthDate.getMonth();
+    const elapsedDay = to.getDate();
+    const clampedDay = Math.min(elapsedDay, daysInMonth(prevYear, prevMonth));
+    return {
+      from: toLocalISODate(new Date(prevYear, prevMonth, 1)),
+      to: toLocalISODate(new Date(prevYear, prevMonth, clampedDay)),
+    };
+  }
+
+  if (presetKey === "ytd") {
+    const prevYear = from.getFullYear() - 1;
+    const toPrevYear = to.getFullYear() - 1;
+    // Feb 29 -> Feb 28 when the previous year isn't a leap year.
+    const clampedDay = Math.min(to.getDate(), daysInMonth(toPrevYear, to.getMonth()));
+    return {
+      from: toLocalISODate(new Date(prevYear, 0, 1)),
+      to: toLocalISODate(new Date(toPrevYear, to.getMonth(), clampedDay)),
+    };
+  }
+
+  // Custom: immediately preceding period of identical length.
+  const spanDays = Math.round((to - from) / 86400000) + 1;
+  const compareTo = addDays(from, -1);
+  const compareFrom = addDays(compareTo, -(spanDays - 1));
+  return { from: toLocalISODate(compareFrom), to: toLocalISODate(compareTo) };
+}
+
+// Display label for the comparison delta shown next to a scorecard.
+export function comparisonLabel(value) {
+  const isCustom = value && typeof value === "object" && value.key === "custom";
+  if (isCustom) return "vs previous period";
+  if (value === "wtd") return "vs previous week-to-date";
+  if (value === "mtd") return "vs previous month-to-date";
+  if (value === "ytd") return "vs previous year-to-date";
+  return "vs previous period";
+}

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
+import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import { formatPeso } from "../utils/format";
 
@@ -40,8 +41,8 @@ const METHODOLOGY = {
     "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
 };
 
-export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
-  const { heroKPIs, unsoldLots, operationsDetail, auctionSummary, serviceIncomeLots } = overview;
+export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel }) {
+  const { heroKPIs, unsoldLots, operationsDetail, auctionSummary, serviceIncomeLots, categoryBreakdown, branchBreakdown, comparison } = overview;
   const [drilldown, setDrilldown] = useState(null);
 
   const lotsByAuction = useMemo(() => {
@@ -80,6 +81,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
             sub="Settled · Paid & Released"
             methodology={METHODOLOGY.totalBidAmount}
             onClick={() => setDrilldown("totalBidAmount")}
+            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.total_bid_amount_pct }] : []}
           />
           <StatTile
             icon={ICONS.gavel}
@@ -87,6 +89,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
             value={heroKPIs.auctionsConcluded}
             methodology={METHODOLOGY.auctionsConcluded}
             onClick={() => setDrilldown("auctionsConcluded")}
+            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.auctions_concluded_pct }] : []}
           />
           <StatTile
             icon={ICONS.chart}
@@ -94,6 +97,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
             value={heroKPIs.avgBidPerAuction != null ? formatPeso(heroKPIs.avgBidPerAuction) : "—"}
             methodology={METHODOLOGY.avgBidPerAuction}
             onClick={() => setDrilldown("avgBidPerAuction")}
+            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.avg_bid_per_auction_pct }] : []}
           />
           <StatTile
             icon={ICONS.target}
@@ -101,6 +105,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
             value={heroKPIs.avgBidPerSoldLot != null ? formatPeso(heroKPIs.avgBidPerSoldLot) : "—"}
             methodology={METHODOLOGY.avgBidPerSoldLot}
             onClick={() => setDrilldown("avgBidPerSoldLot")}
+            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.avg_bid_per_sold_lot_pct }] : []}
           />
         </div>
       </div>
@@ -114,7 +119,10 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
           sub={`${sellThroughPct}% sell-through`}
           methodology={METHODOLOGY.lotsSoldListed}
           onClick={() => setDrilldown("lotsSoldListed")}
-          extraDeltas={[{ label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} unsold value` }]}
+          extraDeltas={[
+            ...(comparison ? [{ label: compareLabel, pct: comparison.lots_sold_pct }] : []),
+            { label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} unsold value` },
+          ]}
         />
         <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5">
           <div className="flex items-center gap-1.5 mb-2.5">
@@ -139,6 +147,14 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
           <div className="text-[14.5px] text-ink">
             {heroKPIs.participatingRegisteredBidders} of {heroKPIs.registeredCustomers} registered
           </div>
+          {comparison && comparison.registration_conversion_pct != null && (
+            <div className="text-[13px] mt-1.5">
+              <span className={comparison.registration_conversion_pct >= 0 ? "text-toneGreenText" : "text-toneRedText"}>
+                {comparison.registration_conversion_pct >= 0 ? "▲" : "▼"} {Math.abs(comparison.registration_conversion_pct).toFixed(1)}%
+              </span>
+              <span className="text-muted ml-1">{compareLabel}</span>
+            </div>
+          )}
           <div
             role="tooltip"
             className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
@@ -153,6 +169,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
           sub="HMR revenue · Paid & Released"
           methodology={METHODOLOGY.serviceIncome}
           onClick={() => setDrilldown("serviceIncome")}
+          extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.service_income_pct }] : []}
         />
       </div>
 
@@ -163,14 +180,15 @@ export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
         rangeLabel={rangeLabel}
       />
 
-      <AuctionSummaryModal
+      <TotalBidAmountModal
         open={drilldown === "totalBidAmount"}
         onClose={() => setDrilldown(null)}
-        title="Total Bid Amount · Contributing Auctions"
-        subtitle={`${rangeLabel} · settled Paid/Released lots only`}
-        rows={settledAuctionSummary}
-        highlight="amount"
-        lotsByAuction={lotsByAuction}
+        rangeLabel={rangeLabel}
+        compareLabel={compareLabel}
+        heroKPIs={heroKPIs}
+        comparison={comparison}
+        categoryBreakdown={categoryBreakdown}
+        branchBreakdown={branchBreakdown}
       />
       <AuctionSummaryModal
         open={drilldown === "auctionsConcluded"}

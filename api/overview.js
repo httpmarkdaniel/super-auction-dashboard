@@ -1,6 +1,7 @@
 import { createClient } from "@clickhouse/client";
 import { getLiveLotsSafe } from "./_liveBids.js";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
+import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -80,7 +81,7 @@ const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "", category = "", type = "summary" } = req.query;
+    const { from, to, store = "", category = "", type = "summary", compareFrom = "", compareTo = "" } = req.query;
 
     if (type === "active-auctions") {
       const result = await client.query({
@@ -1301,24 +1302,21 @@ export default async function handler(req, res) {
     const auctionSummaryRows = await auctionSummaryResult.json();
 
     // ---------------------------------------------------------
-    // BID TREND
+    // BID TREND — always daily, one point per calendar day in range.
     //
-    // Same settled_lots population as Total Bid Amount, bucketed by the
-    // auction's own starting_time (same scoping convention as every other
-    // settled query in this file) instead of collapsed to one number.
-    // Grain adapts to the selected range's day-span — daily for <= 45
-    // days (covers Week/Month to Date and any custom range that size),
-    // monthly beyond that (covers Year to Date and longer custom ranges)
-    // — so a Year to Date trend renders ~12 points, not ~250.
+    // WINNING side: same settled_lots population as Total Bid Amount,
+    // bucketed by the auction's own starting_time day (same scoping
+    // convention as every other settled query in this file). Identity
+    // resolved through the SAME canonical bridge as Bidder Composition
+    // (BIDDER_IDENTITY_CTES) — not a new classifier. Unresolved identity
+    // is folded into the returning amount server-side, matching the
+    // established Overview presentation rule (never a separate Unresolved
+    // bucket), while returning/new COUNTS only ever include a resolved
+    // identity — an unresolved lot's value is real and must still land
+    // somewhere, but it never manufactures a returning bidder who doesn't
+    // exist.
     // ---------------------------------------------------------
-    const daySpan = Math.max(
-      1,
-      Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000) + 1,
-    );
-    const trendGrain = daySpan <= 45 ? "day" : "month";
-    const bucketExpr = trendGrain === "day" ? "toDate(a.auction_starting_time)" : "toStartOfMonth(a.auction_starting_time)";
-
-    const bidTrendResult = await client.query({
+    const bidTrendResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT
@@ -1334,8 +1332,12 @@ export default async function handler(req, res) {
         settled_lots AS (
           SELECT
             v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
-            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category,
+            any(a.auction_starting_time) AS auction_starting_time
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1349,17 +1351,41 @@ export default async function handler(req, res) {
           GROUP BY v.auction_number, v.lot_number
 
           HAVING ({category:String} = '' OR lot_category = {category:String})
-        )
+        ),
+
+        ${BIDDER_IDENTITY_CTES}
 
         SELECT
-          ${bucketExpr} AS bucket,
+          toDate(sl.auction_starting_time) AS bucket,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
-          countDistinct(sl.auction_number) AS auctions_concluded
+          countDistinct(sl.auction_number) AS auctions_concluded,
+          count() AS lots_sold,
+
+          uniqExactIf(
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS winning_new,
+          uniqExactIf(
+            rli.resolved_email,
+            fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS winning_returning,
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS winning_new_amount,
+          sumIf(
+            ifNull(sl.lot_bid_amount, 0),
+            (fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila'))
+            OR fe.first_ever_at IS NULL
+          ) AS winning_returning_amount
 
         FROM settled_lots sl
 
-        INNER JOIN selected_auctions a
-          ON sl.auction_number = a.auction_number
+        LEFT JOIN resolved_lot_identity rli
+          ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+
+        LEFT JOIN bidder_first_ever fe
+          ON rli.resolved_email = fe.fe_key
 
         GROUP BY bucket
         ORDER BY bucket
@@ -1368,7 +1394,133 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const bidTrendRows = await bidTrendResult.json();
+    // ---------------------------------------------------------
+    // BID TREND — PARTICIPATING side, bucketed by the bid EVENT's own day
+    // (bid_created_at), not the auction's starting_time — Participating is
+    // an activity signal (when did the bidding happen), unlike Winning's
+    // settled/auction-anchored day. Same first-ever-bid classification and
+    // source table as api/leaderboards.js's compositionResult, just
+    // grouped by day instead of collapsed to one number.
+    // ---------------------------------------------------------
+    const bidTrendParticipatingResultPromise = client.query({
+      query: `
+        WITH auction_store AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE auction_number IS NOT NULL
+        ),
+
+        lot_category AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        bidder_first_bid AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bid_created_at) AS first_bid_at
+          FROM cms.mart_cms_bid_history_report
+          WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+          GROUP BY bidder_key
+        ),
+
+        daily_bidder_activity AS (
+          SELECT
+            toDate(b.bid_created_at, 'Asia/Manila') AS bucket,
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            sum(b.bid_amount) AS bidder_day_amount
+
+          FROM cms.mart_cms_bid_history_report b
+
+          INNER JOIN auction_store s
+            ON b.auction_number = s.auction_number
+
+          LEFT JOIN lot_category lc
+            ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+
+          WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR s.store_name = {store:String})
+            AND b.email IS NOT NULL AND trim(b.email) != ''
+            AND ({category:String} = '' OR lc.lot_category = {category:String})
+
+          GROUP BY bucket, bidder_key
+        )
+
+        SELECT
+          d.bucket AS bucket,
+
+          uniqExactIf(d.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+          uniqExactIf(d.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+          sumIf(d.bidder_day_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+          sumIf(d.bidder_day_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount
+
+        FROM daily_bidder_activity d
+
+        INNER JOIN bidder_first_bid f
+          ON d.bidder_key = f.bidder_key
+
+        GROUP BY bucket
+        ORDER BY bucket
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const [bidTrendResult, bidTrendParticipatingResult] = await Promise.all([
+      bidTrendResultPromise,
+      bidTrendParticipatingResultPromise,
+    ]);
+    const bidTrendWinningRows = await bidTrendResult.json();
+    const bidTrendParticipatingRows = await bidTrendParticipatingResult.json();
+
+    // Merge the two per-day result sets (different source tables/bucket
+    // dimensions — see each query's own comment) by bucket date into one
+    // row per day. A day with settled value but no participating rows (or
+    // vice versa) still gets a row — never silently dropped.
+    const bidTrendByBucket = new Map();
+    function bidTrendBucket(key) {
+      if (!bidTrendByBucket.has(key)) {
+        bidTrendByBucket.set(key, {
+          bucket: key,
+          bid_amount: 0,
+          auctions_concluded: 0,
+          lots_sold: 0,
+          winning_new: 0,
+          winning_returning: 0,
+          winning_new_amount: 0,
+          winning_returning_amount: 0,
+          participating_new: 0,
+          participating_returning: 0,
+          participating_new_amount: 0,
+          participating_returning_amount: 0,
+        });
+      }
+      return bidTrendByBucket.get(key);
+    }
+    for (const row of bidTrendWinningRows) {
+      const b = bidTrendBucket(row.bucket);
+      b.bid_amount = Number(row.bid_amount ?? 0);
+      b.auctions_concluded = Number(row.auctions_concluded ?? 0);
+      b.lots_sold = Number(row.lots_sold ?? 0);
+      b.winning_new = Number(row.winning_new ?? 0);
+      b.winning_returning = Number(row.winning_returning ?? 0);
+      b.winning_new_amount = Number(row.winning_new_amount ?? 0);
+      b.winning_returning_amount = Number(row.winning_returning_amount ?? 0);
+    }
+    for (const row of bidTrendParticipatingRows) {
+      const b = bidTrendBucket(row.bucket);
+      b.participating_new = Number(row.participating_new ?? 0);
+      b.participating_returning = Number(row.participating_returning ?? 0);
+      b.participating_new_amount = Number(row.participating_new_amount ?? 0);
+      b.participating_returning_amount = Number(row.participating_returning_amount ?? 0);
+    }
+    const bidTrendRows = [...bidTrendByBucket.values()].sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
 
     // ---------------------------------------------------------
     // REGISTRATION -> BIDDER CONVERSION
@@ -1526,6 +1678,8 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             any(a.store_name) AS store_name,
             any(v.bid_amount) AS lot_bid_amount,
+            any(v.sold_price) AS lot_sold_price,
+            any(v.commission) AS lot_commission_pct,
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
@@ -1549,7 +1703,11 @@ export default async function handler(req, res) {
 
         SELECT
           store_name AS branch,
-          sum(ifNull(lot_bid_amount, 0)) AS bid_amount
+          sum(ifNull(lot_bid_amount, 0)) AS bid_amount,
+          countDistinct(auction_number) AS auction_count,
+          count() AS lots_sold,
+          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS buyers_premium_income,
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS commission_income
 
         FROM settled_lots
 
@@ -1592,6 +1750,8 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
+            any(v.sold_price) AS lot_sold_price,
+            any(v.commission) AS lot_commission_pct,
 
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
 
@@ -1611,7 +1771,11 @@ export default async function handler(req, res) {
 
         SELECT
           category,
-          sum(ifNull(lot_bid_amount, 0)) AS bid_amount
+          sum(ifNull(lot_bid_amount, 0)) AS bid_amount,
+          countDistinct(auction_number) AS auction_count,
+          count() AS lots_sold,
+          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS buyers_premium_income,
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS commission_income
 
         FROM settled_lots
 
@@ -2444,6 +2608,186 @@ export default async function handler(req, res) {
       .map(([category, bid_amount]) => ({ category, bid_amount }))
       .sort((a, b) => b.bid_amount - a.bid_amount);
 
+    // ---------------------------------------------------------
+    // DYNAMIC COMPARISON PERIOD — only runs when the frontend sent a
+    // comparable previous window (see resolveComparisonRange in
+    // src/utils/dateRange.js: same elapsed weekday/day-of-month/
+    // calendar-date window as the current selection, never a blanket
+    // rolling shift). Mirrors the exact same settled/lot-status/service-
+    // income/registration queries above, just against [compareFrom,
+    // compareTo] — same population, same definitions, nothing new. Custom
+    // ranges always resolve a comparison window (immediately preceding
+    // period of identical length), so this is skipped only if the
+    // frontend genuinely sent nothing.
+    // ---------------------------------------------------------
+    let comparison = null;
+    if (compareFrom && compareTo) {
+      const compareParams = { from: compareFrom, to: compareTo, store, category };
+
+      const [cmpSettledResult, cmpLotStatusResult, cmpServiceIncomeResult, cmpRegistrationResult] = await Promise.all([
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(v.bid_amount) AS lot_bid_amount,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            )
+            SELECT
+              sum(ifNull(lot_bid_amount, 0)) AS total_bid_amount,
+              countDistinct(auction_number) AS auctions_concluded,
+              count() AS settled_lot_count
+            FROM settled_lots
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number
+              FROM xv3.mart_auction_productivity_report
+              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            lots AS (
+              SELECT
+                v.auction_number,
+                v.lot_number,
+                argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+                max(ifNull(v.reserved_price, 0)) AS reserved_price,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            )
+            SELECT
+              count() AS listed_lots,
+              countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS sold_lots,
+              countIf(status = 'Unsold') AS unsold_lots,
+              sumIf(reserved_price, status = 'Unsold') AS unsold_value
+            FROM lots
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(v.bid_amount) AS lot_bid_amount,
+                any(v.sold_price) AS lot_sold_price,
+                any(v.commission) AS lot_commission_pct,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            )
+            SELECT
+              sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS service_income_buyers_premium,
+              sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission
+            FROM settled_lots
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number
+              FROM xv3.mart_auction_productivity_report
+              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            )
+            SELECT
+              uniqExact(r.customer_id) AS registered,
+              uniqExactIf(r.customer_id, r.is_participating_bidder = 1) AS participating
+            FROM cms.mart_cms_bidder_registrations r
+            INNER JOIN selected_auctions a ON r.auction_number = a.auction_number
+            WHERE r.customer_id IS NOT NULL
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const cmpSettled = (await cmpSettledResult.json())[0] ?? {};
+      const cmpLotStatus = (await cmpLotStatusResult.json())[0] ?? {};
+      const cmpServiceIncome = (await cmpServiceIncomeResult.json())[0] ?? {};
+      const cmpRegistration = (await cmpRegistrationResult.json())[0] ?? {};
+
+      const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
+      const cmpAuctionsConcluded = Number(cmpSettled.auctions_concluded ?? 0);
+      const cmpSettledLotCount = Number(cmpSettled.settled_lot_count ?? 0);
+      const cmpListedLots = Number(cmpLotStatus.listed_lots ?? 0);
+      const cmpSoldLots = Number(cmpLotStatus.sold_lots ?? 0);
+      const cmpUnsoldLots = Number(cmpLotStatus.unsold_lots ?? 0);
+      const cmpUnsoldValue = Number(cmpLotStatus.unsold_value ?? 0);
+      const cmpServiceIncomeTotal =
+        Number(cmpServiceIncome.service_income_buyers_premium ?? 0) + Number(cmpServiceIncome.service_income_commission ?? 0);
+      const cmpRegistered = Number(cmpRegistration.registered ?? 0);
+      const cmpParticipatingRegistered = Number(cmpRegistration.participating ?? 0);
+
+      // Safe % change: null (never a fabricated number) whenever the prior
+      // period had nothing to compare against.
+      const pctChange = (curr, prev) => (prev > 0 ? ((curr - prev) / prev) * 100 : null);
+
+      comparison = {
+        from: compareFrom,
+        to: compareTo,
+        total_bid_amount: cmpTotalBidAmount,
+        total_bid_amount_pct: pctChange(settledTotalBidAmount, cmpTotalBidAmount),
+        auctions_concluded: cmpAuctionsConcluded,
+        auctions_concluded_pct: pctChange(settledAuctionCount, cmpAuctionsConcluded),
+        avg_bid_per_auction_pct: pctChange(
+          settledAuctionCount > 0 ? settledTotalBidAmount / settledAuctionCount : null,
+          cmpAuctionsConcluded > 0 ? cmpTotalBidAmount / cmpAuctionsConcluded : null,
+        ),
+        avg_bid_per_sold_lot_pct: pctChange(
+          settledLotCount > 0 ? settledTotalBidAmount / settledLotCount : null,
+          cmpSettledLotCount > 0 ? cmpTotalBidAmount / cmpSettledLotCount : null,
+        ),
+        lots_sold_pct: pctChange(soldLots, cmpSoldLots),
+        lots_listed_pct: pctChange(listedLots, cmpListedLots),
+        unsold_lots: cmpUnsoldLots,
+        unsold_lots_pct: pctChange(unsoldLots, cmpUnsoldLots),
+        unsold_value_pct: pctChange(Number(lotStatus.unsold_value ?? 0), cmpUnsoldValue),
+        service_income_pct: pctChange(serviceIncomeBuyersPremium + serviceIncomeCommission, cmpServiceIncomeTotal),
+        registration_conversion_pct: pctChange(
+          registeredCustomers > 0 ? (participatingRegisteredBidders / registeredCustomers) * 100 : null,
+          cmpRegistered > 0 ? (cmpParticipatingRegistered / cmpRegistered) * 100 : null,
+        ),
+      };
+    }
+
     // =========================================================
     // SUMMARY RESPONSE
     // =========================================================
@@ -2451,6 +2795,11 @@ export default async function handler(req, res) {
       // Business definition of Total Bid Amount: settled (Paid/Released)
       // bid_amount only. See the SETTLED query comments above.
       total_bid_amount: settledTotalBidAmount,
+
+      // Dynamic period-over-period comparison — see DYNAMIC COMPARISON
+      // PERIOD query comment above. null when the frontend didn't send a
+      // comparable window (never a fabricated comparison).
+      comparison,
 
       // Today's Bid Amount: warehouse-only "latest bid placed today" — NOT
       // the settled Paid/Released definition used by Total Bid Amount
@@ -2524,13 +2873,26 @@ export default async function handler(req, res) {
         settled_lot_count: Number(row.settled_lot_count ?? 0),
       })),
 
-      // Bid Trend — see BID TREND query comment above for grain selection.
+      // Bid Trend — always daily, each row is that single day only (never
+      // a cumulative/period total) — see BID TREND query comments above.
       bid_trend: bidTrendRows.map((row) => ({
         bucket: row.bucket,
-        bid_amount: Number(row.bid_amount ?? 0),
-        auctions_concluded: Number(row.auctions_concluded ?? 0),
+        bid_amount: row.bid_amount,
+        auctions_concluded: row.auctions_concluded,
+        lots_sold: row.lots_sold,
+        winning: {
+          new: row.winning_new,
+          returning: row.winning_returning,
+          new_amount: row.winning_new_amount,
+          returning_amount: row.winning_returning_amount,
+        },
+        participating: {
+          new: row.participating_new,
+          returning: row.participating_returning,
+          new_amount: row.participating_new_amount,
+          returning_amount: row.participating_returning_amount,
+        },
       })),
-      bid_trend_grain: trendGrain,
 
       // Registration -> Bidder Conversion — see REGISTRATION -> BIDDER
       // CONVERSION query comment above for cohort definition.
@@ -2574,11 +2936,19 @@ export default async function handler(req, res) {
       branches: settledBranchRows.map((row) => ({
         branch: row.branch,
         bid_amount: Number(row.bid_amount ?? 0),
+        auction_count: Number(row.auction_count ?? 0),
+        lots_sold: Number(row.lots_sold ?? 0),
+        buyers_premium_income: Number(row.buyers_premium_income ?? 0),
+        commission_income: Number(row.commission_income ?? 0),
       })),
 
       categories: settledCategoryRows.map((row) => ({
         category: row.category,
         bid_amount: Number(row.bid_amount ?? 0),
+        auction_count: Number(row.auction_count ?? 0),
+        lots_sold: Number(row.lots_sold ?? 0),
+        buyers_premium_income: Number(row.buyers_premium_income ?? 0),
+        commission_income: Number(row.commission_income ?? 0),
       })),
 
       // Bidding Activity by Hour (CategoryView-only today) — see the

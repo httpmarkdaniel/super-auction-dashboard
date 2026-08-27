@@ -3,7 +3,7 @@ import StorySection from "./primitives/StorySection";
 import AuctionSummaryTable from "./AuctionSummaryTable";
 import { useFullAuctionDetail } from "../useFullAuctionDetail";
 
-export default function FullAuctionDetailView({ store, dateRange, rangeLabel, refreshNonce }) {
+export default function FullAuctionDetailView({ store, dateRange, rangeLabel, refreshNonce, initialQuery }) {
   const { data, loading, error, unsupported } = useFullAuctionDetail(store, dateRange, refreshNonce);
 
   // A deliberate, expected state (unbounded "All Time" isn't currently
@@ -42,7 +42,7 @@ export default function FullAuctionDetailView({ store, dateRange, rangeLabel, re
 
       <div className="mb-8">
         <StoryHeader
-          eyebrow={`${store} · ${rangeLabel} · Live`}
+          eyebrow={`${store} · ${rangeLabel}${initialQuery ? ` · Filtered: ${initialQuery}` : ""} · Live`}
           headline={`${auctionCount} auction${auctionCount === 1 ? "" : "s"} ${
             rangeLabel === "Today" ? "today" : `in the ${rangeLabel.toLowerCase()}`
           }, rolled up from ${lots.length} individual lot${lots.length === 1 ? "" : "s"}.`}
@@ -53,7 +53,7 @@ export default function FullAuctionDetailView({ store, dateRange, rangeLabel, re
         insight="Every auction from the selected date range, rolled up from its individual lots — search by auction #, branch, or category."
         last
       >
-        <AuctionSummaryTable data={lots} bidderActivity={bidderActivity} />
+        <AuctionSummaryTable data={lots} bidderActivity={bidderActivity} initialQuery={initialQuery} />
       </StorySection>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { resolveDateRange } from "./utils/dateRange";
+import { resolveDateRange, resolveComparisonRange } from "./utils/dateRange";
 import {
   MOCK_OVERVIEW,
   MOCK_LEADERBOARDS,
@@ -53,6 +53,12 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
     async function load() {
       try {
         const { from, to } = resolveDateRange(dateRangeKey);
+        // Comparable previous-period window for scorecard deltas — same
+        // elapsed-window rule per preset (see resolveComparisonRange's own
+        // comment). Passed through as additive query params: /api/overview
+        // only computes the comparison block when both are present, so
+        // this can never change any other Overview figure.
+        const { from: compareFrom, to: compareTo } = resolveComparisonRange(dateRangeKey);
 
         const [
           liveOverview,
@@ -64,7 +70,7 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
           serviceIncomeResult,
           forApprovalResult,
         ] = await Promise.all([
-          fetchJson("/api/overview", { from, to, store, category }),
+          fetchJson("/api/overview", { from, to, store, category, compareFrom, compareTo }),
           fetchJson("/api/leaderboards", { from, to, store, category }),
 
           // TOTAL BID AMOUNT DRILLDOWN — the exact settled lots behind
@@ -161,17 +167,21 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               auctions_concluded: liveOverview.auctions_concluded ?? 0,
               settled_lot_count: liveOverview.settled_lot_count ?? 0,
 
-              // Auction-grain drilldown data + the Bid Trend chart/grain —
-              // see api/overview.js's AUCTION-LEVEL SUMMARY / BID TREND
-              // query comments.
+              // Auction-grain drilldown data + the daily Bid Trend — see
+              // api/overview.js's AUCTION-LEVEL SUMMARY / BID TREND query
+              // comments.
               auction_summary: liveOverview.auction_summary ?? [],
               bid_trend: liveOverview.bid_trend ?? [],
-              bid_trend_grain: liveOverview.bid_trend_grain ?? "day",
 
               // Registration -> Bidder Conversion — see api/overview.js's
               // REGISTRATION -> BIDDER CONVERSION query comment.
               registered_customers: liveOverview.registered_customers ?? 0,
               participating_registered_bidders: liveOverview.participating_registered_bidders ?? 0,
+
+              // Dynamic period-over-period comparison — null when not
+              // computed (see api/overview.js's DYNAMIC COMPARISON PERIOD
+              // query comment), never a fabricated delta.
+              comparison: liveOverview.comparison ?? null,
             },
 
             leaderboards: {
@@ -179,6 +189,13 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               composition: liveLeaderboards.composition,
               perAuctionComposition:
                 liveLeaderboards.perAuctionComposition ?? [],
+
+              // Per-auction Participating breakdown — same
+              // bidding_activity_composition definition, grouped by
+              // auction instead of collapsed to one number. Reused (not
+              // refetched) for the Auctions Concluded drilldown's
+              // per-auction bidder composition.
+              perAuctionBiddingActivity: liveLeaderboards.perAuctionBiddingActivity ?? [],
 
               // Bid-activity ("Participating") composition — sum of every
               // bid EVENT per bidder, not settled winning value. See

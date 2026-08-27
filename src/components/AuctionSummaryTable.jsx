@@ -307,9 +307,9 @@ function mapLotForDetail(l) {
   };
 }
 
-export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, title = "Order Workbench · Auction Detail" }) {
+export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, title = "Order Workbench · Auction Detail", initialQuery = "" }) {
   const [open, setOpen] = useState(true);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [bidderModalAuction, setBidderModalAuction] = useState(null);
