@@ -44,6 +44,7 @@ function BreakdownTable({ rows, labelKey, labelHeader }) {
         <thead>
           <tr className="text-ink text-[13.5px] uppercase tracking-wide">
             <th className="text-left font-medium pb-2 pr-4">{labelHeader}</th>
+            <th className="text-right font-medium pb-2 pr-4">Bid Amount</th>
             <th className="text-right font-medium pb-2 pr-4">Buyer's Premium</th>
             <th className="text-right font-medium pb-2 pr-4">Commission</th>
             <th className="text-right font-medium pb-2">Total Service Income</th>
@@ -53,6 +54,7 @@ function BreakdownTable({ rows, labelKey, labelHeader }) {
           {rows.map((r) => (
             <tr key={r[labelKey]} className="border-t border-gridline">
               <td className="py-2.5 pr-4 text-ink">{r[labelKey]}</td>
+              <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.bidAmount)}</td>
               <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.buyersPremium)}</td>
               <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.commission)}</td>
               <td className="py-2.5 text-right tabular text-series1">{formatPeso(r.total)}</td>
@@ -60,7 +62,7 @@ function BreakdownTable({ rows, labelKey, labelHeader }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} className="py-6 text-center text-muted text-[15px]">
+              <td colSpan={5} className="py-6 text-center text-muted text-[15px]">
                 No settled revenue in this scope.
               </td>
             </tr>
@@ -75,8 +77,9 @@ function groupBy(rows, keyFn) {
   const map = new Map();
   for (const r of rows) {
     const key = keyFn(r);
-    if (!map.has(key)) map.set(key, { buyersPremium: 0, commission: 0, count: 0 });
+    if (!map.has(key)) map.set(key, { bidAmount: 0, buyersPremium: 0, commission: 0, count: 0 });
     const agg = map.get(key);
+    agg.bidAmount += r.bid_amount;
     agg.buyersPremium += r.buyers_premium_income;
     agg.commission += r.commission_income;
     agg.count += 1;
@@ -94,23 +97,27 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
   const summary = useMemo(() => {
     if (!rows) return null;
 
+    let bidAmount = 0;
     let buyersPremium = 0;
     let commission = 0;
     for (const r of rows) {
+      bidAmount += r.bid_amount;
       buyersPremium += r.buyers_premium_income;
       commission += r.commission_income;
     }
+    // Bid Amount is contextual auction value, never folded into Service
+    // Income — Total Service Income stays Buyer's Premium + Commission only.
     const total = buyersPremium + commission;
 
     const branchMap = groupBy(rows, (r) => r.store_name || "—");
     const byBranch = [...branchMap.entries()]
-      .map(([branch, v]) => ({ branch, buyersPremium: v.buyersPremium, commission: v.commission, total: v.buyersPremium + v.commission }))
+      .map(([branch, v]) => ({ branch, bidAmount: v.bidAmount, buyersPremium: v.buyersPremium, commission: v.commission, total: v.buyersPremium + v.commission }))
       .sort((a, b) => b.total - a.total);
 
     const categoryMap = groupBy(rows, (r) => r.category || "—");
     const byCategory = CATEGORY_NAMES.map((category) => {
-      const v = categoryMap.get(category) ?? { buyersPremium: 0, commission: 0 };
-      return { category, buyersPremium: v.buyersPremium, commission: v.commission, total: v.buyersPremium + v.commission };
+      const v = categoryMap.get(category) ?? { bidAmount: 0, buyersPremium: 0, commission: 0 };
+      return { category, bidAmount: v.bidAmount, buyersPremium: v.buyersPremium, commission: v.commission, total: v.buyersPremium + v.commission };
     });
 
     const auctionMap = new Map();
@@ -146,7 +153,7 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
     }
     const trend = [...dayMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, amount]) => ({ day, amount }));
 
-    return { buyersPremium, commission, total, byBranch, byCategory, byAuction, trend };
+    return { bidAmount, buyersPremium, commission, total, byBranch, byCategory, byAuction, trend };
   }, [rows]);
 
   const detailRows = useMemo(() => {
@@ -203,12 +210,12 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
         />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         <StatTile
-          eyebrow="Total Service Income"
-          value={formatPeso(summary.total)}
-          sub="Paid & Released only"
-          methodology="Buyer's Premium Income + Commission Income, on settled (Paid/Released) lots only. Never Total Bid Amount, never a vendor payable figure."
+          eyebrow="Bid Amount"
+          value={formatPeso(summary.bidAmount)}
+          sub="Settled hammer value"
+          methodology="Settled (Paid/Released) hammer bid_amount, deduped by auction_number + lot_number — the same population and figure as Overview's Total Bid Amount. Contextual auction value only, never added into Service Income."
         />
         <StatTile
           eyebrow="Buyer's Premium Income"
@@ -221,6 +228,12 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
           value={formatPeso(summary.commission)}
           sub={`${commSharePct.toFixed(1)}% of Service Income`}
           methodology="bid_amount × commission rate, summed over settled lots."
+        />
+        <StatTile
+          eyebrow="Total Service Income"
+          value={formatPeso(summary.total)}
+          sub="Paid & Released only"
+          methodology="Buyer's Premium Income + Commission Income, on settled (Paid/Released) lots only. Never Total Bid Amount, never a vendor payable figure."
         />
         <StatTile eyebrow="Settled Lots" value={rows.length} sub="Contributing to revenue" />
       </div>
