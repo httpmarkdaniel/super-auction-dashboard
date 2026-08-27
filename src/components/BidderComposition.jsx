@@ -63,10 +63,18 @@ export default function BidderComposition({
   const palette = usePalette();
   const newAmount = bidderComposition.newBiddersBidAmount || 0;
   const returningAmount = bidderComposition.returningBiddersBidAmount || 0;
-  const totalAmount = newAmount + returningAmount;
+  // Settled bid value whose bidder identity couldn't be resolved through
+  // either identity bridge (see api/_bidderIdentity.js) — real value, never
+  // folded into New or Returning. Included in the denominator below so New
+  // + Returning + Unresolved always reconciles to the same settled Total
+  // Bid Amount this scope's Overview KPI shows.
+  const unresolvedAmount = bidderComposition.unclassifiedBidAmount || 0;
+  const totalAmount = newAmount + returningAmount + unresolvedAmount;
   const newSharePct = totalAmount > 0 ? (newAmount / totalAmount) * 100 : 0;
   const returningSharePct =
     totalAmount > 0 ? (returningAmount / totalAmount) * 100 : 0;
+  const unresolvedSharePct =
+    totalAmount > 0 ? (unresolvedAmount / totalAmount) * 100 : 0;
   const totalBidders =
     bidderComposition.newBidders + bidderComposition.returningBidders;
   const newBidderPct =
@@ -159,8 +167,14 @@ export default function BidderComposition({
               className="bg-series1 h-full"
               style={{ width: `${newSharePct}%` }}
             />
+            {unresolvedAmount > 0 && (
+              <div
+                className="bg-warning h-full"
+                style={{ width: `${unresolvedSharePct}%` }}
+              />
+            )}
           </div>
-          <div className="flex justify-between gap-4 mt-1.5 text-[14px] text-ink">
+          <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 mt-1.5 text-[14px] text-ink">
             <span>
               New bidders · {newSharePct.toFixed(1)}% · {formatPeso(newAmount)}
             </span>
@@ -168,6 +182,12 @@ export default function BidderComposition({
               Returning bidders · {returningSharePct.toFixed(1)}% ·{" "}
               {formatPeso(returningAmount)}
             </span>
+            {unresolvedAmount > 0 && (
+              <span className="w-full text-right text-toneAmberText">
+                Unresolved identity · {unresolvedSharePct.toFixed(1)}% ·{" "}
+                {formatPeso(unresolvedAmount)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -249,8 +269,11 @@ export default function BidderComposition({
                   <th className="text-right font-medium pb-2 pr-4">
                     Returning Bidders
                   </th>
-                  <th className="text-right font-medium pb-2">
+                  <th className="text-right font-medium pb-2 pr-4">
                     Returning Amount
+                  </th>
+                  <th className="text-right font-medium pb-2">
+                    Unresolved Amount
                   </th>
                 </tr>
               </thead>
@@ -272,15 +295,18 @@ export default function BidderComposition({
                     <td className="py-2 pr-4 text-right tabular text-ink">
                       {a.returningBidders}
                     </td>
-                    <td className="py-2 text-right tabular text-ink">
+                    <td className="py-2 pr-4 text-right tabular text-ink">
                       {formatPeso(a.returningBiddersBidAmount)}
+                    </td>
+                    <td className="py-2 text-right tabular text-ink">
+                      {a.unclassifiedBidAmount > 0 ? formatPeso(a.unclassifiedBidAmount) : "—"}
                     </td>
                   </tr>
                 ))}
                 {byAuction.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="py-6 text-center text-muted text-[14.5px]"
                     >
                       No auctions in this range yet.
@@ -304,8 +330,12 @@ export default function BidderComposition({
                       {bidderComposition.returningBidders}
                     </td>
 
-                    <td className="py-3 text-right tabular text-ink">
+                    <td className="py-3 pr-4 text-right tabular text-ink">
                       {formatPeso(bidderComposition.returningBiddersBidAmount)}
+                    </td>
+
+                    <td className="py-3 text-right tabular text-ink">
+                      {formatPeso(bidderComposition.unclassifiedBidAmount)}
                     </td>
                   </tr>
                 )}

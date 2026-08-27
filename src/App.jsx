@@ -9,7 +9,6 @@ import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
 import BidderComposition from "./components/BidderComposition";
-import HourlyTrend from "./components/HourlyTrend";
 import CategoryView from "./components/CategoryView";
 import LiveAuctionView from "./components/LiveAuctionView";
 import UpcomingAuctionsView from "./components/UpcomingAuctionsView";
@@ -29,7 +28,7 @@ import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection, useMarqueeSummary } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange } from "./utils/dateRange";
-import { HOUR_LABELS, mapHourlyRows } from "./utils/hourlyBidderDetail";
+import { HOUR_LABELS } from "./utils/hourlyBidderDetail";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -71,9 +70,12 @@ const EMPTY_OVERVIEW = {
   categoryTally: [],
   auctionNumbersInRange: new Set(),
   channelBreakdown: [],
+  // Feeds only HeroKPIs' Total Bid Amount sparkline — the "Bidding Activity
+  // by Hour" StorySection itself (and its hover-tooltip hourlyDetail) was
+  // removed, but this small hero-tile trend line is a separate, still-live
+  // feature.
   hourlyTrend: [],
-  hourlyDetail: {},
-  bidderComposition: { newBidders: 0, returningBidders: 0, newBiddersBidAmount: 0, returningBiddersBidAmount: 0, newBidderTrend: [], byAuction: [] },
+  bidderComposition: { newBidders: 0, returningBidders: 0, newBiddersBidAmount: 0, returningBiddersBidAmount: 0, unclassifiedBidAmount: 0, newBidderTrend: [], byAuction: [] },
   topVendors: [],
   topBidders: [],
   reservePerformance: {
@@ -162,15 +164,14 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     ...(otherBranchesTotal > 0 ? [{ branch: "Others", bidAmount: otherBranchesTotal }] : []),
   ].map((b) => ({ ...b, share: Number(((b.bidAmount / branchTotal) * 100).toFixed(1)) }));
 
-  // Pace by hour-of-day — whatever hours actually have activity in this
-  // range, in order; null bid_amount (rows exist but none carry a value)
-  // reads as 0 rather than a gap. The chart line itself still comes from
-  // kpis.hourly (api/overview.js's own hourlyResult, unchanged) — only the
-  // hover tooltip's Participating/Winning breakdown comes from the shared
-  // hourlyBidderRows (api/bidding-pace.js), keyed by the same hour label.
+  // Pace by hour-of-day, feeding ONLY HeroKPIs' Total Bid Amount sparkline
+  // now — the "Bidding Activity by Hour" chart/tooltip section that used to
+  // also consume this (plus a separate hourlyBidderRows fetch for its
+  // tooltip) was removed from Overview. Still kpis.hourly, api/overview.js's
+  // own hourlyResult, unchanged and still needed by CategoryView's own
+  // separate fetch of the same endpoint.
   const hourlyRows = (kpis.hourly || []).filter((h) => h.hour != null);
   const hourlyTrend = hourlyRows.map((h) => ({ hour: HOUR_LABELS[Number(h.hour)], bidAmount: Number(h.bid_amount) || 0 }));
-  const { hourlyDetail } = mapHourlyRows(kpis.hourlyBidderRows);
 
   // New vs returning bidders — an honest zero (no bidder activity in this
   // scope) is a real, valid state, not a reason to fall back to mock; see
@@ -183,6 +184,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     returningBidders,
     newBiddersBidAmount: Number(composition.new_bidders_bid_amount) || 0,
     returningBiddersBidAmount: Number(composition.returning_bidders_bid_amount) || 0,
+    // Settled bid value whose bidder identity resolves through NEITHER the
+    // primary (postings) nor fallback (payments) bridge — see
+    // api/_bidderIdentity.js. Real, disclosed value, never folded into New
+    // or Returning: New + Returning + Unclassified always reconciles
+    // exactly to Total Bid Amount for the same scope (same settled
+    // population, same query family as api/overview.js's total_bid_amount).
+    unclassifiedBidAmount: Number(composition.unclassified_bid_amount) || 0,
     newBidderTrend: (leaderboards.newBidderTrend || []).map((d) => ({
       week: d.day,
       newBidders: Number(d.new_bidders) || 0,
@@ -193,6 +201,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       returningBidders: Number(a.returning_bidders) || 0,
       newBiddersBidAmount: Number(a.new_bidders_bid_amount) || 0,
       returningBiddersBidAmount: Number(a.returning_bidders_bid_amount) || 0,
+      unclassifiedBidAmount: Number(a.unclassified_bid_amount) || 0,
     })),
   };
 
@@ -315,7 +324,6 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     auctionNumbersInRange: new Set((kpis.auctions || []).map((a) => a.auction_number)),
     channelBreakdown,
     hourlyTrend,
-    hourlyDetail,
     bidderComposition,
     topVendors,
     topBidders,
@@ -385,10 +393,6 @@ function OverviewTab({ store, overview, rangeLabel, isLive, loading, error, cate
           onCategoryChange={onOverviewCategoryChange}
         />
       </div>
-
-      <StorySection title="Bidding Activity by Hour" insight="How bidding activity is spread across the hours of the day.">
-        <HourlyTrend data={overview.hourlyTrend} rangeLabel={rangeLabel} hourlyDetail={overview.hourlyDetail} />
-      </StorySection>
 
       <div className="mb-8">
         <div className="flex flex-col lg:flex-row gap-4 items-stretch">

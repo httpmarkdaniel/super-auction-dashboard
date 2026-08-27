@@ -63,7 +63,6 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
           activeAuctionsResult,
           serviceIncomeResult,
           forApprovalResult,
-          biddingPaceResult,
         ] = await Promise.all([
           fetchJson("/api/overview", { from, to, store, category }),
           fetchJson("/api/leaderboards", { from, to, store, category }),
@@ -95,16 +94,6 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
           // FOR APPROVAL DRILLDOWN — lots resolved for_approval_status =
           // 'For Approval', independent of lifecycle status.
           fetchJson("/api/overview", { from, to, store, category, type: "for-approval" }),
-
-          // HOURLY BIDDER BREAKDOWN — the ONE authoritative per-hour
-          // Participating/Winning breakdown (src/utils/hourlyBidderDetail.js),
-          // reused unmodified from the Bidding Pace tab's own endpoint, for
-          // the "Bidding Activity by Hour" hover tooltip. Category-scoped
-          // (unlike Bidding Pace's own call, which never passes one) so the
-          // tooltip narrows exactly like every other Overview figure when a
-          // category is selected. Does NOT replace liveOverview.hourly
-          // above, which still drives the chart's own Bid Amount line.
-          fetchJson("/api/bidding-pace", { from, to, store, category }),
         ]);
 
         if (cancelled) return;
@@ -157,19 +146,14 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               // Used as denominator for unsold calculations
               total_inventory: liveOverview.listed_lots ?? 0,
 
-              // BIDDING ACTIVITY BY HOUR — same field/query CategoryView
-              // already reads, now scoped by Overview's own category filter
-              // too (via the `category` param above). Sum of every bid
-              // EVENT within the selected date range + store + category,
-              // regardless of settlement status — NOT the settled
-              // total_bid_amount above. See api/overview.js's BIDDING
-              // ACTIVITY BY HOUR query comment.
+              // Sum of every bid EVENT per hour (regardless of settlement
+              // status) — feeds only HeroKPIs' Total Bid Amount sparkline
+              // now. The full "Bidding Activity by Hour" chart/tooltip
+              // section (and the extra /api/bidding-pace fetch that fed its
+              // hover tooltip) was removed from Overview; CategoryView
+              // still fetches this same field via its own separate
+              // /api/overview call.
               hourly: liveOverview.hourly ?? [],
-
-              // Per-hour Participating/Winning bidder breakdown for the
-              // same "Bidding Activity by Hour" chart's hover tooltip —
-              // see the fetchJson call above.
-              hourlyBidderRows: biddingPaceResult.hourly ?? [],
             },
 
             leaderboards: {
