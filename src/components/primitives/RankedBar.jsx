@@ -2,7 +2,25 @@ import { formatPeso } from "../../utils/format";
 
 // Horizontal ranked bar list — one hue (magnitude comparison, not identity),
 // direct-labeled so the bar and the number never disagree.
-export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, showRank = true, showAvg = false }) {
+// badgeKey: optional field name (e.g. "new_or_returning") whose value —
+// already resolved server-side, never inferred here — renders as a
+// compact chip beside the name. A shrink-0 sibling of the (truncating)
+// name, so the badge itself is never the thing that gets cut off.
+function Badge({ value }) {
+  if (!value) return null;
+  const isNew = value === "new";
+  return (
+    <span
+      className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${
+        isNew ? "bg-navySoft text-navy" : "bg-gridline text-muted"
+      }`}
+    >
+      {isNew ? "New" : "Returning"}
+    </span>
+  );
+}
+
+export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, badgeKey, showRank = true, showAvg = false }) {
   const max = Math.max(...rows.map((r) => r[valueKey]), 1);
 
   if (rows.length === 0) {
@@ -19,7 +37,10 @@ export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel
             </div>
           )}
           <div className="w-[150px] shrink-0 min-w-0">
-            <div className="text-[15.5px] text-ink truncate">{r[labelKey]}</div>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[15.5px] text-ink truncate">{r[labelKey]}</span>
+              {badgeKey && <Badge value={r[badgeKey]} />}
+            </div>
             {metaKey && (
               <div className="text-[13.5px] text-muted">
                 {r[metaKey]} {metaLabel}

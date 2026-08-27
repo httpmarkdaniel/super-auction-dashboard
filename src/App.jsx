@@ -4,6 +4,7 @@ import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
+import LiveAuctionActivity from "./components/LiveAuctionActivity";
 import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
@@ -333,12 +334,15 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   }));
 
   const topBidders = (leaderboards.bidders || []).map((b) => ({
-    // Canonical New/Returning label reused from the backend classification
-    // (api/leaderboards.js's settledBiddersResult) — never inferred on the
-    // frontend from name/email.
-    bidder: `${b.bidder_name} · ${b.new_or_returning === "new" ? "New" : "Returning"}`,
+    bidder: b.bidder_name,
     bidAmount: Number(b.settled_bid_amount) || 0,
     wins: Number(b.settled_wins) || 0,
+    // Canonical New/Returning classification reused from the backend
+    // (api/leaderboards.js's settledBiddersResult) — never inferred on
+    // the frontend from name/email. Rendered as its own badge chip (see
+    // RankedBar's badgeKey), not appended into the name string, so it's
+    // never lost to name truncation.
+    new_or_returning: b.new_or_returning || "returning",
   }));
 
   const rp = reservePerformance;
@@ -734,6 +738,8 @@ function OverviewTab({
   onCategoryChange,
   onSelectBranch,
   onSelectCategory,
+  updatedAt,
+  onGoLive,
 }) {
   const story = buildStoryline();
 
@@ -750,6 +756,15 @@ function OverviewTab({
           Loading live dashboard data…
         </div>
       )}
+
+      <div className="mb-8">
+        <LiveAuctionActivity
+          todaysBidAmount={overview.heroKPIs.todaysBidAmount}
+          activeAuctionsNow={overview.heroKPIs.activeAuctionsNow}
+          updatedAt={updatedAt}
+          onClickActiveAuctions={onGoLive}
+        />
+      </div>
 
       <div className="mb-8">
         <div className="mb-3">
@@ -850,6 +865,7 @@ function OverviewTab({
             nameKey="bidder"
             metaKey="wins"
             metaLabel="wins"
+            badgeKey="new_or_returning"
           />
         </div>
       </StorySection>
@@ -1048,6 +1064,8 @@ export default function App() {
               }
               onSelectBranch={goToFullAuctionDetailForBranch}
               onSelectCategory={goToFullAuctionDetailForCategory}
+              updatedAt={formatUpdatedAt(lastUpdated)}
+              onGoLive={() => setTab("Online Bidding")}
             />
           )}
 

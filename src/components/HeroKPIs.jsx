@@ -70,9 +70,9 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
 
   return (
     <div className="flex flex-col gap-5">
-      {/* PRIMARY PERFORMANCE */}
+      {/* AUCTION PERFORMANCE */}
       <div>
-        <div className="eyebrow mb-2">Primary Performance</div>
+        <div className="eyebrow mb-2">Auction Performance · {rangeLabel}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatTile
             icon={ICONS.sales}
@@ -110,8 +110,10 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
         </div>
       </div>
 
-      {/* INVENTORY PERFORMANCE + LIVE SNAPSHOT + CUSTOMER CONVERSION + SERVICE INCOME */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* BUSINESS HEALTH */}
+      <div>
+        <div className="eyebrow mb-2">Business Health · {rangeLabel}</div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatTile
           icon={ICONS.box}
           eyebrow="Lots Sold / Listed"
@@ -124,17 +126,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
             { label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} unsold value` },
           ]}
         />
-        <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5">
-          <div className="flex items-center gap-1.5 mb-2.5">
-            <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.clock}</span>
-            <span className="eyebrow">Today's Bid</span>
-          </div>
-          <div className="font-display text-[36.5px] leading-none text-ink mb-2">{formatPeso(heroKPIs.todaysBidAmount)}</div>
-          <div className="text-[14.5px] text-ink flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-critical pulse-dot inline-block" />
-            {heroKPIs.activeAuctionsNow} active auction{heroKPIs.activeAuctionsNow === 1 ? "" : "s"}
-          </div>
-        </div>
         <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.users}</span>
@@ -171,6 +162,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
           onClick={() => setDrilldown("serviceIncome")}
           extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.service_income_pct }] : []}
         />
+        </div>
       </div>
 
       <ServiceIncomeModal
