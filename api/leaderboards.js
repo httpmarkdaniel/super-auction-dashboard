@@ -499,6 +499,160 @@ export default async function handler(req, res) {
     });
 
     // =========================================================
+    // PER-AUCTION PARTICIPATING (UNION) — Full Auction Detail ONLY.
+    // Business rule: Participating >= Winning must always hold. A
+    // Negotiated auction's winner never generates a
+    // cms.mart_cms_bid_history_report row, so the old bid-history-only
+    // Participating definition (perAuctionBiddingActivity above,
+    // unchanged and still used by Overview's own drilldown) could show
+    // Participating = 0 while Winning > 0 for those auctions.
+    //
+    // Participating (this field only) = the real deduplicated UNION of:
+    //   A) every bidder_key (lowerUTF8(trim(email))) with a real bid
+    //      EVENT in this auction (cms.mart_cms_bid_history_report), and
+    //   B) every settled Paid/Released lot's resolved winning identity
+    //      in this auction (same BIDDER_IDENTITY_CTES bridge as Winning),
+    //      resolved-identity only — an unresolved winner is never
+    //      fabricated into the union, exactly like Winning's own count.
+    // Both sides key on the SAME canonical lowerUTF8(trim(email)), so the
+    // union is a genuine dedup, not a sum: a bidder who both bid AND won
+    // counts once. Because Winning's own total (new_bidders +
+    // returning_bidders below) is itself drawn from set B, the union
+    // structurally contains it -> Participating >= Winning always holds,
+    // with no max()/addition hack.
+    //
+    // Bid Activity stays real bid-history activity ONLY: a winning-only
+    // bidder with no bid-history row contributes bid_activity_amount = 0,
+    // never their winning bid value — see union_bidder_activity below.
+    //
+    // New/Returning reuses the canonical bidder_first_ever classifier
+    // (BIDDER_IDENTITY_CTES) unmodified. A union member whose identity
+    // resolves but who has neither a competitive nor a negotiated
+    // first-ever record (fe.first_ever_at IS NULL — possible only for a
+    // winning-only bidder resolved via a bridge path with no bid-history/
+    // payments trail) is excluded from both new/returning COUNTS, same
+    // "never fabricate into a count" rule as settled_new_bidders/
+    // settled_returning_bidders above — surfaced separately as
+    // participating_unclassified_bidders/_bid_amount, never silently
+    // folded into Returning.
+    // =========================================================
+    const perAuctionParticipatingUnionResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+
+        bid_history_bidders AS (
+          SELECT
+            b.auction_number AS auction_number,
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            sum(b.bid_amount) AS bid_activity_amount
+
+          FROM cms.mart_cms_bid_history_report b
+
+          INNER JOIN selected_auctions s
+            ON b.auction_number = s.auction_number
+
+          WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND b.email IS NOT NULL AND trim(b.email) != ''
+
+          GROUP BY b.auction_number, bidder_key
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        ${BIDDER_IDENTITY_CTES},
+
+        winning_bidders AS (
+          SELECT DISTINCT
+            sl.auction_number AS auction_number,
+            rli.resolved_email AS bidder_key
+          FROM settled_lots sl
+          INNER JOIN resolved_lot_identity rli
+            ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+          WHERE rli.resolved_email IS NOT NULL
+        ),
+
+        union_bidders AS (
+          SELECT auction_number, bidder_key FROM bid_history_bidders
+          UNION DISTINCT
+          SELECT auction_number, bidder_key FROM winning_bidders
+        ),
+
+        union_bidder_activity AS (
+          SELECT
+            u.auction_number AS auction_number,
+            u.bidder_key AS bidder_key,
+            ifNull(bha.bid_activity_amount, 0) AS bid_activity_amount
+          FROM union_bidders u
+          LEFT JOIN bid_history_bidders bha
+            ON u.auction_number = bha.auction_number AND u.bidder_key = bha.bidder_key
+        )
+
+        SELECT
+          uba.auction_number AS auction_number,
+
+          count() AS participating_bidders,
+          sum(uba.bid_activity_amount) AS participating_bid_amount,
+
+          countIf(
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS participating_new_bidders,
+          sumIf(
+            uba.bid_activity_amount,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS participating_new_bid_amount,
+
+          countIf(
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS participating_returning_bidders,
+          sumIf(
+            uba.bid_activity_amount,
+            fe.first_ever_at IS NOT NULL
+            AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+          ) AS participating_returning_bid_amount,
+
+          countIf(fe.first_ever_at IS NULL) AS participating_unclassified_bidders,
+          sumIf(uba.bid_activity_amount, fe.first_ever_at IS NULL) AS participating_unclassified_bid_amount
+
+        FROM union_bidder_activity uba
+
+        LEFT JOIN bidder_first_ever fe
+          ON uba.bidder_key = fe.fe_key
+
+        GROUP BY uba.auction_number
+        ORDER BY uba.auction_number
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // =========================================================
     // TOP 10 VENDORS (settled) — same Paid/Released settled population as
     // Total Bid Amount. vendor comes directly off vendor_analysis's own
     // row (verified 0% missing across 1.43M Paid/Released rows sampled),
@@ -706,6 +860,7 @@ export default async function handler(req, res) {
     const auctionRows = await perAuctionResult.json();
     const settledCompositionRows = await settledCompositionResult.json();
     const settledPerAuctionRows = await settledPerAuctionResult.json();
+    const perAuctionParticipatingUnionRows = await perAuctionParticipatingUnionResult.json();
     const settledVendorRows = await settledVendorsResult.json();
     const settledBidderRows = await settledBiddersResult.json();
 
@@ -804,6 +959,27 @@ export default async function handler(req, res) {
         new_bidder_lots: Number(row.settled_new_lots ?? 0),
         returning_bidder_lots: Number(row.settled_returning_lots ?? 0),
         unclassified_lots: Number(row.settled_unclassified_lots ?? 0),
+      })),
+
+      // Full Auction Detail ONLY — real deduplicated UNION of bid-history
+      // participants and resolved winning bidders, per auction. See the
+      // perAuctionParticipatingUnionResult query comment above for the
+      // full rule (Participating >= Winning, Bid Activity never
+      // fabricated for winner-only bidders). Never consumed by Overview's
+      // own drilldown — that reuses perAuctionBiddingActivity/
+      // perAuctionComposition unmodified, on purpose.
+      perAuctionParticipatingUnion: perAuctionParticipatingUnionRows.map((row) => ({
+        auction_number: row.auction_number,
+        total_bidders: Number(row.participating_bidders ?? 0),
+        bid_amount: Number(row.participating_bid_amount ?? 0),
+
+        new_bidders: Number(row.participating_new_bidders ?? 0),
+        returning_bidders: Number(row.participating_returning_bidders ?? 0),
+        new_bidders_bid_amount: Number(row.participating_new_bid_amount ?? 0),
+        returning_bidders_bid_amount: Number(row.participating_returning_bid_amount ?? 0),
+
+        unclassified_bidders: Number(row.participating_unclassified_bidders ?? 0),
+        unclassified_bid_amount: Number(row.participating_unclassified_bid_amount ?? 0),
       })),
 
       // Preserved, not deleted: the previous bid-history cumulative-

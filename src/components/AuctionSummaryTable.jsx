@@ -4,13 +4,16 @@ import Modal from "./primitives/Modal";
 import AuctionLotDetailTable from "./AuctionLotDetailTable";
 
 const SETTLED_STATUSES = ["Paid", "Released"];
+const PAGE_SIZE = 10;
 
 // Compact "N Participating · M Winning" label for the Total Bidders column.
-// Deliberately NOT a single combined count — see BidderBreakdownModal's
-// header comment for why a true union isn't safely computable from the
-// aggregate-only data this app has. "—" for a population means genuinely
-// no data (e.g. Negotiated auctions never have participating bid events),
-// never a fabricated zero.
+// Participating is already the real deduplicated union (bid-history
+// participants UNION resolved winning bidders — see useFullAuctionDetail.js
+// and api/leaderboards.js's perAuctionParticipatingUnion), so Participating
+// is guaranteed >= Winning here; shown as two separate labeled numbers
+// (not summed) since they're two different populations to compare, not a
+// quantity to add. "—" for a population means genuinely no data, never a
+// fabricated zero.
 function totalBiddersLabel(activity) {
   const p = activity?.participating;
   const w = activity?.winning;
@@ -79,26 +82,16 @@ function BidderSummaryCard({ title, amountLabel, stats, expanded, onToggle }) {
   );
 }
 
-// PARTICIPATING vs WINNING are deliberately separate, non-reconciling
-// metrics — see api/leaderboards.js's perAuctionBiddingActivity (every
-// real bid EVENT from cms.mart_cms_bid_history_report, including bids
-// that were later outbid — "activity") vs perAuctionComposition (only the
-// settled Paid/Released winning lots, via the canonical identity bridge —
-// "winning value"). A bidder who bid 5 times and lost still counts fully
-// in Participating but contributes nothing to Winning.
-//
-// TOTAL BIDDERS UNION: investigated before implementing. Both source
-// arrays only carry pre-aggregated COUNTS per auction (participating_bidders,
-// new_bidders, etc.) — no per-bidder identity list. A winner is very likely
-// already counted once in Participating too (for competitive auctions), so
-// naively summing participating.total + winning.total would double-count
-// real people. Computing a true deduplicated union would require the raw
-// resolved-identity rows behind both aggregates, which neither existing
-// endpoint currently returns — adding that is a real backend change, not
-// "genuinely necessary" for this feature per the explicit instruction to
-// avoid a third bidder query. So Total Bidders is shown as two honest,
-// separately-labeled counts ("N Participating · M Winning"), never a
-// single fabricated combined number.
+// PARTICIPATING = the real deduplicated UNION of bid-history participants
+// and resolved winning bidders (api/leaderboards.js's
+// perAuctionParticipatingUnion) — a bidder who both bid and won counts
+// once. WINNING = only the settled Paid/Released winning lots, via the
+// canonical identity bridge (perAuctionComposition), unchanged. So
+// Participating always >= Winning, including for Negotiated auctions
+// whose winner never generated a cms.mart_cms_bid_history_report event —
+// they still appear in Participating (via the union's winning side) even
+// with zero Bid Activity, since Bid Activity is real bid-history activity
+// only and is never fabricated from their winning value.
 function BidderBreakdownModal({ open, onClose, auctionNumber, auctionName, activity }) {
   // Independent toggles — Participating and Winning must be expandable at
   // the same time, neither one collapsing the other.
@@ -313,6 +306,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
   const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [bidderModalAuction, setBidderModalAuction] = useState(null);
+  const [page, setPage] = useState(0);
 
   const auctions = useMemo(() => groupByAuction(lots), [lots]);
 
@@ -337,8 +331,26 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
     return filtered;
   }, [auctions, query, sort]);
 
+  // 10 auctions per page, client-side over the already-in-memory filtered/
+  // sorted rows — no re-fetch per page. Any change to the filter or sort
+  // order snaps back to page 1 rather than silently stranding the user on
+  // a now out-of-range page.
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE);
+
+  function changePage(next) {
+    setPage(Math.max(0, Math.min(pageCount - 1, next)));
+  }
+
   function handleSort(key) {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+    setPage(0);
+  }
+
+  function handleQueryChange(value) {
+    setQuery(value);
+    setPage(0);
   }
 
   const selectedAuctionMeta = auctions.find((a) => a.auctionNumber === selectedAuction);
@@ -364,7 +376,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => handleQueryChange(e.target.value)}
                 placeholder="Filter auction #, name, branch, or category…"
                 className="flex-1 min-w-0 text-[15px] text-ink bg-transparent outline-none placeholder:text-muted"
               />
@@ -398,7 +410,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {pageRows.map((r) => (
                   <tr key={r.auctionNumber} className="border-t border-gridline">
                     <td className="py-2.5 pr-4 tabular">
                       <button
@@ -451,6 +463,28 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
               </tbody>
             </table>
           </div>
+
+          {rows.length > 0 && (
+            <div className="flex items-center justify-between mt-4 pt-3 border-t border-gridline text-[14px]">
+              <button
+                type="button"
+                onClick={() => changePage(clampedPage - 1)}
+                disabled={clampedPage === 0}
+                className="font-semibold text-series1 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <span className="text-muted">Page {clampedPage + 1} of {pageCount}</span>
+              <button
+                type="button"
+                onClick={() => changePage(clampedPage + 1)}
+                disabled={clampedPage >= pageCount - 1}
+                className="font-semibold text-series1 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       )}
 

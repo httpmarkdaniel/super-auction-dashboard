@@ -1,6 +1,6 @@
 import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
-import HourlyTrend from "./HourlyTrend";
+import BiddingPaceHourlyTrend from "./BiddingPaceHourlyTrend";
 import { useBiddingPace } from "../useBiddingPace";
 
 export default function BiddingPaceView({ store, dateRange, rangeLabel, refreshNonce }) {
@@ -43,12 +43,12 @@ export default function BiddingPaceView({ store, dateRange, rangeLabel, refreshN
       </div>
 
       <StorySection title="Bidding Activity by Hour" last>
-        <HourlyTrend data={hourlyTrend} rangeLabel={rangeLabel} hourlyDetail={hourlyDetail} />
+        <BiddingPaceHourlyTrend data={hourlyTrend} rangeLabel={rangeLabel} hourlyDetail={hourlyDetail} />
 
         <div className="mt-4 px-4 py-3 rounded-lg border border-gridline bg-plane text-[13px] text-muted">
-          <div className="text-ink font-medium mb-0.5">Why Bidding Pace can be higher than Today's Bid</div>
-          Bidding Pace sums every bid event, including bids that were later outbid. Today's Bid (on Overview) reflects
-          the current/latest standing bid value, so the two figures are not expected to match.
+          <div className="text-ink font-medium mb-0.5">What "Auction Events" counts</div>
+          The distinct auctions with real bidding activity in each hour — an auction bid on many times in one hour
+          still counts once; the same auction can appear again in a later hour if it stays active.
         </div>
       </StorySection>
     </div>

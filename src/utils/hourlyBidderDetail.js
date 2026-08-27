@@ -29,6 +29,7 @@ export function mapHourlyRows(hourlyRows) {
   const hourlyTrend = rows.map((h) => ({
     hour: HOUR_LABELS[Number(h.hour)],
     bidAmount: Number(h.bid_amount) || 0,
+    auctionCount: Number(h.auction_count) || 0,
   }));
 
   const hourlyDetail = {};
@@ -39,6 +40,7 @@ export function mapHourlyRows(hourlyRows) {
 
     hourlyDetail[label] = {
       bidAmount: Number(h.bid_amount) || 0,
+      auctionCount: Number(h.auction_count) || 0,
       participating: withTotal({
         new: Number(p.new) || 0,
         returning: Number(p.returning) || 0,

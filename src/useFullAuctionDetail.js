@@ -26,9 +26,13 @@ function fetchJson(path, params = {}) {
 //
 // Bidder activity per auction is NOT computed here — it's fetched from
 // /api/leaderboards, which already has both pieces, live and unmodified:
-//   - perAuctionBiddingActivity: PARTICIPATING bidders (every real bid
-//     event from cms.mart_cms_bid_history_report, not just winners),
-//     already split New/Returning with both counts and bid_amount.
+//   - perAuctionParticipatingUnion: PARTICIPATING bidders — the real
+//     deduplicated UNION of bid-history participants and resolved winning
+//     bidders (see api/leaderboards.js's query comment for the full
+//     rule). Guarantees Participating >= Winning, including for
+//     Negotiated auctions whose winner never generated a bid-history
+//     event. Bid Activity stays real bid-history activity only — never
+//     fabricated for a winner with no bid-history row.
 //   - perAuctionComposition: WINNING bidders (settled Paid/Released lots,
 //     via the canonical BIDDER_IDENTITY_CTES bridge), already split
 //     New/Returning with both counts and bid_amount, plus an
@@ -100,16 +104,18 @@ export function useFullAuctionDetail(store, dateRangeKey, refreshNonce = 0) {
         if (cancelled) return;
 
         const bidderActivity = {};
-        for (const row of leaderboardsResult.perAuctionBiddingActivity ?? []) {
+        for (const row of leaderboardsResult.perAuctionParticipatingUnion ?? []) {
           bidderActivity[row.auction_number] = {
             ...(bidderActivity[row.auction_number] ?? {}),
             participating: {
-              total: row.participating_bidders,
-              new: row.participating_new_bidders,
-              returning: row.participating_returning_bidders,
-              totalAmount: row.participating_bid_amount,
-              newAmount: row.participating_new_bid_amount,
-              returningAmount: row.participating_returning_bid_amount,
+              total: row.total_bidders,
+              new: row.new_bidders,
+              returning: row.returning_bidders,
+              totalAmount: row.bid_amount,
+              newAmount: row.new_bidders_bid_amount,
+              returningAmount: row.returning_bidders_bid_amount,
+              unresolvedBidders: row.unclassified_bidders,
+              unresolvedAmount: row.unclassified_bid_amount,
             },
           };
         }

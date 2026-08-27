@@ -1190,9 +1190,9 @@ export default function App() {
           {tab === "Revenue Breakdown" && (
             <RevenueBreakdownView
               store={store}
-              overview={overview}
+              dateRange={dateRange}
               rangeLabel={rangeLabel}
-              isLive={Boolean(live)}
+              refreshNonce={refreshNonce}
             />
           )}
 

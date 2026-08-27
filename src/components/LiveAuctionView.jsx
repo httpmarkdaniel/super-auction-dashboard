@@ -3,7 +3,6 @@ import { useLiveAuctionEvents, useAuctionLotDetail } from "../useOnlineBidding";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 import { formatManila, isEndingSoon } from "../utils/manilaTime";
 import { ALL_STORES } from "../mockData";
-import StoryHeader from "./StoryHeader";
 import StorySection from "./primitives/StorySection";
 import BidActivityBar from "./primitives/BidActivityBar";
 import AuctionProgressBar from "./primitives/AuctionProgressBar";
@@ -325,10 +324,6 @@ function AuctionEventsList({ store }) {
 export default function LiveAuctionView({ store }) {
   return (
     <div>
-      <div className="mb-8">
-        <StoryHeader eyebrow={`${store} · Online Bidding`} headline="Ongoing Online Bidding" />
-      </div>
-
       <AuctionEventsList store={store} />
     </div>
   );

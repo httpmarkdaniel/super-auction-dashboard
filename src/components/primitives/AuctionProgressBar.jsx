@@ -30,21 +30,22 @@ export default function AuctionProgressBar({ timelineStart, officialStartTime, e
 
   return (
     <div className="pb-1">
-      <div className="relative h-2 rounded-full bg-gridline">
+      <div className="relative h-3 rounded-full bg-gridline overflow-visible">
         <div
-          className="absolute top-0 left-0 h-full rounded-full bg-series1/30"
+          className="absolute top-0 left-0 h-full rounded-full bg-series1 transition-[width]"
           style={{ width: `${nowPct}%` }}
+          title={`${nowPct.toFixed(0)}% elapsed`}
         />
         {officialStartPct != null && (
           <div
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-4 bg-navy/50"
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-5 bg-navy/60 z-10"
             style={{ left: `${officialStartPct}%` }}
             title={`Official auction start · ${formatManila(officialStartTime)}`}
           />
         )}
         {!ended && (
           <div
-            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-series1 border-2 border-plane"
+            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-series1 border-2 border-plane shadow z-10"
             style={{ left: `${nowPct}%` }}
             title={`Current position · ${timeRemainingLabel(endingTime)}`}
           />

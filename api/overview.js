@@ -1357,6 +1357,7 @@ export default async function handler(req, res) {
 
         SELECT
           toDate(sl.auction_starting_time) AS bucket,
+          max(sl.auction_starting_time) AS bucket_timestamp,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
           countDistinct(sl.auction_number) AS auctions_concluded,
           count() AS lots_sold,
@@ -1433,7 +1434,8 @@ export default async function handler(req, res) {
           SELECT
             toDate(b.bid_created_at, 'Asia/Manila') AS bucket,
             lowerUTF8(trim(b.email)) AS bidder_key,
-            sum(b.bid_amount) AS bidder_day_amount
+            sum(b.bid_amount) AS bidder_day_amount,
+            max(b.bid_created_at) AS bidder_day_last_bid
 
           FROM cms.mart_cms_bid_history_report b
 
@@ -1454,6 +1456,7 @@ export default async function handler(req, res) {
 
         SELECT
           d.bucket AS bucket,
+          max(d.bidder_day_last_bid) AS bucket_timestamp,
 
           uniqExactIf(d.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
           uniqExactIf(d.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
@@ -1488,6 +1491,7 @@ export default async function handler(req, res) {
       if (!bidTrendByBucket.has(key)) {
         bidTrendByBucket.set(key, {
           bucket: key,
+          bucket_timestamp: null,
           bid_amount: 0,
           auctions_concluded: 0,
           lots_sold: 0,
@@ -1505,6 +1509,7 @@ export default async function handler(req, res) {
     }
     for (const row of bidTrendWinningRows) {
       const b = bidTrendBucket(row.bucket);
+      b.bucket_timestamp = row.bucket_timestamp || b.bucket_timestamp;
       b.bid_amount = Number(row.bid_amount ?? 0);
       b.auctions_concluded = Number(row.auctions_concluded ?? 0);
       b.lots_sold = Number(row.lots_sold ?? 0);
@@ -1515,6 +1520,7 @@ export default async function handler(req, res) {
     }
     for (const row of bidTrendParticipatingRows) {
       const b = bidTrendBucket(row.bucket);
+      if (!b.bucket_timestamp) b.bucket_timestamp = row.bucket_timestamp || null;
       b.participating_new = Number(row.participating_new ?? 0);
       b.participating_returning = Number(row.participating_returning ?? 0);
       b.participating_new_amount = Number(row.participating_new_amount ?? 0);
@@ -3100,6 +3106,7 @@ export default async function handler(req, res) {
       // a cumulative/period total) — see BID TREND query comments above.
       bid_trend: bidTrendRows.map((row) => ({
         bucket: row.bucket,
+        bucket_timestamp: row.bucket_timestamp,
         bid_amount: row.bid_amount,
         auctions_concluded: row.auctions_concluded,
         lots_sold: row.lots_sold,

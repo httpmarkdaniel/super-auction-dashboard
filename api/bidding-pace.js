@@ -41,6 +41,13 @@ const client = createClient({
 // Bidding Pace's non-hourly Participating card showed before this hourly
 // rework; never forced to reconcile).
 //
+// AUCTION_COUNT per hour — countDistinct(auction_number) over the exact
+// same scoped_bids population as bid_amount/Participating above (same
+// date/store/category scope, same bid-event hour bucket). An auction with
+// many bid events in one hour still counts once for that hour; an auction
+// active across several hours counts once in each hour it has activity in
+// — never counting individual bids or lots as auctions.
+//
 // WINNING per hour — settled (Paid/Released) lots, identity resolved via
 // the canonical BIDDER_IDENTITY_CTES bridge (api/_bidderIdentity.js),
 // exactly as api/leaderboards.js's settledCompositionResult already does.
@@ -113,7 +120,8 @@ export default async function handler(req, res) {
             toHour(b.bid_created_at, 'Asia/Manila') AS hour,
             ifNull(b.bid_amount, 0) AS bid_amount,
             lowerUTF8(trim(b.email)) AS bidder_key,
-            (b.email IS NOT NULL AND trim(b.email) != '') AS has_email
+            (b.email IS NOT NULL AND trim(b.email) != '') AS has_email,
+            b.auction_number AS auction_number
           FROM cms.mart_cms_bid_history_report b
           INNER JOIN auction_store s ON b.auction_number = s.auction_number
           LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
@@ -126,6 +134,7 @@ export default async function handler(req, res) {
         SELECT
           sb.hour AS hour,
           sum(sb.bid_amount) AS bid_amount,
+          countDistinct(sb.auction_number) AS auction_count,
 
           uniqExactIf(sb.bidder_key, sb.has_email AND f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
           uniqExactIf(sb.bidder_key, sb.has_email AND f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
@@ -242,6 +251,7 @@ export default async function handler(req, res) {
       return {
         hour,
         bid_amount: Number(row.bid_amount) || 0,
+        auction_count: Number(row.auction_count) || 0,
         participating: {
           new: Number(row.participating_new) || 0,
           returning: Number(row.participating_returning) || 0,

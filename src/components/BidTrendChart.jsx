@@ -2,9 +2,22 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import { formatManila } from "../utils/manilaTime";
 
 function formatDayLabel(iso) {
   return new Date(`${iso}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+}
+
+// Date + hour header for the hover tooltip — the hour comes from a real
+// authoritative timestamp already tied to this bucket (the settled lots'
+// own auction_starting_time, or the bid activity's own bid_created_at when
+// there's no settled value that day), never a fabricated/invented hour.
+// The chart itself stays one point per calendar day (see api/overview.js's
+// BID TREND query comments) — this only enriches the label.
+function formatDayHourLabel(row) {
+  const datePart = formatDayLabel(row.bucket);
+  if (!row.bucket_timestamp) return datePart;
+  return `${datePart} · ${formatManila(row.bucket_timestamp, { withDate: false })}`;
 }
 
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
@@ -24,7 +37,7 @@ function DailyTooltip({ active, payload }) {
 
   return (
     <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[260px]">
-      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatDayLabel(d.bucket)}</div>
+      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatDayHourLabel(d)}</div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2.5 pb-2.5 border-b border-gridline">
         <div>
