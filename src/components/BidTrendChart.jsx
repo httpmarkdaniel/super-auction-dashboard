@@ -109,6 +109,8 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
               <CartesianGrid stroke={palette.gridline} strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="bucket"
+                type="category"
+                padding={{ left: 0, right: 0 }}
                 tickFormatter={formatDayLabel}
                 interval={tickInterval}
                 tick={{ fill: palette.muted, fontSize: 11 }}
