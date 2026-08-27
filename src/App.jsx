@@ -113,6 +113,11 @@ const EMPTY_OVERVIEW = {
   },
 
   operationsDetail: [],
+  settledLots: [],
+  activeAuctionRows: [],
+  unsoldLotRows: [],
+  serviceIncomeLots: [],
+  forApprovalLots: [],
 
   moneyFlow: [
     { stage: "Bid Amount", value: 0, type: "total" },
@@ -131,6 +136,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     categories,
     lots,
     payables,
+    settledLots,
+    activeAuctionRows,
+    unsoldLotRows,
+    serviceIncomeLots,
+    forApprovalLots,
   } = live;
 
   const totalLots = Number(kpis.total_lots) || 0;
@@ -558,6 +568,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     },
 
     operationsDetail,
+    settledLots: settledLots || [],
+    activeAuctionRows: activeAuctionRows || [],
+    unsoldLotRows: unsoldLotRows || [],
+    serviceIncomeLots: serviceIncomeLots || [],
+    forApprovalLots: forApprovalLots || [],
 
     moneyFlow,
   };
