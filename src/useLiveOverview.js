@@ -134,8 +134,13 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               // LIVE BRANCH BREAKDOWN
               branches: liveOverview.branches ?? [],
 
-              // LIVE ACTIVE AUCTIONS
-              total_auctions: liveOverview.active_auctions ?? 0,
+              // LIVE ACTIVE AUCTIONS — key must be active_auctions, matching
+              // what App.jsx's heroKPIs.activeAuctionsNow actually reads
+              // (kpis.active_auctions). This used to write to total_auctions
+              // instead, a field nothing in the pipeline consumes, so the
+              // real live count from the API was silently discarded and
+              // Active Auctions always rendered its `|| 0` fallback.
+              active_auctions: liveOverview.active_auctions ?? 0,
 
               // LIVE LOTS SOLD / LISTED
               ended_lots_listed: liveOverview.listed_lots ?? 0,
