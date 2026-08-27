@@ -10,7 +10,7 @@ export default function CategoryStrip({ data: categoryBreakdown, rangeLabel = "T
   if (sorted.length === 0) {
     return (
       <Card title={`By Category · ${rangeLabel}`}>
-        <div className="text-center text-muted text-[15px] py-6">No data for this period.</div>
+        <div className="text-center text-muted text-[15px] py-6">No settled auction results yet for this period.</div>
       </Card>
     );
   }

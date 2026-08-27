@@ -34,7 +34,7 @@ function EntityTable({ rows, nameKey, totalBidAmount }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={4} className="py-6 text-center text-muted text-[14.5px]">No data for this period.</td>
+              <td colSpan={4} className="py-6 text-center text-muted text-[14.5px]">No settled auction results yet for this period.</td>
             </tr>
           )}
           {rows.length > 0 && (

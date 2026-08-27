@@ -20,11 +20,11 @@ function Badge({ value }) {
   );
 }
 
-export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, badgeKey, showRank = true, showAvg = false }) {
+export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel, badgeKey, showRank = true, showAvg = false, emptyMessage = "No data for this period." }) {
   const max = Math.max(...rows.map((r) => r[valueKey]), 1);
 
   if (rows.length === 0) {
-    return <div className="text-center text-muted text-[15px] py-6">No data for this period.</div>;
+    return <div className="text-center text-muted text-[15px] py-6">{emptyMessage}</div>;
   }
 
   return (

@@ -857,6 +857,7 @@ function OverviewTab({
             nameKey="vendor"
             metaKey="lots"
             metaLabel="lots"
+            emptyMessage="No settled auction results yet for this period."
           />
 
           <Leaderboard
@@ -865,6 +866,7 @@ function OverviewTab({
             nameKey="bidder"
             metaKey="wins"
             metaLabel="wins"
+            emptyMessage="No settled auction results yet for this period."
             badgeKey="new_or_returning"
           />
         </div>
