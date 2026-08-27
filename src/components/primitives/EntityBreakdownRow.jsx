@@ -2,10 +2,13 @@ import { formatPeso } from "../../utils/format";
 
 // Shared hoverable/clickable row for CategoryStrip/BranchStrip — bar +
 // share (unchanged visual language from RankedBar), plus a hover panel
-// telling the complete financial story for THIS entity only (never the
-// overall Overview totals), and a click-through into Full Auction Detail
-// pre-filtered to this entity.
+// telling the complete financial + bidder story for THIS entity only
+// (never the overall Overview totals), and a click-through into Full
+// Auction Detail pre-filtered to this entity.
 export default function EntityBreakdownRow({ label, bidAmount, share, max, detail, onClick }) {
+  const p = detail.participating;
+  const w = detail.winning;
+
   return (
     <button
       type="button"
@@ -27,9 +30,11 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
         role="tooltip"
         className="pointer-events-none absolute left-0 right-0 top-full mt-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
       >
-        <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left">
+        <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[320px]">
           <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{label}</div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+
+          <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1.5">Performance</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-3 pb-3 border-b border-gridline">
             <div>
               <div className="text-muted text-[12px]">Total Bid Amount</div>
               <div className="tabular font-medium">{formatPeso(bidAmount)}</div>
@@ -50,6 +55,26 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
               <div className="text-muted text-[12px]">Avg Bid / Sold Lot</div>
               <div className="tabular font-medium">{detail.avgBidPerSoldLot != null ? formatPeso(detail.avgBidPerSoldLot) : "—"}</div>
             </div>
+          </div>
+
+          <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1.5">Bidders</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-3 pb-3 border-b border-gridline">
+            <div>
+              <div className="text-muted text-[12px]">Participating</div>
+              <div className="tabular font-medium">{p.total} <span className="text-muted font-normal">({p.newBidders} New · {p.returningBidders} Returning)</span></div>
+              <div className="tabular text-[12px] text-series1 mt-0.5">{formatPeso(p.activity)} activity</div>
+              <div className="tabular text-[11px] text-muted">New {formatPeso(p.newActivity)} · Returning {formatPeso(p.returningActivity)}</div>
+            </div>
+            <div>
+              <div className="text-muted text-[12px]">Winning</div>
+              <div className="tabular font-medium">{w.total} <span className="text-muted font-normal">({w.newBidders} New · {w.returningBidders} Returning)</span></div>
+              <div className="tabular text-[12px] text-series1 mt-0.5">{formatPeso(w.amount)} value</div>
+              <div className="tabular text-[11px] text-muted">New {formatPeso(w.newAmount)} · Returning {formatPeso(w.returningAmount)}</div>
+            </div>
+          </div>
+
+          <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1.5">Revenue</div>
+          <div className="grid grid-cols-3 gap-x-4 gap-y-1.5">
             <div>
               <div className="text-muted text-[12px]">Buyer's Premium</div>
               <div className="tabular font-medium">{formatPeso(detail.buyersPremiumIncome)}</div>
@@ -63,6 +88,7 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
               <div className="tabular font-medium text-series1">{formatPeso(detail.serviceIncome)}</div>
             </div>
           </div>
+
           <div className="text-[11.5px] text-muted mt-2 pt-2 border-t border-gridline">Click to view in Full Auction Detail</div>
         </div>
       </div>

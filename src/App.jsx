@@ -183,6 +183,21 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     const buyersPremium = Number(row.buyers_premium_income) || 0;
     const commission = Number(row.commission_income) || 0;
     const bidAmount = Number(row.bid_amount) || 0;
+
+    // Entity-specific Participating/Winning composition (see
+    // api/overview.js's BRANCH / CATEGORY BIDDER COMPOSITION query
+    // comment) — scoped to THIS branch/category only, same canonical
+    // definitions/identity bridge as the top-level Bidder Composition
+    // section, never the overall Overview totals.
+    const pNew = Number(row.participating_new) || 0;
+    const pReturning = Number(row.participating_returning) || 0;
+    const pNewAmt = Number(row.participating_new_amount) || 0;
+    const pReturningAmt = Number(row.participating_returning_amount) || 0;
+    const wNew = Number(row.winning_new) || 0;
+    const wReturning = Number(row.winning_returning) || 0;
+    const wNewAmt = Number(row.winning_new_amount) || 0;
+    const wReturningAmt = Number(row.winning_returning_amount) || 0;
+
     return {
       auctionCount,
       lotsSold,
@@ -191,6 +206,22 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       serviceIncome: buyersPremium + commission,
       avgBidPerAuction: auctionCount > 0 ? bidAmount / auctionCount : null,
       avgBidPerSoldLot: lotsSold > 0 ? bidAmount / lotsSold : null,
+      participating: {
+        total: pNew + pReturning,
+        newBidders: pNew,
+        returningBidders: pReturning,
+        activity: pNewAmt + pReturningAmt,
+        newActivity: pNewAmt,
+        returningActivity: pReturningAmt,
+      },
+      winning: {
+        total: wNew + wReturning,
+        newBidders: wNew,
+        returningBidders: wReturning,
+        amount: wNewAmt + wReturningAmt,
+        newAmount: wNewAmt,
+        returningAmount: wReturningAmt,
+      },
     };
   }
 
@@ -237,6 +268,18 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     buyers_premium_income: otherBranchesRows.reduce((s, b) => s + (Number(b.buyers_premium_income) || 0), 0),
     commission_income: otherBranchesRows.reduce((s, b) => s + (Number(b.commission_income) || 0), 0),
     bid_amount: otherBranchesTotal,
+    // Note: summed (not re-deduplicated) across the rolled-up branches —
+    // a bidder active in two "Others" branches would be counted twice
+    // here, same known approximation already accepted for a bucket this
+    // minor (only appears past the top 7 branches).
+    participating_new: otherBranchesRows.reduce((s, b) => s + (Number(b.participating_new) || 0), 0),
+    participating_returning: otherBranchesRows.reduce((s, b) => s + (Number(b.participating_returning) || 0), 0),
+    participating_new_amount: otherBranchesRows.reduce((s, b) => s + (Number(b.participating_new_amount) || 0), 0),
+    participating_returning_amount: otherBranchesRows.reduce((s, b) => s + (Number(b.participating_returning_amount) || 0), 0),
+    winning_new: otherBranchesRows.reduce((s, b) => s + (Number(b.winning_new) || 0), 0),
+    winning_returning: otherBranchesRows.reduce((s, b) => s + (Number(b.winning_returning) || 0), 0),
+    winning_new_amount: otherBranchesRows.reduce((s, b) => s + (Number(b.winning_new_amount) || 0), 0),
+    winning_returning_amount: otherBranchesRows.reduce((s, b) => s + (Number(b.winning_returning_amount) || 0), 0),
   };
 
   const branchBreakdown = [

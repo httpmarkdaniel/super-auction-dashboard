@@ -1789,6 +1789,229 @@ export default async function handler(req, res) {
     const settledCategoryRows = await settledCategoryResult.json();
 
     // ---------------------------------------------------------
+    // BRANCH / CATEGORY BIDDER COMPOSITION (for the Overview hover panel)
+    //
+    // Same two populations as the top-level Bidder Composition section,
+    // just grouped by store_name/category instead of collapsed to one
+    // number — so hovering ONE branch/category shows bidder counts/
+    // amounts scoped to ONLY that entity, never the overall Overview
+    // totals. WINNING reuses the exact same settled_lots + canonical
+    // BIDDER_IDENTITY_CTES bridge as the Bid Trend query (identity never
+    // redefined per-entity). PARTICIPATING reuses the exact same bid-
+    // activity/bidder_first_bid definition as the Bid Trend Participating
+    // query, just grouped by branch/category instead of day. All four
+    // queries run once here (server-side, part of this same /api/overview
+    // call) — hovering in the UI triggers zero additional requests.
+    // ---------------------------------------------------------
+    const [
+      winningByBranchResult,
+      winningByCategoryResult,
+      participatingByBranchResult,
+      participatingByCategoryResult,
+    ] = await Promise.all([
+      client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT auction_number, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(a.store_name) AS store_name,
+              any(v.bid_amount) AS lot_bid_amount,
+              any(v.or_number) AS or_number,
+              any(v.date_time_paid) AS date_time_paid,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+            WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
+          ),
+          ${BIDDER_IDENTITY_CTES}
+          SELECT
+            sl.store_name AS branch,
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new,
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_returning,
+            sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new_amount,
+            sumIf(ifNull(sl.lot_bid_amount, 0), (fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) OR fe.first_ever_at IS NULL) AS winning_returning_amount
+          FROM settled_lots sl
+          LEFT JOIN resolved_lot_identity rli ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+          LEFT JOIN bidder_first_ever fe ON rli.resolved_email = fe.fe_key
+          GROUP BY sl.store_name
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      }),
+      client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT auction_number, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(v.bid_amount) AS lot_bid_amount,
+              any(v.or_number) AS or_number,
+              any(v.date_time_paid) AS date_time_paid,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+            WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+          ),
+          ${BIDDER_IDENTITY_CTES}
+          SELECT
+            sl.category AS category,
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new,
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_returning,
+            sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new_amount,
+            sumIf(ifNull(sl.lot_bid_amount, 0), (fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) OR fe.first_ever_at IS NULL) AS winning_returning_amount
+          FROM settled_lots sl
+          LEFT JOIN resolved_lot_identity rli ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+          LEFT JOIN bidder_first_ever fe ON rli.resolved_email = fe.fe_key
+          GROUP BY sl.category
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      }),
+      client.query({
+        query: `
+          WITH auction_store AS (
+            SELECT DISTINCT auction_number, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE auction_number IS NOT NULL
+          ),
+          lot_category AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+          ),
+          bidder_first_bid AS (
+            SELECT lowerUTF8(trim(email)) AS bidder_key, min(bid_created_at) AS first_bid_at
+            FROM cms.mart_cms_bid_history_report
+            WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+            GROUP BY bidder_key
+          ),
+          branch_bidder_activity AS (
+            SELECT
+              s.store_name AS store_name,
+              lowerUTF8(trim(b.email)) AS bidder_key,
+              sum(b.bid_amount) AS bidder_amount
+            FROM cms.mart_cms_bid_history_report b
+            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR s.store_name = {store:String})
+              AND b.email IS NOT NULL AND trim(b.email) != ''
+              AND ({category:String} = '' OR lc.lot_category = {category:String})
+            GROUP BY store_name, bidder_key
+          )
+          SELECT
+            ba.store_name AS branch,
+            uniqExactIf(ba.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+            uniqExactIf(ba.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            sumIf(ba.bidder_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+            sumIf(ba.bidder_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount
+          FROM branch_bidder_activity ba
+          INNER JOIN bidder_first_bid f ON ba.bidder_key = f.bidder_key
+          GROUP BY ba.store_name
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      }),
+      client.query({
+        query: `
+          WITH auction_store AS (
+            SELECT DISTINCT auction_number, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE auction_number IS NOT NULL
+          ),
+          lot_category AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+          ),
+          bidder_first_bid AS (
+            SELECT lowerUTF8(trim(email)) AS bidder_key, min(bid_created_at) AS first_bid_at
+            FROM cms.mart_cms_bid_history_report
+            WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+            GROUP BY bidder_key
+          ),
+          category_bidder_activity AS (
+            SELECT
+              lc.lot_category AS lot_category,
+              lowerUTF8(trim(b.email)) AS bidder_key,
+              sum(b.bid_amount) AS bidder_amount
+            FROM cms.mart_cms_bid_history_report b
+            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            INNER JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR s.store_name = {store:String})
+              AND b.email IS NOT NULL AND trim(b.email) != ''
+            GROUP BY lot_category, bidder_key
+          )
+          SELECT
+            ca.lot_category AS category,
+            uniqExactIf(ca.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+            uniqExactIf(ca.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            sumIf(ca.bidder_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+            sumIf(ca.bidder_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount
+          FROM category_bidder_activity ca
+          INNER JOIN bidder_first_bid f ON ca.bidder_key = f.bidder_key
+          GROUP BY ca.lot_category
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      }),
+    ]);
+
+    const winningByBranchRows = await winningByBranchResult.json();
+    const winningByCategoryRows = await winningByCategoryResult.json();
+    const participatingByBranchRows = await participatingByBranchResult.json();
+    const participatingByCategoryRows = await participatingByCategoryResult.json();
+
+    const winningByBranchMap = new Map(winningByBranchRows.map((r) => [r.branch, r]));
+    const winningByCategoryMap = new Map(winningByCategoryRows.map((r) => [r.category, r]));
+    const participatingByBranchMap = new Map(participatingByBranchRows.map((r) => [r.branch, r]));
+    const participatingByCategoryMap = new Map(participatingByCategoryRows.map((r) => [r.category, r]));
+
+    function bidderComposition(winningRow, participatingRow) {
+      const w = winningRow || {};
+      const p = participatingRow || {};
+      return {
+        participating_new: Number(p.participating_new ?? 0),
+        participating_returning: Number(p.participating_returning ?? 0),
+        participating_new_amount: Number(p.participating_new_amount ?? 0),
+        participating_returning_amount: Number(p.participating_returning_amount ?? 0),
+        winning_new: Number(w.winning_new ?? 0),
+        winning_returning: Number(w.winning_returning ?? 0),
+        winning_new_amount: Number(w.winning_new_amount ?? 0),
+        winning_returning_amount: Number(w.winning_returning_amount ?? 0),
+      };
+    }
+
+    // ---------------------------------------------------------
     // BIDDING ACTIVITY BY HOUR (Asia/Manila local hour)
     //
     // For CategoryView's "Bidding Activity by Hour" — the main Overview UI
@@ -2940,6 +3163,7 @@ export default async function handler(req, res) {
         lots_sold: Number(row.lots_sold ?? 0),
         buyers_premium_income: Number(row.buyers_premium_income ?? 0),
         commission_income: Number(row.commission_income ?? 0),
+        ...bidderComposition(winningByBranchMap.get(row.branch), participatingByBranchMap.get(row.branch)),
       })),
 
       categories: settledCategoryRows.map((row) => ({
@@ -2949,6 +3173,7 @@ export default async function handler(req, res) {
         lots_sold: Number(row.lots_sold ?? 0),
         buyers_premium_income: Number(row.buyers_premium_income ?? 0),
         commission_income: Number(row.commission_income ?? 0),
+        ...bidderComposition(winningByCategoryMap.get(row.category), participatingByCategoryMap.get(row.category)),
       })),
 
       // Bidding Activity by Hour (CategoryView-only today) — see the

@@ -110,16 +110,28 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
                 axisLine={false}
                 tickLine={false}
                 width={56}
+                // Frame the actual value range rather than always anchoring
+                // at ₱0 — the same "zoom into the real range" convention a
+                // stock/price chart uses, so real day-to-day swings stay
+                // visible instead of getting flattened against a tall
+                // from-zero axis. Purely a rendering choice — the plotted
+                // bid_amount values themselves are untouched.
+                domain={([dataMin, dataMax]) => {
+                  if (dataMax <= 0) return [0, 1];
+                  const pad = Math.max((dataMax - dataMin) * 0.15, dataMax * 0.05);
+                  return [Math.max(0, dataMin - pad), dataMax + pad];
+                }}
+                allowDataOverflow={false}
               />
-              <Tooltip content={<DailyTooltip />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "3 3" }} />
+              <Tooltip content={<DailyTooltip />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }} />
               <Area
-                type="monotone"
+                type="linear"
                 dataKey="bid_amount"
                 stroke={palette.series1}
                 strokeWidth={2}
                 fill="url(#bidTrendFill)"
-                dot={false}
-                activeDot={{ r: 4, strokeWidth: 2, stroke: palette.series1, fill: "#fff" }}
+                dot={{ r: 2.5, strokeWidth: 0, fill: palette.series1 }}
+                activeDot={{ r: 5.5, strokeWidth: 2, stroke: "#fff", fill: palette.series1 }}
                 isAnimationActive={false}
               />
             </AreaChart>

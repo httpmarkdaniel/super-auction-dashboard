@@ -38,7 +38,7 @@ export default function RankedBar({ rows, labelKey, valueKey, metaKey, metaLabel
           )}
           <div className="w-[150px] shrink-0 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
-              <span className="text-[15.5px] text-ink truncate">{r[labelKey]}</span>
+              <span className="text-[15.5px] text-ink truncate" title={r[labelKey]}>{r[labelKey]}</span>
               {badgeKey && <Badge value={r[badgeKey]} />}
             </div>
             {metaKey && (
