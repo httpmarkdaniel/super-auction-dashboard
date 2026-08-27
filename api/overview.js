@@ -1065,7 +1065,8 @@ export default async function handler(req, res) {
 
         SELECT
           sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount,
-          countDistinct(auction_number) AS settled_auction_count
+          countDistinct(auction_number) AS settled_auction_count,
+          count() AS settled_lot_count
 
         FROM settled_lots
       `,
@@ -1075,6 +1076,15 @@ export default async function handler(req, res) {
 
     const settledTotalRows = await settledTotalResult.json();
     const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
+    // Denominator for Avg Bid / Sold Lot — count() over the EXACT same
+    // settled_lots population as settled_total_bid_amount above, never the
+    // broader lot_status "sold_lots" figure (Outstanding/Paid/Unpaid/
+    // Released) computed later in this file, which is a different
+    // population from a different query. Keeping the numerator and
+    // denominator from the same CTE is what makes SUM(settled bid)/COUNT
+    // (settled lots) a correct per-lot average rather than a mismatched
+    // ratio between two different lot populations.
+    const settledLotCount = Number(settledTotalRows[0]?.settled_lot_count ?? 0);
     // "Total Auctions" for CategoryView: no existing Overview definition
     // scopes "auction count" by date range + category (Active Auctions is
     // a "right now" concept, unrelated to either) — this is a natural
@@ -1209,6 +1219,210 @@ export default async function handler(req, res) {
     const aboveReserveExcess = Number(settledServiceIncomeRows[0]?.above_reserve_excess ?? 0);
     const aboveReserveBase = Number(settledServiceIncomeRows[0]?.above_reserve_base ?? 0);
     const avgPremiumOverReservePct = aboveReserveBase > 0 ? (aboveReserveExcess / aboveReserveBase) * 100 : 0;
+
+    // ---------------------------------------------------------
+    // AUCTION-LEVEL SUMMARY (Overview KPI drilldowns)
+    //
+    // One row per auction contributing to this scope, covering every
+    // Overview KPI that clicks through to an auction-first drilldown
+    // (Total Bid Amount, Auctions Concluded, Avg Bid/Auction, Avg Bid/Sold
+    // Lot, Lots Sold/Listed) from ONE query instead of one per KPI.
+    //
+    // lots_listed/lots_sold/lots_unsold reuse the exact same status
+    // resolution and "Sold" population (Outstanding/Paid/Unpaid/Released)
+    // as the type=lots drilldown/summary lotStatusResult above.
+    // settled_bid_amount/settled_lot_count are the SAME Paid/Released-only
+    // population as settled_total_bid_amount above, just grouped by
+    // auction instead of collapsed to a scalar — so
+    // SUM(settled_bid_amount) here reconciles exactly to Total Bid Amount,
+    // and COUNT(*) reconciles to Auctions Concluded.
+    // ---------------------------------------------------------
+    const auctionSummaryResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT
+            auction_number,
+            any(name) AS auction_name,
+            any(store_name) AS auction_store_name,
+            any(starting_time) AS auction_starting_time
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+          GROUP BY auction_number
+        ),
+
+        lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+            any(v.bid_amount) AS bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+
+          HAVING ({category:String} = '' OR lot_category = {category:String})
+        )
+
+        SELECT
+          l.auction_number AS auction_number,
+          any(a.auction_name) AS name,
+          any(a.auction_store_name) AS store_name,
+          any(a.auction_starting_time) AS starting_time,
+
+          count() AS lots_listed,
+          countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
+          countIf(status = 'Unsold') AS lots_unsold,
+
+          sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
+          countIf(status IN ('Paid', 'Released')) AS settled_lot_count
+
+        FROM lots l
+
+        INNER JOIN selected_auctions a
+          ON l.auction_number = a.auction_number
+
+        GROUP BY l.auction_number
+        ORDER BY settled_bid_amount DESC
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const auctionSummaryRows = await auctionSummaryResult.json();
+
+    // ---------------------------------------------------------
+    // BID TREND
+    //
+    // Same settled_lots population as Total Bid Amount, bucketed by the
+    // auction's own starting_time (same scoping convention as every other
+    // settled query in this file) instead of collapsed to one number.
+    // Grain adapts to the selected range's day-span — daily for <= 45
+    // days (covers Week/Month to Date and any custom range that size),
+    // monthly beyond that (covers Year to Date and longer custom ranges)
+    // — so a Year to Date trend renders ~12 points, not ~250.
+    // ---------------------------------------------------------
+    const daySpan = Math.max(
+      1,
+      Math.round((new Date(`${to}T00:00:00`) - new Date(`${from}T00:00:00`)) / 86400000) + 1,
+    );
+    const trendGrain = daySpan <= 45 ? "day" : "month";
+    const bucketExpr = trendGrain === "day" ? "toDate(a.auction_starting_time)" : "toStartOfMonth(a.auction_starting_time)";
+
+    const bidTrendResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT
+            auction_number,
+            any(starting_time) AS auction_starting_time
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+          GROUP BY auction_number
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            any(v.bid_amount) AS lot_bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+
+          HAVING ({category:String} = '' OR lot_category = {category:String})
+        )
+
+        SELECT
+          ${bucketExpr} AS bucket,
+          sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
+          countDistinct(sl.auction_number) AS auctions_concluded
+
+        FROM settled_lots sl
+
+        INNER JOIN selected_auctions a
+          ON sl.auction_number = a.auction_number
+
+        GROUP BY bucket
+        ORDER BY bucket
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const bidTrendRows = await bidTrendResult.json();
+
+    // ---------------------------------------------------------
+    // REGISTRATION -> BIDDER CONVERSION
+    //
+    // Population: cms.mart_cms_bidder_registrations, the authoritative
+    // per-(auction, customer) registration mart already used elsewhere in
+    // this codebase for bidder identity (see api/_bidderIdentity.js). Its
+    // own is_participating_bidder flag is the SAME authoritative signal
+    // the table already carries — not a second classifier invented here.
+    //
+    // Cohort: customers registered for an auction whose starting_time
+    // falls in the selected range (same selected_auctions scoping
+    // convention as every other query in this file, for the same reason —
+    // bidder_registered_at coverage wasn't independently verified here,
+    // whereas starting_time via productivity_report is the established
+    // ~100%-covering join key throughout this endpoint). Registered =
+    // distinct customers with a registration row for one of those
+    // auctions. Participating = the same cohort, filtered to
+    // is_participating_bidder = 1. Both sides of the ratio are therefore
+    // the same comparable cohort, not lifetime registrations vs. a
+    // period's participants.
+    //
+    // Not category-scoped: this mart has no lot/category dimension (same
+    // reasoning as ACTIVE AUCTIONS RIGHT NOW above, which is also
+    // deliberately global for this reason).
+    // ---------------------------------------------------------
+    const registrationResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        )
+
+        SELECT
+          uniqExact(r.customer_id) AS registered,
+          uniqExactIf(r.customer_id, r.is_participating_bidder = 1) AS participating
+
+        FROM cms.mart_cms_bidder_registrations r
+
+        INNER JOIN selected_auctions a
+          ON r.auction_number = a.auction_number
+
+        WHERE r.customer_id IS NOT NULL
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    const registrationRows = await registrationResult.json();
+    const registeredCustomers = Number(registrationRows[0]?.registered ?? 0);
+    const participatingRegisteredBidders = Number(registrationRows[0]?.participating ?? 0);
 
     // ---------------------------------------------------------
     // FOR APPROVAL
@@ -2291,6 +2505,37 @@ export default async function handler(req, res) {
       // "right now" concept unrelated to date range/category) — see the
       // TOTAL BID AMOUNT (SETTLED) query comment above.
       total_auctions: settledAuctionCount,
+      // Same figure under an explicit name — "Auctions Concluded" KPI.
+      auctions_concluded: settledAuctionCount,
+      settled_lot_count: settledLotCount,
+
+      // Auction-grain summary behind the Total Bid Amount / Auctions
+      // Concluded / Avg Bid per Auction / Avg Bid per Sold Lot / Lots Sold
+      // drilldowns — see AUCTION-LEVEL SUMMARY query comment above.
+      auction_summary: auctionSummaryRows.map((row) => ({
+        auction_number: row.auction_number,
+        name: row.name,
+        store_name: row.store_name,
+        starting_time: row.starting_time,
+        lots_listed: Number(row.lots_listed ?? 0),
+        lots_sold: Number(row.lots_sold ?? 0),
+        lots_unsold: Number(row.lots_unsold ?? 0),
+        settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+        settled_lot_count: Number(row.settled_lot_count ?? 0),
+      })),
+
+      // Bid Trend — see BID TREND query comment above for grain selection.
+      bid_trend: bidTrendRows.map((row) => ({
+        bucket: row.bucket,
+        bid_amount: Number(row.bid_amount ?? 0),
+        auctions_concluded: Number(row.auctions_concluded ?? 0),
+      })),
+      bid_trend_grain: trendGrain,
+
+      // Registration -> Bidder Conversion — see REGISTRATION -> BIDDER
+      // CONVERSION query comment above for cohort definition.
+      registered_customers: registeredCustomers,
+      participating_registered_bidders: participatingRegisteredBidders,
 
       // For Approval: lots whose resolved for_approval_status is exactly
       // 'For Approval', independent of lifecycle status (Unsold/Outstanding/

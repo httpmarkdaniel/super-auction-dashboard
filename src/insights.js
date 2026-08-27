@@ -28,17 +28,9 @@ function periodAdverb(rangeLabel) {
 
 // Turns the raw store-scoped numbers into the one headline sentence shown
 // at the top of the Overview page.
-export function buildStoryline(overview, storeName) {
-  const { heroKPIs } = overview;
-
-  const hasDelta = heroKPIs.totalBidAmountDeltaPct !== undefined && heroKPIs.totalBidAmountDeltaPct !== null;
-  const bidUp = heroKPIs.totalBidAmountDeltaPct >= 0;
-  const deltaClause = hasDelta
-    ? `, ${bidUp ? "up" : "down"} ${Math.abs(heroKPIs.totalBidAmountDeltaPct).toFixed(1)}% vs. yesterday`
-    : "";
-
+export function buildStoryline() {
   return {
-    headline: `The combined value of all bids placed during the selected period, based on the current filters.`,
+    headline: `Total settled hammer value from concluded auctions in the selected period.`,
   };
 }
 

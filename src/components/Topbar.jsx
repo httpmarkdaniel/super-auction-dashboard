@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import SearchBar from "./SearchBar";
-import { formatCompactPeso } from "../utils/format";
 import { RANGE_PRESETS, resolveDateRange } from "../utils/dateRange";
 
 function StoreChip({ value, onChange, options }) {
@@ -235,97 +234,11 @@ function UserBadge() {
   );
 }
 
-const TONE_DOT = {
-  good: "bg-good",
-  warning: "bg-warning",
-  critical: "bg-critical",
-  info: "bg-navy",
-};
-
-function TickerItem({ tone = "good", children }) {
-  return (
-    <span className="flex items-center gap-1.5 text-[15px] font-medium text-ink whitespace-nowrap shrink-0">
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]}`} />
-      {children}
-    </span>
-  );
-}
-
-function AlertTicker({ items }) {
-  if (items.length === 0) return null;
-  const doubled = [...items, ...items];
-  return (
-    <div className="flex items-stretch bg-surface1 border-b border-gridline">
-      <div className="flex items-center gap-1.5 pl-4 pr-3 py-1.5 shrink-0 bg-critical">
-        <span className="w-1.5 h-1.5 rounded-full bg-white pulse-dot" />
-        <span className="text-[13.5px] font-bold tracking-[0.08em] uppercase text-white whitespace-nowrap">Live Alerts</span>
-      </div>
-      <div className="marquee-viewport flex-1 min-w-0 overflow-hidden">
-        <div className="flex items-center gap-8 px-4 py-1.5 w-max marquee-track">
-          {doubled.map((item, i) => (
-            <TickerItem key={i} tone={item.tone}>
-              {item.node}
-            </TickerItem>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatCountdown(sec) {
-  const totalMin = Math.max(1, Math.round(sec / 60));
-  if (totalMin >= 60) {
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    return m ? `${h}h ${m}m` : `${h}h`;
-  }
-  return `${totalMin}m`;
-}
-
-// Live-auction-only ticker: sold today (fixed calendar day, all stores),
-// how many auctions end today, and which ones are closing within the hour
-// — nothing else, so the marquee stays a pure "what's happening right now"
-// feed rather than a grab-bag of overview stats.
-function buildActivityItems({ loading, error, soldToday, endingTodayCount, endingSoon }) {
-  if (error) return [{ tone: "critical", node: <>Couldn't load live auction activity: {error}</> }];
-  if (loading) return [{ tone: "info", node: <>Loading live auction activity…</> }];
-
-  const items = [
-    {
-      tone: "good",
-      node: <>{formatCompactPeso(soldToday)} sold today across all stores</>,
-    },
-    {
-      tone: "info",
-      node: (
-        <>
-          {endingTodayCount} auction{endingTodayCount === 1 ? "" : "s"} ending today
-        </>
-      ),
-    },
-  ];
-
-  endingSoon.forEach((a) => {
-    items.push({
-      tone: a.closesInSec <= 600 ? "critical" : "warning",
-      node: (
-        <>
-          Auction #{a.auctionNumber} · {a.store} ending in {formatCountdown(a.closesInSec)}
-        </>
-      ),
-    });
-  });
-
-  return items;
-}
-
 export default function Topbar({
   store,
   onStoreChange,
   onExportClick,
   onMenuClick,
-  marquee,
   searchPool,
   dateRange,
   onDateRangeChange,
@@ -333,8 +246,6 @@ export default function Topbar({
   updatedAt,
   onRefresh,
 }) {
-  const activityItems = buildActivityItems(marquee);
-
   return (
     <div className="flex flex-col w-full bg-surface1 border-b border-gridline">
       <div className="flex items-center gap-3 px-4 md:px-6 h-16">
@@ -371,8 +282,6 @@ export default function Topbar({
           </IconButton>
         </div>
       </div>
-
-      <AlertTicker items={activityItems} />
     </div>
   );
 }

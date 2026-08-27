@@ -645,6 +645,26 @@ export default async function handler(req, res) {
             AND email IS NOT NULL
 
           GROUP BY customer_id
+        ),
+
+        -- New/Returning for Top Bidders — every bidder ranked here already
+        -- has a real xv3.postings row (required by the posting_customer
+        -- INNER JOIN below), i.e. a genuine competitive bid, so the
+        -- competitive-only first-ever-bid rule (same definition/table as
+        -- api/_bidderIdentity.js's bidder_first_competitive and
+        -- compositionResult's bidder_first_bid above) fully classifies
+        -- every row here — the negotiated-purchase fallback that matters
+        -- for lots with NO postings row is a non-issue for this
+        -- already-postings-gated population. Does not change ranking or
+        -- population, only labels it — see this query's own comment above
+        -- for why the ranking stays primary-bridge-only.
+        bidder_first_competitive AS (
+          SELECT
+            lowerUTF8(trim(email)) AS fc_bidder_key,
+            min(bid_created_at) AS first_competitive_at
+          FROM cms.mart_cms_bid_history_report
+          WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+          GROUP BY fc_bidder_key
         )
 
         SELECT
@@ -652,7 +672,13 @@ export default async function handler(req, res) {
           any(firstname) AS firstname,
           any(lastname) AS lastname,
           count() AS settled_lots,
-          sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount
+          sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount,
+
+          if(
+            min(fc.first_competitive_at) >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila'),
+            'new',
+            'returning'
+          ) AS new_or_returning
 
         FROM settled_lots sl
 
@@ -664,6 +690,9 @@ export default async function handler(req, res) {
 
         INNER JOIN cms_bidder_email
           ON br_hmr_customer_id = cb_customer_id
+
+        LEFT JOIN bidder_first_competitive fc
+          ON cb_email = fc.fc_bidder_key
 
         GROUP BY cb_email
         ORDER BY settled_bid_amount DESC
@@ -738,6 +767,7 @@ export default async function handler(req, res) {
           settled_wins: settled_lots,
           settled_bid_amount,
           average_bid_amount_per_win: settled_lots > 0 ? settled_bid_amount / settled_lots : 0,
+          new_or_returning: row.new_or_returning ?? "returning",
         };
       }),
 

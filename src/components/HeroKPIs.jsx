@@ -1,11 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
-import Modal from "./primitives/Modal";
-import BranchTallyModal from "./primitives/BranchTallyModal";
-import ActiveAuctionsModal from "./primitives/ActiveAuctionsModal";
+import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
-import ForApprovalModal from "./primitives/ForApprovalModal";
-import OperationsTable from "./OperationsTable";
 import { formatPeso } from "../utils/format";
 
 function Icon({ path }) {
@@ -20,181 +16,195 @@ const ICONS = {
   sales: <Icon path={<path d="M3 17l6-6 4 4 8-8M21 3h-6v6" />} />,
   gavel: <Icon path={<path d="M14 6l4 4M5 15l4 4M9.5 3.5l6 6-6.5 6.5-6-6zM13.5 14l6 6M2 22l5-5" />} />,
   box: <Icon path={<><path d="M3 8l9-5 9 5-9 5-9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" /></>} />,
-  alert: <Icon path={<><circle cx="12" cy="12" r="9" /><path d="M12 8v5" /><path d="M12 16h.01" /></>} />,
-  tag: <Icon path={<><path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3H4a1 1 0 0 0-1 1v5.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.82 0l4.6-4.6a2 2 0 0 0 0-2.83z" /><circle cx="7.5" cy="7.5" r="1.5" /></>} />,
+  chart: <Icon path={<><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></>} />,
+  target: <Icon path={<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></>} />,
   clock: <Icon path={<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>} />,
-  wallet: <Icon path={<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M17 12h.01" /></>} />
+  wallet: <Icon path={<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M17 12h.01" /></>} />,
+  users: <Icon path={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>} />,
 };
 
 const METHODOLOGY = {
   totalBidAmount:
-    "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the tally by branch, category, or the underlying settled lots.",
-  activeAuctions:
-    "Count of auctions currently in progress right now (starting_time has passed, ending_time hasn't) — independent of the selected date range, but still scoped to the selected store. Click to see those auctions.",
+    "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the contributing auctions.",
+  auctionsConcluded:
+    "Distinct auction events contributing to the settled Total Bid Amount above — same population, same scope. Click to see them.",
+  avgBidPerAuction:
+    "Total Bid Amount ÷ Auctions Concluded. Click to compare auctions against this average.",
+  avgBidPerSoldLot:
+    "Total Bid Amount ÷ settled sold-lot count (SUM of settled value ÷ COUNT of settled lots, not an average of per-auction averages). Click to compare auctions.",
   lotsSoldListed:
-    "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the sold lots.",
-  forApproval:
-    "Count: lots whose resolved approval status is \"For Approval\" (independent of lifecycle status — Unsold, Outstanding, Unpaid, Paid, Released, Returned, or Refunded lots can all appear), within the selected date range. Value: sum of bid amount for those lots — a lot with no bid yet legitimately contributes ₱0. Click to see them.",
-  unsoldLots:
-    "Lots created in the selected date range that are still sitting Unsold as of today. Value is the sum of reserve price across these lots. Click to see them.",
-  withReservePrice:
-    "Of the unsold lots above, how many have a reserve price set (and their combined reserve value) — lots with no reserve on file don't contribute a comparable value figure. Click to see them.",
+    "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the contributing auctions.",
   serviceIncome:
-    "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots."
+    "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots.",
+  registration:
+    "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
 };
 
-function LotDrilldownModal({ open, onClose, title, subtitle, data, initialTab }) {
-  return (
-    <Modal open={open} onClose={onClose} title={title} subtitle={subtitle}>
-      <OperationsTable data={data} initialTab={initialTab} embedded />
-    </Modal>
-  );
-}
-
 export default function HeroKPIs({ overview, rangeLabel = "Today" }) {
-  const {
-    heroKPIs,
-    unsoldLots,
-    hourlyTrend,
-    operationsDetail,
-    branchTally,
-    categoryTally,
-    settledLots,
-    activeAuctionRows,
-    unsoldLotRows,
-    serviceIncomeLots,
-    forApprovalLots,
-  } = overview;
-  const trend = hourlyTrend.map((h) => h.bidAmount);
-  const pendingApproval = heroKPIs.pendingApprovalCount ?? 0;
+  const { heroKPIs, unsoldLots, operationsDetail, auctionSummary, serviceIncomeLots } = overview;
   const [drilldown, setDrilldown] = useState(null);
 
-  // Strict Unsold population (status='Unsold') — same rows used for both
-  // the Unsold Lots and With Reserve Price drilldowns, since "With
-  // Reserve" is just that same population filtered to reservedPrice > 0.
-  const unsoldWithReserveLots = unsoldLotRows.filter((r) => r.reservedPrice > 0);
+  const lotsByAuction = useMemo(() => {
+    const map = new Map();
+    for (const lot of operationsDetail) {
+      if (!map.has(lot.auctionNumber)) map.set(lot.auctionNumber, []);
+      map.get(lot.auctionNumber).push(lot);
+    }
+    return (auctionNumber) => map.get(auctionNumber) ?? [];
+  }, [operationsDetail]);
+
+  const sellThroughPct = heroKPIs.lotsListed > 0 ? ((heroKPIs.lotsSold / heroKPIs.lotsListed) * 100).toFixed(0) : 0;
+
+  // auctionSummary covers every auction with a LISTED lot (needed for the
+  // Lots Sold/Listed drilldown's population), but Total Bid Amount/
+  // Auctions Concluded/Avg Bid per Auction/Avg Bid per Sold Lot are scoped
+  // to the SETTLED (Paid/Released) population only — filtering here keeps
+  // each drilldown's row count/sum reconciling to its own parent KPI (see
+  // api/overview.js's AUCTION-LEVEL SUMMARY comment), never showing
+  // auctions with zero settled contribution under "Auctions Concluded".
+  const settledAuctionSummary = useMemo(
+    () => auctionSummary.filter((a) => a.settledLotCount > 0),
+    [auctionSummary],
+  );
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <StatTile
-        icon={ICONS.sales}
-        eyebrow={`Total Bid Amount · ${rangeLabel}`}
-        value={formatPeso(heroKPIs.totalBidAmount)}
-        delta={heroKPIs.totalBidAmountDeltaPct}
-        sub="Paid & Released only"
-        sparkline={trend}
-        methodology={METHODOLOGY.totalBidAmount}
-        onClick={() => setDrilldown("totalBidAmount")}
-        extraDeltas={[
-          heroKPIs.totalBidAmountWeekDeltaPct !== undefined && { label: "vs last week", pct: heroKPIs.totalBidAmountWeekDeltaPct },
-          heroKPIs.totalBidAmountMonthDeltaPct !== undefined && { label: "vs last month", pct: heroKPIs.totalBidAmountMonthDeltaPct },
-        ].filter(Boolean)}
-      />
-      <StatTile
-        icon={ICONS.gavel}
-        eyebrow="Active Auctions"
-        value={heroKPIs.activeAuctionsNow}
-        live
-        sparkline={trend}
-        methodology={METHODOLOGY.activeAuctions}
-        onClick={() => setDrilldown("activeAuctions")}
-      />
-      <StatTile
-        icon={ICONS.box}
-        eyebrow="Lots Sold / Listed"
-        value={`${heroKPIs.lotsSold} / ${heroKPIs.lotsListed}`}
-        sub={`${heroKPIs.lotsListed > 0 ? ((heroKPIs.lotsSold / heroKPIs.lotsListed) * 100).toFixed(0) : 0}% cleared`}
-        sparkline={trend}
-        methodology={METHODOLOGY.lotsSoldListed}
-        onClick={() => setDrilldown("lotsSoldListed")}
-      />
-      <StatTile
-        icon={ICONS.alert}
-        eyebrow="Unsold Lots"
-        value={unsoldLots.count}
-        sub={formatPeso(unsoldLots.value)}
-        pill={{ label: "Recover", tone: "critical" }}
-        sparkline={trend}
-        methodology={METHODOLOGY.unsoldLots}
-        onClick={() => setDrilldown("unsoldLots")}
-      />
-      <StatTile
-        icon={ICONS.tag}
-        eyebrow="With Reserve Price"
-        value={unsoldLots.withReserveCount}
-        sub={formatPeso(unsoldLots.withReserveValue)}
-        sparkline={trend}
-        methodology={METHODOLOGY.withReservePrice}
-        onClick={() => setDrilldown("withReserve")}
-      />
-      <StatTile
-        icon={ICONS.clock}
-        eyebrow="For Approval"
-        value={pendingApproval}
-        sub={formatPeso(heroKPIs.pendingApprovalValue)}
-        pill={pendingApproval > 0 ? { label: "Watch", tone: "warning" } : null}
-        sparkline={trend}
-        methodology={METHODOLOGY.forApproval}
-        onClick={() => setDrilldown("forApproval")}
-      />
-      <StatTile
-        icon={ICONS.wallet}
-        eyebrow="Service Income"
-        value={formatPeso(heroKPIs.serviceIncome)}
-        delta={heroKPIs.serviceIncomeDeltaPct}
-        sub="HMR revenue · Paid & Released"
-        sparkline={trend}
-        methodology={METHODOLOGY.serviceIncome}
-        onClick={() => setDrilldown("serviceIncome")}
-      />
-      <BranchTallyModal
-        open={drilldown === "totalBidAmount"}
-        onClose={() => setDrilldown(null)}
-        branchTally={branchTally}
-        categoryTally={categoryTally}
-        lotsTally={settledLots}
-        rangeLabel={rangeLabel}
-      />
-      <ActiveAuctionsModal
-        open={drilldown === "activeAuctions"}
-        onClose={() => setDrilldown(null)}
-        rows={activeAuctionRows}
-      />
-      <LotDrilldownModal
-        open={drilldown === "lotsSoldListed"}
-        onClose={() => setDrilldown(null)}
-        title="Lots Sold · Lot Detail"
-        subtitle={`${rangeLabel} · up to 200 most recent lot rows`}
-        data={operationsDetail}
-        initialTab="Sold"
-      />
-      <LotDrilldownModal
-        open={drilldown === "unsoldLots"}
-        onClose={() => setDrilldown(null)}
-        title="Unsold Lots · Lot Detail"
-        subtitle={`${rangeLabel} · up to 200 most recent unsold lot rows`}
-        data={unsoldLotRows}
-        initialTab="Unsold"
-      />
-      <LotDrilldownModal
-        open={drilldown === "withReserve"}
-        onClose={() => setDrilldown(null)}
-        title="Unsold Lots With Reserve Price · Lot Detail"
-        subtitle={`${rangeLabel} · unsold lots with a reserve price set, out of up to 200 most recent unsold lot rows`}
-        data={unsoldWithReserveLots}
-        initialTab="All"
-      />
-      <ForApprovalModal
-        open={drilldown === "forApproval"}
-        onClose={() => setDrilldown(null)}
-        rows={forApprovalLots}
-        rangeLabel={rangeLabel}
-      />
+    <div className="flex flex-col gap-5">
+      {/* PRIMARY PERFORMANCE */}
+      <div>
+        <div className="eyebrow mb-2">Primary Performance</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatTile
+            icon={ICONS.sales}
+            eyebrow={`Total Bid Amount · ${rangeLabel}`}
+            value={formatPeso(heroKPIs.totalBidAmount)}
+            sub="Settled · Paid & Released"
+            methodology={METHODOLOGY.totalBidAmount}
+            onClick={() => setDrilldown("totalBidAmount")}
+          />
+          <StatTile
+            icon={ICONS.gavel}
+            eyebrow="Auctions Concluded"
+            value={heroKPIs.auctionsConcluded}
+            methodology={METHODOLOGY.auctionsConcluded}
+            onClick={() => setDrilldown("auctionsConcluded")}
+          />
+          <StatTile
+            icon={ICONS.chart}
+            eyebrow="Avg Bid / Auction"
+            value={heroKPIs.avgBidPerAuction != null ? formatPeso(heroKPIs.avgBidPerAuction) : "—"}
+            methodology={METHODOLOGY.avgBidPerAuction}
+            onClick={() => setDrilldown("avgBidPerAuction")}
+          />
+          <StatTile
+            icon={ICONS.target}
+            eyebrow="Avg Bid / Sold Lot"
+            value={heroKPIs.avgBidPerSoldLot != null ? formatPeso(heroKPIs.avgBidPerSoldLot) : "—"}
+            methodology={METHODOLOGY.avgBidPerSoldLot}
+            onClick={() => setDrilldown("avgBidPerSoldLot")}
+          />
+        </div>
+      </div>
+
+      {/* INVENTORY PERFORMANCE + LIVE SNAPSHOT + CUSTOMER CONVERSION + SERVICE INCOME */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatTile
+          icon={ICONS.box}
+          eyebrow="Lots Sold / Listed"
+          value={`${heroKPIs.lotsSold} / ${heroKPIs.lotsListed}`}
+          sub={`${sellThroughPct}% sell-through`}
+          methodology={METHODOLOGY.lotsSoldListed}
+          onClick={() => setDrilldown("lotsSoldListed")}
+          extraDeltas={[{ label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} unsold value` }]}
+        />
+        <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5">
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.clock}</span>
+            <span className="eyebrow">Today's Bid</span>
+          </div>
+          <div className="font-display text-[36.5px] leading-none text-ink mb-2">{formatPeso(heroKPIs.todaysBidAmount)}</div>
+          <div className="text-[14.5px] text-ink flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-critical pulse-dot inline-block" />
+            {heroKPIs.activeAuctionsNow} active auction{heroKPIs.activeAuctionsNow === 1 ? "" : "s"}
+          </div>
+        </div>
+        <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
+          <div className="flex items-center gap-1.5 mb-2.5">
+            <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.users}</span>
+            <span className="eyebrow">Registration → Bidder</span>
+            <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
+          </div>
+          <div className="font-display text-[36.5px] leading-none text-ink mb-2">
+            {heroKPIs.registrationConversionPct != null ? `${heroKPIs.registrationConversionPct.toFixed(1)}%` : "—"}
+          </div>
+          <div className="text-[14.5px] text-ink">
+            {heroKPIs.participatingRegisteredBidders} of {heroKPIs.registeredCustomers} registered
+          </div>
+          <div
+            role="tooltip"
+            className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
+          >
+            <div className="floating px-3 py-2 text-[14px] leading-snug text-ink shadow-lg text-left">{METHODOLOGY.registration}</div>
+          </div>
+        </div>
+        <StatTile
+          icon={ICONS.wallet}
+          eyebrow="Service Income"
+          value={formatPeso(heroKPIs.serviceIncome)}
+          sub="HMR revenue · Paid & Released"
+          methodology={METHODOLOGY.serviceIncome}
+          onClick={() => setDrilldown("serviceIncome")}
+        />
+      </div>
+
       <ServiceIncomeModal
         open={drilldown === "serviceIncome"}
         onClose={() => setDrilldown(null)}
         rows={serviceIncomeLots}
         rangeLabel={rangeLabel}
+      />
+
+      <AuctionSummaryModal
+        open={drilldown === "totalBidAmount"}
+        onClose={() => setDrilldown(null)}
+        title="Total Bid Amount · Contributing Auctions"
+        subtitle={`${rangeLabel} · settled Paid/Released lots only`}
+        rows={settledAuctionSummary}
+        highlight="amount"
+        lotsByAuction={lotsByAuction}
+      />
+      <AuctionSummaryModal
+        open={drilldown === "auctionsConcluded"}
+        onClose={() => setDrilldown(null)}
+        title="Auctions Concluded"
+        subtitle={`${rangeLabel} · ${settledAuctionSummary.length} auctions contributed settled value`}
+        rows={settledAuctionSummary}
+        lotsByAuction={lotsByAuction}
+      />
+      <AuctionSummaryModal
+        open={drilldown === "avgBidPerAuction"}
+        onClose={() => setDrilldown(null)}
+        title="Avg Bid / Auction · Contributing Auctions"
+        subtitle={`${rangeLabel} · overall average is Total Bid Amount ÷ Auctions Concluded, shown per auction below for comparison`}
+        rows={settledAuctionSummary}
+        highlight="amount"
+        lotsByAuction={lotsByAuction}
+      />
+      <AuctionSummaryModal
+        open={drilldown === "avgBidPerSoldLot"}
+        onClose={() => setDrilldown(null)}
+        title="Avg Bid / Sold Lot · Contributing Auctions"
+        subtitle={`${rangeLabel} · overall average is Total Bid Amount ÷ settled sold lots, shown per auction below for comparison`}
+        rows={settledAuctionSummary}
+        highlight="avg"
+        lotsByAuction={lotsByAuction}
+      />
+      <AuctionSummaryModal
+        open={drilldown === "lotsSoldListed"}
+        onClose={() => setDrilldown(null)}
+        title="Lots Sold / Listed · Contributing Auctions"
+        subtitle={`${rangeLabel} · every listed lot regardless of settlement status`}
+        rows={auctionSummary}
+        lotsByAuction={lotsByAuction}
       />
     </div>
   );

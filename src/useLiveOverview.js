@@ -154,6 +154,24 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               // still fetches this same field via its own separate
               // /api/overview call.
               hourly: liveOverview.hourly ?? [],
+
+              // AUCTIONS CONCLUDED / AVG BID PER AUCTION / AVG BID PER SOLD
+              // LOT — same settled population as total_bid_amount, see
+              // api/overview.js's settledTotalResult query.
+              auctions_concluded: liveOverview.auctions_concluded ?? 0,
+              settled_lot_count: liveOverview.settled_lot_count ?? 0,
+
+              // Auction-grain drilldown data + the Bid Trend chart/grain —
+              // see api/overview.js's AUCTION-LEVEL SUMMARY / BID TREND
+              // query comments.
+              auction_summary: liveOverview.auction_summary ?? [],
+              bid_trend: liveOverview.bid_trend ?? [],
+              bid_trend_grain: liveOverview.bid_trend_grain ?? "day",
+
+              // Registration -> Bidder Conversion — see api/overview.js's
+              // REGISTRATION -> BIDDER CONVERSION query comment.
+              registered_customers: liveOverview.registered_customers ?? 0,
+              participating_registered_bidders: liveOverview.participating_registered_bidders ?? 0,
             },
 
             leaderboards: {
@@ -161,6 +179,11 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               composition: liveLeaderboards.composition,
               perAuctionComposition:
                 liveLeaderboards.perAuctionComposition ?? [],
+
+              // Bid-activity ("Participating") composition — sum of every
+              // bid EVENT per bidder, not settled winning value. See
+              // api/leaderboards.js's bidding_activity_composition comment.
+              participatingComposition: liveLeaderboards.bidding_activity_composition ?? {},
 
               // LIVE TOP VENDORS / TOP BIDDERS (settled, Paid/Released) —
               // real data, replaces the mock spread above.

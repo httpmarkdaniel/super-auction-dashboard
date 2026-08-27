@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
-import StoryHeader from "./components/StoryHeader";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
-import BranchTallyModal from "./components/primitives/BranchTallyModal";
 import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
-import BidderComposition from "./components/BidderComposition";
+import BidTrendChart from "./components/BidTrendChart";
+import BidderPopulationCard from "./components/BidderPopulationCard";
 import CategoryView from "./components/CategoryView";
 import LiveAuctionView from "./components/LiveAuctionView";
 import UpcomingAuctionsView from "./components/UpcomingAuctionsView";
@@ -23,9 +22,8 @@ import BiddingPaceView from "./components/BiddingPaceView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
-import { formatPeso } from "./utils/format";
 import { useLiveOverview } from "./useLiveOverview";
-import { useLiveBidCorrection, useMarqueeSummary } from "./useLiveBidding";
+import { useLiveBidCorrection } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange } from "./utils/dateRange";
 
@@ -62,6 +60,12 @@ const EMPTY_OVERVIEW = {
     lotsListed: 0,
     pendingApprovalCount: 0,
     pendingApprovalValue: 0,
+    auctionsConcluded: 0,
+    avgBidPerAuction: null,
+    avgBidPerSoldLot: null,
+    registeredCustomers: 0,
+    participatingRegisteredBidders: 0,
+    registrationConversionPct: null,
   },
 
   unsoldLots: {
@@ -93,6 +97,18 @@ const EMPTY_OVERVIEW = {
     newBidderTrend: [],
     byAuction: [],
   },
+
+  participatingComposition: {
+    total: 0,
+    newBidders: 0,
+    returningBidders: 0,
+    newBidActivity: 0,
+    returningBidActivity: 0,
+  },
+
+  auctionSummary: [],
+  bidTrend: [],
+  bidTrendGrain: "day",
 
   topVendors: [],
   topBidders: [],
@@ -265,6 +281,19 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     })),
   };
 
+  // PARTICIPATING bidders — sum of every real bid EVENT in the selected
+  // scope (leaderboards.participatingComposition, unchanged
+  // bidding_activity_composition definition), a DIFFERENT population from
+  // the settled Winning bidderComposition above — see api/leaderboards.js.
+  const participating = leaderboards.participatingComposition || {};
+  const participatingComposition = {
+    total: (Number(participating.new_bidders) || 0) + (Number(participating.returning_bidders) || 0),
+    newBidders: Number(participating.new_bidders) || 0,
+    returningBidders: Number(participating.returning_bidders) || 0,
+    newBidActivity: Number(participating.new_bidders_bid_amount) || 0,
+    returningBidActivity: Number(participating.returning_bidders_bid_amount) || 0,
+  };
+
   const topVendors = (leaderboards.vendors || []).map((v) => ({
     vendor: v.vendor,
     bidAmount: Number(v.settled_bid_amount) || 0,
@@ -272,9 +301,12 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   }));
 
   const topBidders = (leaderboards.bidders || []).map((b) => ({
-    bidder: b.bidder_name,
-    bidAmount: Number(b.bid_amount) || 0,
-    wins: Number(b.wins) || 0,
+    // Canonical New/Returning label reused from the backend classification
+    // (api/leaderboards.js's settledBiddersResult) — never inferred on the
+    // frontend from name/email.
+    bidder: `${b.bidder_name} · ${b.new_or_returning === "new" ? "New" : "Returning"}`,
+    bidAmount: Number(b.settled_bid_amount) || 0,
+    wins: Number(b.settled_wins) || 0,
   }));
 
   const rp = reservePerformance;
@@ -429,8 +461,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 
       totalBidAmountMonthDeltaPct,
 
+      // Live "right now" count — active_auctions, NOT total_auctions
+      // (that field is the settled/date-scoped Auctions Concluded count,
+      // a completely different population — see AUCTIONS CONCLUDED below).
       activeAuctionsNow:
-        Number(kpis.total_auctions) || 0,
+        Number(kpis.active_auctions) || 0,
 
       sellThroughRate:
         endedLotsListed > 0
@@ -443,7 +478,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 
       serviceIncome:
         (Number(kpis.service_income_buyers_premium) || 0) +
-        (Number(kpis.service_income_service_fee) || 0),
+        (Number(kpis.service_income_commission) || 0),
 
       serviceIncomeDeltaPct: undefined,
 
@@ -451,11 +486,31 @@ function buildLiveOverview(live, bidCorrectionDelta) {
 
       lotsListed: endedLotsListed,
 
-      pendingApprovalCount:
-        Number(kpis.pending_payment_count) || 0,
+      // AUCTIONS CONCLUDED / AVG BID PER AUCTION / AVG BID PER SOLD LOT —
+      // same settled population as totalBidAmount above (see
+      // api/overview.js's AUCTION-LEVEL SUMMARY / settledTotalResult).
+      // Safe division: null (rendered as "—") when the denominator is 0,
+      // never a fabricated average.
+      auctionsConcluded: Number(kpis.auctions_concluded) || 0,
+      avgBidPerAuction:
+        Number(kpis.auctions_concluded) > 0
+          ? bidAmount / Number(kpis.auctions_concluded)
+          : null,
+      avgBidPerSoldLot:
+        Number(kpis.settled_lot_count) > 0
+          ? bidAmount / Number(kpis.settled_lot_count)
+          : null,
 
-      pendingApprovalValue:
-        Number(kpis.pending_payment_value) || 0,
+      // REGISTRATION -> BIDDER CONVERSION — see api/overview.js's
+      // REGISTRATION -> BIDDER CONVERSION query comment for cohort
+      // definition. null (rendered as "—") when nobody registered for an
+      // auction in this scope, never a fabricated 0%.
+      registeredCustomers: Number(kpis.registered_customers) || 0,
+      participatingRegisteredBidders: Number(kpis.participating_registered_bidders) || 0,
+      registrationConversionPct:
+        Number(kpis.registered_customers) > 0
+          ? (Number(kpis.participating_registered_bidders) / Number(kpis.registered_customers)) * 100
+          : null,
     },
 
     unsoldLots: {
@@ -516,6 +571,25 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     hourlyTrend,
 
     bidderComposition,
+    participatingComposition,
+
+    // Auction-grain drilldown rows behind Total Bid Amount/Auctions
+    // Concluded/Avg Bid per Auction/Avg Bid per Sold Lot/Lots Sold/Listed
+    // — see api/overview.js's AUCTION-LEVEL SUMMARY query comment.
+    auctionSummary: (kpis.auction_summary || []).map((a) => ({
+      auctionNumber: a.auction_number,
+      name: a.name,
+      storeName: a.store_name,
+      startingTime: a.starting_time,
+      lotsListed: Number(a.lots_listed) || 0,
+      lotsSold: Number(a.lots_sold) || 0,
+      lotsUnsold: Number(a.lots_unsold) || 0,
+      settledBidAmount: Number(a.settled_bid_amount) || 0,
+      settledLotCount: Number(a.settled_lot_count) || 0,
+    })),
+
+    bidTrend: kpis.bid_trend || [],
+    bidTrendGrain: kpis.bid_trend_grain || "day",
 
     topVendors,
 
@@ -578,22 +652,16 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   };
 }
 
-const BID_AMOUNT_METHODOLOGY =
-  "Sum of every lot's bid amount across auctions in the selected date range, corrected against cms.hmr.ph's live current-bid figures for any auction still in progress (ClickHouse's own snapshot can lag behind real-time bids).";
-
 function OverviewTab({
-  store,
   overview,
   rangeLabel,
-  isLive,
   loading,
   error,
   categoryOptions,
   selectedCategory,
   onCategoryChange,
 }) {
-  const story = buildStoryline(overview, store);
-  const [showBranchTally, setShowBranchTally] = useState(false);
+  const story = buildStoryline();
 
   return (
     <div>
@@ -610,87 +678,58 @@ function OverviewTab({
       )}
 
       <div className="mb-8">
-        <BidderComposition
-          data={overview.bidderComposition}
+        <div className="mb-3">
+          <div className="text-[13.5px] text-muted">{story.headline}</div>
+        </div>
+        <HeroKPIs
+          overview={overview}
           rangeLabel={rangeLabel}
-          categoryOptions={categoryOptions}
-          selectedCategory={selectedCategory}
-          onCategoryChange={onCategoryChange}
         />
       </div>
 
-      <div className="mb-8">
-        <div className="flex flex-col lg:flex-row gap-4 items-stretch">
-          <div className="flex-1 min-w-0">
-            <StoryHeader
-              eyebrow={`${store} · ${rangeLabel}${
-                isLive ? " · Live" : ""
-              }`}
-              headline={story.headline}
-              amount={formatPeso(
-                overview.heroKPIs.totalBidAmount,
-              )}
-              deltaPct={
-                overview.heroKPIs.totalBidAmountDeltaPct
-              }
-              methodology={BID_AMOUNT_METHODOLOGY}
-              onAmountClick={() =>
-                setShowBranchTally(true)
-              }
-              extraDeltas={[
-                overview.heroKPIs
-                  .totalBidAmountWeekDeltaPct !== undefined && {
-                  label: "vs last week",
-                  pct:
-                    overview.heroKPIs
-                      .totalBidAmountWeekDeltaPct,
-                },
-
-                overview.heroKPIs
-                  .totalBidAmountMonthDeltaPct !== undefined && {
-                  label: "vs last month",
-                  pct:
-                    overview.heroKPIs
-                      .totalBidAmountMonthDeltaPct,
-                },
-              ].filter(Boolean)}
-            />
+      <StorySection
+        title="Bid Trend"
+        insight="Settled bid performance over the selected range, plus who's participating vs. who's winning."
+      >
+        <div className="flex items-center justify-end gap-1.5 mb-3">
+          <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold">Overview Category</span>
+          <div className="flex items-center bg-surface1 border border-gridline rounded-lg px-2.5 h-8">
+            <select
+              value={selectedCategory}
+              onChange={(e) => onCategoryChange(e.target.value)}
+              className="text-[14px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[160px]"
+            >
+              <option value="">All Categories</option>
+              {categoryOptions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
-
-          <div className="card px-7 py-6 shrink-0 lg:w-[320px]">
-            <div className="text-[13.5px] tracking-[0.1em] uppercase text-navy font-bold font-display mb-2.5">
-              Today's Bid
-            </div>
-
-            <div className="font-display text-[42px] leading-none text-ink">
-              {formatPeso(
-                overview.heroKPIs.todaysBidAmount,
-              )}
-            </div>
-
-            <div className="text-[14px] text-muted mt-2">
-              Current bid value · regardless of settlement status
-            </div>
-          </div>
-
-          <BranchTallyModal
-            open={showBranchTally}
-            onClose={() =>
-              setShowBranchTally(false)
-            }
-            branchTally={overview.branchTally}
-            categoryTally={overview.categoryTally}
-            rangeLabel={rangeLabel}
-          />
         </div>
 
-        <div className="mt-4">
-          <HeroKPIs
-            overview={overview}
-            rangeLabel={rangeLabel}
+        <BidTrendChart data={overview.bidTrend} grain={overview.bidTrendGrain} rangeLabel={rangeLabel} />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <BidderPopulationCard
+            title="Participating Bidders"
+            total={overview.participatingComposition.total}
+            newCount={overview.participatingComposition.newBidders}
+            returningCount={overview.participatingComposition.returningBidders}
+            amountLabel="Bid Activity"
+            newAmount={overview.participatingComposition.newBidActivity}
+            returningAmount={overview.participatingComposition.returningBidActivity}
+          />
+          <BidderPopulationCard
+            title="Winning Bidders"
+            total={overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
+            newCount={overview.bidderComposition.newBidders}
+            returningCount={overview.bidderComposition.returningBidders}
+            amountLabel="Winning Bid Amount"
+            newAmount={overview.bidderComposition.newBiddersBidAmount}
+            returningAmount={overview.bidderComposition.returningBiddersBidAmount}
           />
         </div>
-      </div>
+      </StorySection>
 
       <StorySection
         title="Bid Value by Category & Branch"
@@ -823,9 +862,6 @@ export default function App() {
       refreshNonce,
     );
 
-  const marquee =
-    useMarqueeSummary(refreshNonce);
-
   const overview = useMemo(() => {
     if (!live) {
       return EMPTY_OVERVIEW;
@@ -871,7 +907,6 @@ export default function App() {
           onMenuClick={() =>
             setSidebarOpen(true)
           }
-          marquee={marquee}
           searchPool={searchPool}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
@@ -895,10 +930,8 @@ export default function App() {
         >
           {tab === "Overview" && (
             <OverviewTab
-              store={store}
               overview={overview}
               rangeLabel={rangeLabel}
-              isLive={Boolean(live)}
               loading={overviewLoading}
               error={overviewError}
               categoryOptions={CATEGORY_TABS}
