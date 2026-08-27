@@ -7,6 +7,46 @@ function formatDayLabel(iso) {
   return new Date(`${iso}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 }
 
+// Y-POSITION-ONLY transform — never touches the real bid_amount used by the
+// tooltip, totals, or any calculation. A large settlement day (e.g. ₱1.8M)
+// would otherwise flatten every smaller day against zero on a linear axis;
+// log1p compresses the visual distance between big and small values while
+// keeping every value's relative ORDER intact, and log1p(0) = 0 so a
+// genuine zero day still sits exactly at the baseline (no fake positive
+// floor, unlike a plain log scale which can't represent zero at all).
+function toDisplayY(value) {
+  return Math.log1p(Math.max(0, value));
+}
+function fromDisplayY(value) {
+  return Math.expm1(Math.max(0, value));
+}
+
+// Round a raw peso value to a "nice" 1/2/5 x 10^n figure for tick labels —
+// same convention chart libraries use for linear axes, applied here to the
+// INVERSE-transformed tick positions so the labels stay human-readable
+// pesos even though they're evenly spaced in log1p space, not peso space.
+function niceRound(value) {
+  if (value <= 0) return 0;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const niceNormalized = normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10;
+  return niceNormalized * magnitude;
+}
+
+// Evenly-spaced steps in TRANSFORMED (log1p) space, each inverse-transformed
+// and rounded to a nice peso figure — gives ticks like ₱0 / ₱10K / ₱50K /
+// ₱250K / ₱1M / ₱2M that visually correspond to equal vertical spacing.
+function computeDisplayTicks(maxRawValue, targetCount = 5) {
+  if (maxRawValue <= 0) return [0];
+  const maxDisplay = toDisplayY(maxRawValue);
+  const raw = new Set([0]);
+  for (let i = 1; i <= targetCount; i++) {
+    const nice = niceRound(fromDisplayY((maxDisplay / targetCount) * i));
+    if (nice > 0) raw.add(nice);
+  }
+  return [...raw].sort((a, b) => a - b);
+}
+
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
 // period total (see api/overview.js's BID TREND query comments: each row
 // is genuinely that one calendar day, distinct bidder counts within it).
@@ -90,8 +130,31 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
     days <= 180 ? 13 : // ~every 2 weeks
     29; // sparse, ~month boundaries
 
+  const maxBidAmount = data.reduce((max, d) => Math.max(max, d.bid_amount || 0), 0);
+  const displayTicks = computeDisplayTicks(maxBidAmount).map(toDisplayY);
+  const displayDomainMax = maxBidAmount > 0 ? toDisplayY(maxBidAmount) * 1.08 : 1;
+
+  const subtitle = (
+    <span className="inline-flex items-center gap-1.5 flex-wrap">
+      <span>Daily settled (Paid & Released) hammer value</span>
+      <span className="relative inline-flex items-center group/tip">
+        <span className="text-[12px] font-semibold text-muted border border-gridline rounded px-1.5 py-0.5 cursor-default">
+          Adjusted scale
+        </span>
+        <div
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full mt-1.5 w-64 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
+        >
+          <div className="methodology px-3 py-2 text-[13px] leading-snug shadow-lg text-left">
+            Vertical spacing is adjusted to make smaller daily movements visible. Hover a point for its exact value.
+          </div>
+        </div>
+      </span>
+    </span>
+  );
+
   return (
-    <Card title={`Bid Trend · ${rangeLabel}`} subtitle="Daily settled (Paid & Released) hammer value" action={action}>
+    <Card title={`Bid Trend · ${rangeLabel}`} subtitle={subtitle} action={action}>
       {data.length === 0 ? (
         <div className="h-[240px] flex items-center justify-center text-center text-muted text-[15px]">
           No settled activity in this period.
@@ -119,28 +182,28 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
                 minTickGap={20}
               />
               <YAxis
-                tickFormatter={(v) => formatCompactPeso(v)}
+                type="number"
+                domain={[0, displayDomainMax]}
+                ticks={displayTicks}
+                // Ticks are positioned in transformed (log1p) space for
+                // even visual spacing, but every label is inverse-
+                // transformed back to a real peso figure — the Y-axis
+                // never shows a raw log value, only pesos.
+                tickFormatter={(v) => formatCompactPeso(fromDisplayY(v))}
                 tick={{ fill: palette.muted, fontSize: 11 }}
                 axisLine={false}
                 tickLine={false}
                 width={56}
-                // Frame the actual value range rather than always anchoring
-                // at ₱0 — the same "zoom into the real range" convention a
-                // stock/price chart uses, so real day-to-day swings stay
-                // visible instead of getting flattened against a tall
-                // from-zero axis. Purely a rendering choice — the plotted
-                // bid_amount values themselves are untouched.
-                domain={([dataMin, dataMax]) => {
-                  if (dataMax <= 0) return [0, 1];
-                  const pad = Math.max((dataMax - dataMin) * 0.15, dataMax * 0.05);
-                  return [Math.max(0, dataMin - pad), dataMax + pad];
-                }}
                 allowDataOverflow={false}
               />
               <Tooltip content={<DailyTooltip />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }} />
               <Area
                 type="linear"
-                dataKey="bid_amount"
+                // Y-POSITION ONLY — Recharts' Tooltip `payload` always
+                // carries the full original row regardless of how this
+                // value is computed, so DailyTooltip above keeps reading
+                // the real d.bid_amount untouched. See toDisplayY comment.
+                dataKey={(d) => toDisplayY(d.bid_amount)}
                 stroke={palette.series1}
                 strokeWidth={2}
                 fill="url(#bidTrendFill)"
