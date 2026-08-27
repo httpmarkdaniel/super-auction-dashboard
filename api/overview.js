@@ -1264,11 +1264,22 @@ export default async function handler(req, res) {
             auction_number,
             any(name) AS auction_name,
             any(store_name) AS auction_store_name,
-            any(starting_time) AS auction_starting_time
+            any(starting_time) AS auction_starting_time,
+            any(sub_type) AS auction_sub_type
           FROM xv3.mart_auction_productivity_report
           WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
             AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
+          GROUP BY auction_number
+        ),
+
+        -- Type (Online/Onsite/Negotiated) — same xv3.auctions.type source
+        -- already established/reused verbatim by api/revenue-breakdown.js
+        -- and api/auction-detail.js, not a new classifier.
+        auction_type AS (
+          SELECT auction_number, any(type) AS auction_type
+          FROM xv3.auctions
+          WHERE auction_number IS NOT NULL
           GROUP BY auction_number
         ),
 
@@ -1298,6 +1309,8 @@ export default async function handler(req, res) {
           any(a.auction_name) AS name,
           any(a.auction_store_name) AS store_name,
           any(a.auction_starting_time) AS starting_time,
+          any(a.auction_sub_type) AS sub_type,
+          any(at.auction_type) AS type,
 
           count() AS lots_listed,
           countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
@@ -1310,6 +1323,9 @@ export default async function handler(req, res) {
 
         INNER JOIN selected_auctions a
           ON l.auction_number = a.auction_number
+
+        LEFT JOIN auction_type at
+          ON l.auction_number = at.auction_number
 
         GROUP BY l.auction_number
         ORDER BY settled_bid_amount DESC
@@ -3124,6 +3140,8 @@ export default async function handler(req, res) {
         name: row.name,
         store_name: row.store_name,
         starting_time: row.starting_time,
+        type: row.type ?? null,
+        sub_type: row.sub_type ?? null,
         lots_listed: Number(row.lots_listed ?? 0),
         lots_sold: Number(row.lots_sold ?? 0),
         lots_unsold: Number(row.lots_unsold ?? 0),

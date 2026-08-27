@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
+import AvgBidDrilldownModal from "./primitives/AvgBidDrilldownModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import { formatPeso } from "../utils/format";
@@ -123,7 +124,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
           onClick={() => setDrilldown("lotsSoldListed")}
           extraDeltas={[
             ...(comparison ? [{ label: compareLabel, pct: comparison.lots_sold_pct }] : []),
-            { label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} unsold value` },
+            { label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} reserve value` },
           ]}
         />
         <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
@@ -190,22 +191,20 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
         rows={settledAuctionSummary}
         lotsByAuction={lotsByAuction}
       />
-      <AuctionSummaryModal
+      <AvgBidDrilldownModal
         open={drilldown === "avgBidPerAuction"}
         onClose={() => setDrilldown(null)}
-        title="Avg Bid / Auction · Contributing Auctions"
-        subtitle={`${rangeLabel} · overall average is Total Bid Amount ÷ Auctions Concluded, shown per auction below for comparison`}
+        metric="auction"
+        rangeLabel={rangeLabel}
         rows={settledAuctionSummary}
-        highlight="amount"
         lotsByAuction={lotsByAuction}
       />
-      <AuctionSummaryModal
+      <AvgBidDrilldownModal
         open={drilldown === "avgBidPerSoldLot"}
         onClose={() => setDrilldown(null)}
-        title="Avg Bid / Sold Lot · Contributing Auctions"
-        subtitle={`${rangeLabel} · overall average is Total Bid Amount ÷ settled sold lots, shown per auction below for comparison`}
+        metric="soldLot"
+        rangeLabel={rangeLabel}
         rows={settledAuctionSummary}
-        highlight="avg"
         lotsByAuction={lotsByAuction}
       />
       <AuctionSummaryModal

@@ -18,7 +18,7 @@ function formatManila(iso) {
 // this one auction (App.jsx's auctionSummary mapping already merges these
 // in from the already-fetched api/leaderboards.js per-auction data, so
 // this costs zero extra requests).
-function AuctionBidderComposition({ participating, winning }) {
+export function AuctionBidderComposition({ participating, winning }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
       <div className="border border-gridline rounded-md px-3 py-2.5 bg-surface1">

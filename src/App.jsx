@@ -675,6 +675,8 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           name: a.name,
           storeName: a.store_name,
           startingTime: a.starting_time,
+          type: a.type ?? null,
+          subType: a.sub_type ?? null,
           lotsListed: Number(a.lots_listed) || 0,
           lotsSold: Number(a.lots_sold) || 0,
           lotsUnsold: Number(a.lots_unsold) || 0,
