@@ -150,7 +150,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
             role="tooltip"
             className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
           >
-            <div className="floating px-3 py-2 text-[14px] leading-snug text-ink shadow-lg text-left">{METHODOLOGY.registration}</div>
+            <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">{METHODOLOGY.registration}</div>
           </div>
         </div>
         <StatTile

@@ -27,6 +27,20 @@
   .floating {
     @apply bg-surface1 border border-gridline rounded-lg shadow-card;
   }
+  /* Methodology/reference tooltips only (metric definitions, calculation
+     notes) — deliberately fixed dark, independent of the light/dark theme
+     toggle, so it always reads as a distinct reference panel against the
+     white dashboard. Not for data tooltips (those stay .floating). */
+  .methodology {
+    @apply rounded-lg;
+    background: #14161b;
+    border: 1px solid #2b303a;
+    color: #f2f4f7;
+  }
+  .methodology a {
+    color: #7e93c2;
+    text-decoration: underline;
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
   }

@@ -53,7 +53,7 @@ export default function StoryHeader({ eyebrow, headline, amount, amountLabel, de
           role="tooltip"
           className="pointer-events-none absolute right-4 left-4 sm:left-auto sm:w-80 sm:max-w-[calc(100vw-2rem)] top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
         >
-          <div className="floating px-3 py-2 text-[14px] leading-snug text-ink shadow-lg text-left">{methodology}</div>
+          <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">{methodology}</div>
         </div>
       )}
     </Wrapper>

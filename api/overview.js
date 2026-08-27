@@ -19,6 +19,25 @@ function toFiniteNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// Every "YYYY-MM-DD" calendar day from fromStr through toStr inclusive.
+// Pure UTC calendar-part arithmetic (not local Date math), so this is
+// correct regardless of the server process's own timezone and never
+// double-counts/skips a day across a DST-less UTC day boundary.
+function enumerateCalendarDays(fromStr, toStr) {
+  const [fy, fm, fd] = fromStr.split("-").map(Number);
+  const [ty, tm, td] = toStr.split("-").map(Number);
+  const end = Date.UTC(ty, tm - 1, td);
+  const days = [];
+  for (let t = Date.UTC(fy, fm - 1, fd); t <= end; t += 86400000) {
+    const d = new Date(t);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    days.push(`${y}-${m}-${day}`);
+  }
+  return days;
+}
+
 // vendor_analysis fans out one row per item_barcode within a lot, and
 // those rows can disagree on `status` when a lot's items were updated at
 // slightly different times mid-transition (e.g. some barcodes flipped to
@@ -1357,7 +1376,6 @@ export default async function handler(req, res) {
 
         SELECT
           toDate(sl.auction_starting_time) AS bucket,
-          max(sl.auction_starting_time) AS bucket_timestamp,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
           countDistinct(sl.auction_number) AS auctions_concluded,
           count() AS lots_sold,
@@ -1456,7 +1474,6 @@ export default async function handler(req, res) {
 
         SELECT
           d.bucket AS bucket,
-          max(d.bidder_day_last_bid) AS bucket_timestamp,
 
           uniqExactIf(d.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
           uniqExactIf(d.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
@@ -1491,7 +1508,6 @@ export default async function handler(req, res) {
       if (!bidTrendByBucket.has(key)) {
         bidTrendByBucket.set(key, {
           bucket: key,
-          bucket_timestamp: null,
           bid_amount: 0,
           auctions_concluded: 0,
           lots_sold: 0,
@@ -1509,7 +1525,6 @@ export default async function handler(req, res) {
     }
     for (const row of bidTrendWinningRows) {
       const b = bidTrendBucket(row.bucket);
-      b.bucket_timestamp = row.bucket_timestamp || b.bucket_timestamp;
       b.bid_amount = Number(row.bid_amount ?? 0);
       b.auctions_concluded = Number(row.auctions_concluded ?? 0);
       b.lots_sold = Number(row.lots_sold ?? 0);
@@ -1520,12 +1535,26 @@ export default async function handler(req, res) {
     }
     for (const row of bidTrendParticipatingRows) {
       const b = bidTrendBucket(row.bucket);
-      if (!b.bucket_timestamp) b.bucket_timestamp = row.bucket_timestamp || null;
       b.participating_new = Number(row.participating_new ?? 0);
       b.participating_returning = Number(row.participating_returning ?? 0);
       b.participating_new_amount = Number(row.participating_new_amount ?? 0);
       b.participating_returning_amount = Number(row.participating_returning_amount ?? 0);
     }
+
+    // Zero-fill: the chart must contain every calendar day in the selected
+    // range, not just the days ClickHouse happened to return a row for —
+    // otherwise a real zero-activity day (e.g. Aug 21-22) gets silently
+    // skipped and the line falsely connects Aug 20 straight to Aug 23,
+    // hiding the drop to zero. bidTrendBucket() is idempotent (only
+    // creates a zero-value entry if the key isn't already present), so
+    // calling it for every day in [from, to] after the two result sets are
+    // merged just fills the gaps without touching real data. Pure UTC
+    // calendar-part arithmetic (not local Date math) so this is correct
+    // regardless of the server process's own timezone.
+    for (const day of enumerateCalendarDays(from, to)) {
+      bidTrendBucket(day);
+    }
+
     const bidTrendRows = [...bidTrendByBucket.values()].sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
 
     // ---------------------------------------------------------
@@ -3106,7 +3135,6 @@ export default async function handler(req, res) {
       // a cumulative/period total) — see BID TREND query comments above.
       bid_trend: bidTrendRows.map((row) => ({
         bucket: row.bucket,
-        bucket_timestamp: row.bucket_timestamp,
         bid_amount: row.bid_amount,
         auctions_concluded: row.auctions_concluded,
         lots_sold: row.lots_sold,

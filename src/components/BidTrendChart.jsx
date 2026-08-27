@@ -2,22 +2,9 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso, formatCompactPeso } from "../utils/format";
-import { formatManila } from "../utils/manilaTime";
 
 function formatDayLabel(iso) {
   return new Date(`${iso}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
-}
-
-// Date + hour header for the hover tooltip — the hour comes from a real
-// authoritative timestamp already tied to this bucket (the settled lots'
-// own auction_starting_time, or the bid activity's own bid_created_at when
-// there's no settled value that day), never a fabricated/invented hour.
-// The chart itself stays one point per calendar day (see api/overview.js's
-// BID TREND query comments) — this only enriches the label.
-function formatDayHourLabel(row) {
-  const datePart = formatDayLabel(row.bucket);
-  if (!row.bucket_timestamp) return datePart;
-  return `${datePart} · ${formatManila(row.bucket_timestamp, { withDate: false })}`;
 }
 
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
@@ -37,7 +24,7 @@ function DailyTooltip({ active, payload }) {
 
   return (
     <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[260px]">
-      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatDayHourLabel(d)}</div>
+      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatDayLabel(d.bucket)}</div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2.5 pb-2.5 border-b border-gridline">
         <div>
@@ -88,8 +75,20 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
   // Thin out rendered X-axis TICKS only (not the underlying hoverable
   // data) once a range gets visually dense — e.g. a Year to Date range
   // with ~250+ trading-style days shouldn't print an unreadable label for
-  // every single point, but every point stays hoverable.
-  const tickInterval = data.length > 60 ? Math.ceil(data.length / 30) : data.length > 20 ? 2 : 0;
+  // every single point, but every point stays hoverable and every day is
+  // still plotted (the date filter controls the RANGE, chart width only
+  // controls LABEL density — see api/overview.js's zero-fill comment for
+  // why the underlying daily grain never changes with range length).
+  // Recharts' numeric `interval` skips that many ticks between renders
+  // (0 = every tick), so these targets are picked to land near the
+  // day-count bands below, then minTickGap does final collision cleanup.
+  const days = data.length;
+  const tickInterval =
+    days <= 7 ? 0 : // label every day
+    days <= 31 ? 3 : // ~every 4 days
+    days <= 90 ? 6 : // ~weekly
+    days <= 180 ? 13 : // ~every 2 weeks
+    29; // sparse, ~month boundaries
 
   return (
     <Card title={`Bid Trend · ${rangeLabel}`} subtitle="Daily settled (Paid & Released) hammer value" action={action}>
