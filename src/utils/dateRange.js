@@ -1,8 +1,7 @@
 export const RANGE_PRESETS = [
-  { key: "today", label: "Today", days: 1 },
-  { key: "7d", label: "Last 7 Days", days: 7 },
-  { key: "30d", label: "Last 30 Days", days: 30 },
-  { key: "all", label: "All Time", days: null },
+  { key: "wtd", label: "Week to Date" },
+  { key: "mtd", label: "Month to Date" },
+  { key: "ytd", label: "Year to Date" },
 ];
 
 function formatShortDate(iso) {
@@ -24,21 +23,26 @@ function toLocalISODate(date) {
   return `${year}-${month}-${day}`;
 }
 
-// Default landing range.
-export function defaultDateRange(days = 7) {
-  const to = new Date();
+// Monday of the current calendar week — getDay() is 0 (Sun) .. 6 (Sat), so
+// Monday is (day - 1), wrapping Sunday to 6 days back.
+function startOfWeek(date) {
+  const d = new Date(date);
+  const diff = d.getDay() === 0 ? 6 : d.getDay() - 1;
+  d.setDate(d.getDate() - diff);
+  return d;
+}
 
-  const from = new Date(to);
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
 
-  // Inclusive range:
-  // 7 days = today + previous 6 days
-  from.setDate(from.getDate() - (days - 1));
+function startOfYear(date) {
+  return new Date(date.getFullYear(), 0, 1);
+}
 
-  return {
-    key: "custom",
-    from: toLocalISODate(from),
-    to: toLocalISODate(to),
-  };
+// Default landing range: Week to Date.
+export function defaultDateRange() {
+  return "wtd";
 }
 
 // Resolves preset/custom dashboard date ranges.
@@ -66,27 +70,17 @@ export function resolveDateRange(value) {
     RANGE_PRESETS.find((p) => p.key === value) ??
     RANGE_PRESETS[0];
 
-  // All Time
-  if (preset.days === null) {
-    return {
-      from: null,
-      to: null,
-      label: preset.label,
-    };
-  }
+  const today = new Date();
+  const to = toLocalISODate(today);
 
-  const to = new Date();
-  const from = new Date(to);
-
-  // Inclusive date ranges.
-  // Today:       subtract 0
-  // Last 7 Days: subtract 6
-  // Last 30:     subtract 29
-  from.setDate(from.getDate() - (preset.days - 1));
+  let from;
+  if (preset.key === "wtd") from = toLocalISODate(startOfWeek(today));
+  else if (preset.key === "mtd") from = toLocalISODate(startOfMonth(today));
+  else from = toLocalISODate(startOfYear(today));
 
   return {
-    from: toLocalISODate(from),
-    to: toLocalISODate(to),
+    from,
+    to,
     label: preset.label,
   };
 }
