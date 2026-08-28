@@ -201,8 +201,12 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // Total Bids for THIS entity only — see api/overview.js's branch_
     // bidder_activity/category_bidder_activity CTEs. Avg Bids / Unique
     // Bidder below is derived from this entity's OWN bid events and
-    // bidder count, never the overall Overview denominator.
+    // ENGAGED (real-bidder-only) count — deliberately NOT pTotal, which is
+    // the real-bidders-UNION-winners population used for the Participating
+    // vs Winning invariant and can include winner-only members with zero
+    // real bid events (see api/overview.js's engaged_bidders comment).
     const pBidEvents = Number(row.participating_bid_events) || 0;
+    const pEngagedBidders = Number(row.engaged_bidders) || 0;
     const pTotal = pNew + pReturning;
     const wNew = Number(row.winning_new) || 0;
     const wReturning = Number(row.winning_returning) || 0;
@@ -222,7 +226,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         newBidders: pNew,
         returningBidders: pReturning,
         totalBids: pBidEvents,
-        avgBidsPerUniqueBidder: pTotal > 0 ? pBidEvents / pTotal : null,
+        avgBidsPerUniqueBidder: pEngagedBidders > 0 ? pBidEvents / pEngagedBidders : null,
       },
       winning: {
         total: wNew + wReturning,
@@ -289,11 +293,22 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   // Shared by auctionSummary below — same per-auction Participating/
   // Winning breakdowns api/leaderboards.js already computes, reused (not
   // refetched) for the drilldown.
+  //
+  // GLOBAL INVARIANT (Participating >= Winning): now sourced from
+  // perAuctionParticipatingUnion — the real deduplicated UNION of bid-
+  // history participants and resolved winning bidders per auction — not
+  // the old bid-history-only perAuctionBiddingActivity. That older
+  // definition could show Participating < Winning for a Negotiated auction
+  // whose winner never generated a bid-history event (see the GLOBAL
+  // BIDDER INVARIANT task); perAuctionParticipatingUnion already
+  // guarantees Winning subset-of Participating structurally, since
+  // Winning's own population (perAuctionComposition) is itself one of the
+  // two sides of that union.
   const winningByAuction = new Map(
     (leaderboards.perAuctionComposition || []).map((a) => [a.auction_number, a]),
   );
   const participatingByAuction = new Map(
-    (leaderboards.perAuctionBiddingActivity || []).map((a) => [a.auction_number, a]),
+    (leaderboards.perAuctionParticipatingUnion || []).map((a) => [a.auction_number, a]),
   );
 
   const channelRows = categories.channels || [];
@@ -738,6 +753,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           name: a.name,
           storeName: a.store_name,
           startingTime: a.starting_time,
+          endingTime: a.ending_time,
           type: a.type ?? null,
           subType: a.sub_type ?? null,
           lotsListed: Number(a.lots_listed) || 0,
@@ -746,12 +762,16 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           settledBidAmount: Number(a.settled_bid_amount) || 0,
           settledLotCount: Number(a.settled_lot_count) || 0,
           participating: {
-            total: Number(p.participating_bidders) || 0,
-            newBidders: Number(p.participating_new_bidders) || 0,
-            returningBidders: Number(p.participating_returning_bidders) || 0,
-            activity: Number(p.participating_bid_amount) || 0,
-            newActivity: Number(p.participating_new_bid_amount) || 0,
-            returningActivity: Number(p.participating_returning_bid_amount) || 0,
+            total: Number(p.total_bidders) || 0,
+            newBidders: Number(p.new_bidders) || 0,
+            returningBidders: Number(p.returning_bidders) || 0,
+            activity: Number(p.bid_amount) || 0,
+            newActivity: Number(p.new_bidders_bid_amount) || 0,
+            // Same fold-unclassified-into-returning convention already
+            // used for Winning just below — a resolved union member whose
+            // identity has no first-ever record (only possible for a
+            // winning-only bidder) is real activity, never dropped.
+            returningActivity: (Number(p.returning_bidders_bid_amount) || 0) + (Number(p.unclassified_bid_amount) || 0),
           },
           winning: {
             total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),

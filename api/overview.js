@@ -184,8 +184,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
               AND (
                 {store:String} = ''
@@ -339,8 +339,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
               AND (
                 {store:String} = ''
@@ -472,8 +472,8 @@ export default async function handler(req, res) {
               auction_number,
               store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
 
@@ -622,8 +622,8 @@ export default async function handler(req, res) {
               auction_number,
               store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
 
@@ -750,8 +750,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
               AND (
                 {store:String} = ''
@@ -1040,10 +1040,15 @@ export default async function handler(req, res) {
             any(name) AS auction_name,
             any(store_name) AS auction_store_name,
             any(starting_time) AS auction_starting_time,
+            any(ending_time) AS auction_ending_time,
             any(sub_type) AS auction_sub_type
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          -- Canonical historical reporting rule: an auction belongs to the
+          -- period it ENDS in, not the period it started in (see the
+          -- ENDING_TIME COHORT task) — an auction starting Jul 30 and
+          -- ending Aug 2 belongs to August, never split across both.
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),
@@ -1084,6 +1089,7 @@ export default async function handler(req, res) {
           any(a.auction_name) AS name,
           any(a.auction_store_name) AS store_name,
           any(a.auction_starting_time) AS starting_time,
+          any(a.auction_ending_time) AS ending_time,
           any(a.auction_sub_type) AS sub_type,
           any(at.auction_type) AS type,
 
@@ -1114,7 +1120,7 @@ export default async function handler(req, res) {
     //
     // Same population as Total Bid Amount below: status IN ('Paid',
     // 'Released'), deduped by auction_number + lot_number, same
-    // starting_time/date-range/store scoping. Two components:
+    // ending_time/date-range/store scoping. Two components:
     //
     // - Buyer's Premium Income = sold_price - bid_amount. buyers_premium is
     //   a PERCENTAGE RATE, not a peso amount (proven: sold_price =
@@ -1150,8 +1156,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -1237,12 +1243,13 @@ export default async function handler(req, res) {
     // lot_number + any() (verified: 97.4% of duplicate-key rows agree on
     // every value; the rest only disagree on status mid-transition).
     //
-    // Scoped by the auction's starting_time (same convention as the
-    // "lots"/sold_lots queries elsewhere in this file), not by any
-    // settlement-timestamp field on vendor_analysis — those fields
-    // (date_time_paid/released_date) are populated for only ~60-87% of
-    // rows, whereas starting_time via productivity_report covers ~100%
-    // of rows that have a real auction_number.
+    // Scoped by the auction's ending_time (the canonical historical
+    // reporting rule — an auction belongs to the period it ENDS in — same
+    // convention as the "lots"/sold_lots queries elsewhere in this file),
+    // not by any settlement-timestamp field on vendor_analysis — those
+    // fields (date_time_paid/released_date) are populated for only
+    // ~60-87% of rows, whereas ending_time via productivity_report covers
+    // ~100% of rows that have a real auction_number.
     //
     // Phase 2B: investigated deriving this from auctionSummaryResult's
     // settled_bid_amount/settled_lot_count instead of running its own query
@@ -1271,8 +1278,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -1393,26 +1400,28 @@ export default async function handler(req, res) {
     // BID TREND — always daily, one point per calendar day in range.
     //
     // WINNING side: same settled_lots population as Total Bid Amount,
-    // bucketed by the auction's own starting_time day (same scoping
-    // convention as every other settled query in this file). Identity
-    // resolved through the SAME canonical bridge as Bidder Composition
-    // (BIDDER_IDENTITY_CTES) — not a new classifier. Unresolved identity
-    // is folded into the returning amount server-side, matching the
-    // established Overview presentation rule (never a separate Unresolved
-    // bucket), while returning/new COUNTS only ever include a resolved
-    // identity — an unresolved lot's value is real and must still land
-    // somewhere, but it never manufactures a returning bidder who doesn't
-    // exist.
+    // bucketed by the auction's own ending_time day — an auction belongs
+    // to the day (and therefore period) it ENDS in, never split across
+    // days/months by when it started (see the ENDING_TIME COHORT task;
+    // same scoping convention as every other settled query in this file).
+    // Identity resolved through the SAME canonical bridge as Bidder
+    // Composition (BIDDER_IDENTITY_CTES) — not a new classifier. Unresolved
+    // identity is folded into the returning amount server-side, matching
+    // the established Overview presentation rule (never a separate
+    // Unresolved bucket), while returning/new COUNTS only ever include a
+    // resolved identity — an unresolved lot's value is real and must still
+    // land somewhere, but it never manufactures a returning bidder who
+    // doesn't exist.
     // ---------------------------------------------------------
     const bidTrendResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT
             auction_number,
-            any(starting_time) AS auction_starting_time
+            any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),
@@ -1425,7 +1434,7 @@ export default async function handler(req, res) {
             any(v.or_number) AS or_number,
             any(v.date_time_paid) AS date_time_paid,
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category,
-            any(a.auction_starting_time) AS auction_starting_time
+            any(a.auction_ending_time) AS auction_ending_time
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -1444,7 +1453,13 @@ export default async function handler(req, res) {
         ${BIDDER_IDENTITY_CTES}
 
         SELECT
-          toDate(sl.auction_starting_time) AS bucket,
+          -- Explicit Asia/Manila conversion, matching every other date
+          -- boundary in this file (and the Participating series' own
+          -- bucket below) — an auction_ending_time without it would bucket
+          -- by the server's default timezone instead, causing a real
+          -- 1-day mismatch against Participating for an auction ending
+          -- near local midnight (confirmed during this task's validation).
+          toDate(sl.auction_ending_time, 'Asia/Manila') AS bucket,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
           countDistinct(sl.auction_number) AS auctions_concluded,
           count() AS lots_sold,
@@ -1483,19 +1498,50 @@ export default async function handler(req, res) {
     });
 
     // ---------------------------------------------------------
-    // BID TREND — PARTICIPATING side, bucketed by the bid EVENT's own day
-    // (bid_created_at), not the auction's starting_time — Participating is
-    // an activity signal (when did the bidding happen), unlike Winning's
-    // settled/auction-anchored day. Same first-ever-bid classification and
-    // source table as api/leaderboards.js's compositionResult, just
-    // grouped by day instead of collapsed to one number.
+    // BID TREND — PARTICIPATING side.
+    //
+    // Bucketed by the auction's ending_time day — the SAME day concept as
+    // the WINNING series above, NOT the bid event's own day. This is
+    // required for the Participating >= Winning invariant to hold on a
+    // per-day basis: a winning bid can be placed on any day the auction
+    // was live, but that bidder is attributed to the day the AUCTION
+    // ended (see the ENDING_TIME COHORT / GLOBAL BIDDER INVARIANT task).
+    // Bucketing Participating by the bid's own calendar day while Winning
+    // is bucketed by the auction's ending day would let a winner's earlier
+    // bid fall outside Participating's day-bucket while still counting
+    // toward Winning's — an invariant violation, confirmed in production
+    // data during this task's own validation.
+    //
+    // Population: real deduplicated UNION of (A) every bid-history event on
+    // an auction ending on this day and (B) every settled lot's resolved
+    // winning identity for that same auction (same technique as
+    // compositionQuery in api/leaderboards.js) — required for Participating
+    // >= Winning to hold per day: a Negotiated auction's winner with zero
+    // bid-history rows would otherwise be silently absent from Participating
+    // entirely (confirmed as a real violation during this task's own
+    // validation). No bid_created_at date filter on side (A) — an auction
+    // is never split across days/months by when within its run a bid
+    // happened, same "do not split the auction" rule as the ending_time
+    // cohort itself. New/Returning uses bidder_first_ever (from
+    // BIDDER_IDENTITY_CTES, covers both bridges) via LEFT JOIN, never
+    // INNER — see compositionQuery's identical comment.
+    //
+    // GLOBAL BIDDER INVARIANT / MEMORY SAFETY: this query now shares
+    // BIDDER_IDENTITY_CTES with bidTrendResultPromise (WINNING) above, so
+    // the two are run SEQUENTIALLY, not concurrently (was a Promise.all) —
+    // same "never overlap 2+ heavy identity-bridge queries" discipline as
+    // the leaderboards.js memory-safety fix and the branch/category
+    // composition split just above.
     // ---------------------------------------------------------
     const bidTrendParticipatingResultPromise = client.query({
       query: `
-        WITH auction_store AS (
-          SELECT DISTINCT auction_number, store_name
+        WITH selected_auctions AS (
+          SELECT auction_number, any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE auction_number IS NOT NULL
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+          GROUP BY auction_number
         ),
 
         lot_category AS (
@@ -1508,63 +1554,92 @@ export default async function handler(req, res) {
           GROUP BY v.auction_number, v.lot_number
         ),
 
-        bidder_first_bid AS (
+        -- Grouped by (bucket, bidder_key) only — NOT auction_number — so a
+        -- bidder active across multiple same-day-ending auctions gets ONE
+        -- summed row here, never fanned out when joined back below (which
+        -- would double-count their bid_amount).
+        auction_bidder_activity AS (
           SELECT
-            lowerUTF8(trim(email)) AS bidder_key,
-            min(bid_created_at) AS first_bid_at
-          FROM cms.mart_cms_bid_history_report
-          WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
-          GROUP BY bidder_key
-        ),
-
-        daily_bidder_activity AS (
-          SELECT
-            toDate(b.bid_created_at, 'Asia/Manila') AS bucket,
+            toDate(s.auction_ending_time, 'Asia/Manila') AS bucket,
             lowerUTF8(trim(b.email)) AS bidder_key,
-            sum(b.bid_amount) AS bidder_day_amount,
-            max(b.bid_created_at) AS bidder_day_last_bid
+            sum(b.bid_amount) AS bidder_amount
 
           FROM cms.mart_cms_bid_history_report b
 
-          INNER JOIN auction_store s
+          INNER JOIN selected_auctions s
             ON b.auction_number = s.auction_number
 
           LEFT JOIN lot_category lc
             ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
 
-          WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-            AND ({store:String} = '' OR s.store_name = {store:String})
-            AND b.email IS NOT NULL AND trim(b.email) != ''
+          WHERE b.email IS NOT NULL AND trim(b.email) != ''
             AND ({category:String} = '' OR lc.lot_category = {category:String})
 
           GROUP BY bucket, bidder_key
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+          WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+          HAVING ({category:String} = '' OR lot_category = {category:String})
+        ),
+
+        ${BIDDER_IDENTITY_CTES},
+
+        winning_bidder_activity AS (
+          SELECT DISTINCT
+            sl.auction_number AS auction_number,
+            toDate(s.auction_ending_time, 'Asia/Manila') AS bucket,
+            rli.resolved_email AS bidder_key
+          FROM settled_lots sl
+          INNER JOIN selected_auctions s ON sl.auction_number = s.auction_number
+          INNER JOIN resolved_lot_identity rli
+            ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+          WHERE rli.resolved_email IS NOT NULL
+        ),
+
+        union_bidder_activity AS (
+          SELECT bucket, bidder_key FROM auction_bidder_activity
+          UNION DISTINCT
+          SELECT bucket, bidder_key FROM winning_bidder_activity
         )
 
         SELECT
-          d.bucket AS bucket,
+          u.bucket AS bucket,
 
-          uniqExactIf(d.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
-          uniqExactIf(d.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
-          sumIf(d.bidder_day_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
-          sumIf(d.bidder_day_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount
+          uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+          uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+          sumIf(ifNull(d.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+          sumIf(ifNull(d.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount
 
-        FROM daily_bidder_activity d
+        FROM union_bidder_activity u
 
-        INNER JOIN bidder_first_bid f
-          ON d.bidder_key = f.bidder_key
+        LEFT JOIN auction_bidder_activity d
+          ON u.bucket = d.bucket AND u.bidder_key = d.bidder_key
+
+        LEFT JOIN bidder_first_ever fe
+          ON u.bidder_key = fe.fe_key
 
         GROUP BY bucket
         ORDER BY bucket
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // Now heavy (BIDDER_IDENTITY_CTES) — same per-query safety net as
+      // api/leaderboards.js's heavy queries.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     });
 
-    const [bidTrendResult, bidTrendParticipatingResult] = await Promise.all([
-      bidTrendResultPromise,
-      bidTrendParticipatingResultPromise,
-    ]);
+    const bidTrendResult = await bidTrendResultPromise;
+    const bidTrendParticipatingResult = await bidTrendParticipatingResultPromise;
     const bidTrendWinningRows = await bidTrendResult.json();
     const bidTrendParticipatingRows = await bidTrendParticipatingResult.json();
 
@@ -1635,12 +1710,14 @@ export default async function handler(req, res) {
     // own is_participating_bidder flag is the SAME authoritative signal
     // the table already carries — not a second classifier invented here.
     //
-    // Cohort: customers registered for an auction whose starting_time
-    // falls in the selected range (same selected_auctions scoping
-    // convention as every other query in this file, for the same reason —
-    // bidder_registered_at coverage wasn't independently verified here,
-    // whereas starting_time via productivity_report is the established
-    // ~100%-covering join key throughout this endpoint). Registered =
+    // Cohort: customers registered for an auction whose ending_time
+    // falls in the selected range (the canonical historical reporting
+    // rule — an auction belongs to the period it ENDS in — same
+    // selected_auctions scoping convention as every other query in this
+    // file, for the same reason — bidder_registered_at coverage wasn't
+    // independently verified here, whereas ending_time via
+    // productivity_report is the established ~100%-covering join key
+    // throughout this endpoint). Registered =
     // distinct customers with a registration row for one of those
     // auctions. Participating = the same cohort, filtered to
     // is_participating_bidder = 1. Both sides of the ratio are therefore
@@ -1656,8 +1733,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         )
 
@@ -1695,8 +1772,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -1760,8 +1837,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -1831,8 +1908,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -1892,21 +1969,37 @@ export default async function handler(req, res) {
 
     // ---------------------------------------------------------
     // AVG BIDS / UNIQUE BIDDER — bidder engagement/intensity, NOT a peso
-    // metric. One row per bidder (canonical Participating identity — same
-    // lowerUTF8(trim(email)) bidder_key + bidder_first_bid New/Returning
-    // classification already used by BID TREND's participating side and
-    // the branch/category bidder-composition queries above; NOT the
-    // separate BIDDER_IDENTITY_CTES bridge used for WINNING/settled
-    // bidders, which is a different identity resolution for a different
-    // population), scoped to the SAME Date + Store + Category as every
-    // other Overview figure.
+    // metric. AUCTION-COHORT FIRST: select auctions whose ending_time falls
+    // in this period (an auction belongs to the period it ENDS in — see
+    // the ENDING_TIME COHORT task — never split between months by when
+    // within its run a bid happened), THEN sum each bidder's REAL bid
+    // events across all of those auctions' full history (no additional
+    // bid_created_at date filter). One row per bidder (canonical
+    // Participating identity — same lowerUTF8(trim(email)) bidder_key +
+    // bidder_first_bid New/Returning classification already used by BID
+    // TREND's participating side and the branch/category bidder-
+    // composition queries above; NOT the separate BIDDER_IDENTITY_CTES
+    // bridge used for WINNING/settled bidders, which is a different
+    // identity resolution for a different population).
+    //
+    // ENGAGED BIDDERS vs COMPARISON PARTICIPATING: this remains the
+    // narrower "real bid participants only" population (bid_events >= 1),
+    // deliberately NOT unioned with resolved winners the way
+    // compositionQuery's Participating is — a winner with zero real bids
+    // has no bids to average, so folding them in here would silently
+    // divide by a padded denominator. This is why Avg Bids / Unique
+    // Bidder's own denominator can differ from the Participating count
+    // shown in Bidder Composition elsewhere on Overview — both are
+    // correct, for different questions (bidding intensity vs. who's
+    // comparable to Winning).
     //
     // bid_events = count() of real bid_history rows (actual bid EVENTS,
     // never a distinct-lot or distinct-auction count) for that bidder.
     // auctions_participated = uniqExact(auction_number) for that bidder in
     // this same scope. bid_activity_amount = sum(bid_amount), the same
     // "Participating" activity-amount definition used elsewhere (never
-    // settled/winning value).
+    // settled/winning value). Never fabricated: a negotiated winner with
+    // no real bid_history row simply never appears in this population.
     //
     // This single bidder-grain query serves BOTH the new scorecard's
     // scalar totals (SUM(bid_events) / COUNT(rows) here in JS below — a
@@ -1917,10 +2010,12 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     const bidderEngagementResultPromise = client.query({
       query: `
-        WITH auction_store AS (
+        WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE auction_number IS NOT NULL
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
         ),
 
         lot_category AS (
@@ -1958,16 +2053,13 @@ export default async function handler(req, res) {
 
           FROM cms.mart_cms_bid_history_report b
 
-          INNER JOIN auction_store s
+          INNER JOIN selected_auctions s
             ON b.auction_number = s.auction_number
 
           LEFT JOIN lot_category lc
             ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
 
-          WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-            AND ({store:String} = '' OR s.store_name = {store:String})
-            AND b.email IS NOT NULL AND trim(b.email) != ''
+          WHERE b.email IS NOT NULL AND trim(b.email) != ''
             AND ({category:String} = '' OR lc.lot_category = {category:String})
 
           GROUP BY bidder_key
@@ -2056,25 +2148,26 @@ export default async function handler(req, res) {
     // amounts scoped to ONLY that entity, never the overall Overview
     // totals. WINNING reuses the exact same settled_lots + canonical
     // BIDDER_IDENTITY_CTES bridge as the Bid Trend query (identity never
-    // redefined per-entity). PARTICIPATING reuses the exact same bid-
-    // activity/bidder_first_bid definition as the Bid Trend Participating
-    // query, just grouped by branch/category instead of day. All four
-    // queries run once here (server-side, part of this same /api/overview
-    // call) — hovering in the UI triggers zero additional requests.
+    // redefined per-entity). PARTICIPATING (GLOBAL BIDDER INVARIANT: this
+    // task) is now the same real-bidders-UNION-resolved-winners technique
+    // as compositionQuery in api/leaderboards.js, so Winning is always
+    // subset-of Participating per branch/category too — which means it now
+    // ALSO uses BIDDER_IDENTITY_CTES. All four queries touch that bridge
+    // now (previously only the two WINNING ones did) — running all 4
+    // concurrently would concentrate 4 heavy identity-bridge scans at
+    // once, the exact memory-pressure pattern the leaderboards.js incident
+    // (see that file's commit) fixed. Split into two concurrent PAIRS
+    // instead: WINNING batch, then PARTICIPATING batch — bounded to 2
+    // heavy queries overlapping at any instant, never 4.
     // ---------------------------------------------------------
-    const [
-      winningByBranchResult,
-      winningByCategoryResult,
-      participatingByBranchResult,
-      participatingByCategoryResult,
-    ] = await Promise.all([
+    const [winningByBranchResult, winningByCategoryResult] = await Promise.all([
       client.query({
         query: `
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           settled_lots AS (
@@ -2112,8 +2205,8 @@ export default async function handler(req, res) {
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           settled_lots AS (
@@ -2144,12 +2237,17 @@ export default async function handler(req, res) {
         query_params: queryParams,
         format: "JSONEachRow",
       }),
+    ]);
+
+    const [participatingByBranchResult, participatingByCategoryResult] = await Promise.all([
       client.query({
         query: `
-          WITH auction_store AS (
+          WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE auction_number IS NOT NULL
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
           ),
           lot_category AS (
             SELECT
@@ -2160,12 +2258,10 @@ export default async function handler(req, res) {
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
           ),
-          bidder_first_bid AS (
-            SELECT lowerUTF8(trim(email)) AS bidder_key, min(bid_created_at) AS first_bid_at
-            FROM cms.mart_cms_bid_history_report
-            WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
-            GROUP BY bidder_key
-          ),
+          -- Real bidders on an auction in this branch's cohort — no
+          -- bid_created_at date filter (same "never split an auction by
+          -- when within its run a bid happened" rule as the ending_time
+          -- cohort itself).
           branch_bidder_activity AS (
             SELECT
               s.store_name AS store_name,
@@ -2173,39 +2269,79 @@ export default async function handler(req, res) {
               sum(b.bid_amount) AS bidder_amount,
               count() AS bidder_bid_events
             FROM cms.mart_cms_bid_history_report b
-            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
             LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
-            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-              AND ({store:String} = '' OR s.store_name = {store:String})
-              AND b.email IS NOT NULL AND trim(b.email) != ''
+            WHERE b.email IS NOT NULL AND trim(b.email) != ''
               AND ({category:String} = '' OR lc.lot_category = {category:String})
             GROUP BY store_name, bidder_key
+          ),
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(a.store_name) AS store_name,
+              any(v.or_number) AS or_number,
+              any(v.date_time_paid) AS date_time_paid,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+            WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
+          ),
+          ${BIDDER_IDENTITY_CTES},
+          -- GLOBAL BIDDER INVARIANT: resolved winners for this SAME branch
+          -- cohort, unioned with real bidders below so Winning is always
+          -- subset-of Participating per branch — see compositionQuery's
+          -- identical technique/comment above.
+          branch_winning_bidder_keys AS (
+            SELECT DISTINCT sl.store_name AS store_name, rli.resolved_email AS bidder_key
+            FROM settled_lots sl
+            INNER JOIN resolved_lot_identity rli
+              ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+            WHERE rli.resolved_email IS NOT NULL
+          ),
+          branch_union_bidder_keys AS (
+            SELECT store_name, bidder_key FROM branch_bidder_activity
+            UNION DISTINCT
+            SELECT store_name, bidder_key FROM branch_winning_bidder_keys
           )
+          -- New/Returning uses bidder_first_ever (BIDDER_IDENTITY_CTES —
+          -- covers competitive bid-history AND negotiated-purchase first
+          -- participation) via LEFT JOIN, NOT the narrower bid-history-only
+          -- first-bid lookup via INNER JOIN — a negotiated winner with zero
+          -- bid-history rows would otherwise be silently dropped from
+          -- Participating entirely (confirmed as a real Winning >
+          -- Participating violation during this task's own validation).
           SELECT
-            ba.store_name AS branch,
-            uniqExactIf(ba.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
-            uniqExactIf(ba.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
-            sumIf(ba.bidder_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
-            sumIf(ba.bidder_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
-            -- Total Bids for this branch — a plain count() partitions
-            -- safely across the (store_name, bidder_key) GROUP BY, so this
-            -- sums exactly, same reasoning as the top-level Avg Bids /
-            -- Unique Bidder metric.
-            sum(ba.bidder_bid_events) AS participating_bid_events
-          FROM branch_bidder_activity ba
-          INNER JOIN bidder_first_bid f ON ba.bidder_key = f.bidder_key
-          GROUP BY ba.store_name
+            u.store_name AS branch,
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            sumIf(ifNull(ba.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+            sumIf(ifNull(ba.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
+            -- ENGAGED BIDDERS (real bid participants only, NOT the union
+            -- above) — this branch's own Avg Bids / Unique Bidder
+            -- denominator must never be padded by winner-only members with
+            -- zero real bid events (see the ENGAGED BIDDER DEFINITION
+            -- comment on bidderEngagementResultPromise above).
+            uniqExactIf(ba.bidder_key, ba.bidder_key IS NOT NULL) AS engaged_bidders,
+            sum(ifNull(ba.bidder_bid_events, 0)) AS participating_bid_events
+          FROM branch_union_bidder_keys u
+          LEFT JOIN branch_bidder_activity ba ON u.store_name = ba.store_name AND u.bidder_key = ba.bidder_key
+          LEFT JOIN bidder_first_ever fe ON u.bidder_key = fe.fe_key
+          GROUP BY u.store_name
         `,
         query_params: queryParams,
         format: "JSONEachRow",
       }),
       client.query({
         query: `
-          WITH auction_store AS (
+          WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE auction_number IS NOT NULL
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
           ),
           lot_category AS (
             SELECT
@@ -2215,12 +2351,6 @@ export default async function handler(req, res) {
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
-          ),
-          bidder_first_bid AS (
-            SELECT lowerUTF8(trim(email)) AS bidder_key, min(bid_created_at) AS first_bid_at
-            FROM cms.mart_cms_bid_history_report
-            WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
-            GROUP BY bidder_key
           ),
           category_bidder_activity AS (
             SELECT
@@ -2229,24 +2359,48 @@ export default async function handler(req, res) {
               sum(b.bid_amount) AS bidder_amount,
               count() AS bidder_bid_events
             FROM cms.mart_cms_bid_history_report b
-            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
             INNER JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
-            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-              AND ({store:String} = '' OR s.store_name = {store:String})
-              AND b.email IS NOT NULL AND trim(b.email) != ''
+            WHERE b.email IS NOT NULL AND trim(b.email) != ''
             GROUP BY lot_category, bidder_key
+          ),
+          settled_lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(v.or_number) AS or_number,
+              any(v.date_time_paid) AS date_time_paid,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+            WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+          ),
+          ${BIDDER_IDENTITY_CTES},
+          category_winning_bidder_keys AS (
+            SELECT DISTINCT sl.category AS category, rli.resolved_email AS bidder_key
+            FROM settled_lots sl
+            INNER JOIN resolved_lot_identity rli
+              ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+            WHERE rli.resolved_email IS NOT NULL
+          ),
+          category_union_bidder_keys AS (
+            SELECT lot_category AS category, bidder_key FROM category_bidder_activity
+            UNION DISTINCT
+            SELECT category, bidder_key FROM category_winning_bidder_keys
           )
           SELECT
-            ca.lot_category AS category,
-            uniqExactIf(ca.bidder_key, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
-            uniqExactIf(ca.bidder_key, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
-            sumIf(ca.bidder_amount, f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
-            sumIf(ca.bidder_amount, f.first_bid_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
-            sum(ca.bidder_bid_events) AS participating_bid_events
-          FROM category_bidder_activity ca
-          INNER JOIN bidder_first_bid f ON ca.bidder_key = f.bidder_key
-          GROUP BY ca.lot_category
+            u.category AS category,
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
+            sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
+            uniqExactIf(ca.bidder_key, ca.bidder_key IS NOT NULL) AS engaged_bidders,
+            sum(ifNull(ca.bidder_bid_events, 0)) AS participating_bid_events
+          FROM category_union_bidder_keys u
+          LEFT JOIN category_bidder_activity ca ON u.category = ca.lot_category AND u.bidder_key = ca.bidder_key
+          LEFT JOIN bidder_first_ever fe ON u.bidder_key = fe.fe_key
+          GROUP BY u.category
         `,
         query_params: queryParams,
         format: "JSONEachRow",
@@ -2276,6 +2430,14 @@ export default async function handler(req, res) {
         // derived downstream from THIS entity's own bid_events/bidder
         // count, never the overall Overview denominator.
         participating_bid_events: Number(p.participating_bid_events ?? 0),
+        // ENGAGED BIDDERS (real bid participants only) — the correct
+        // denominator for this entity's Avg Bids / Unique Bidder. Deliberately
+        // NOT participating_new + participating_returning (that total is the
+        // real-bidders-UNION-winners population used for the Participating
+        // vs Winning invariant, which can include winner-only members with
+        // zero real bid events — using it here would silently understate
+        // engagement by padding the denominator).
+        engaged_bidders: Number(p.engaged_bidders ?? 0),
         winning_new: Number(w.winning_new ?? 0),
         winning_returning: Number(w.winning_returning ?? 0),
         winning_new_amount: Number(w.winning_new_amount ?? 0),
@@ -2620,8 +2782,8 @@ export default async function handler(req, res) {
 
           FROM xv3.mart_auction_productivity_report
 
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
 
             AND (
               {store:String} = ''
@@ -3144,8 +3306,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -3174,8 +3336,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number
               FROM xv3.mart_auction_productivity_report
-              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             lots AS (
@@ -3206,8 +3368,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -3237,8 +3399,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number
               FROM xv3.mart_auction_productivity_report
-              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             )
             SELECT
@@ -3262,8 +3424,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -3290,16 +3452,18 @@ export default async function handler(req, res) {
         }),
         // Previous-period scalar counterpart of bidderEngagementResult
         // above, for the Avg Bids / Unique Bidder delta only — no per-
-        // bidder grain needed here (the drilldown is current-period only),
-        // so this is a plain count()/uniqExact() over the same filtered
-        // bid_history population, same Date/Store/Category scope shifted
-        // to [compareFrom, compareTo].
+        // bidder grain needed here (the drilldown is current-period only).
+        // Same auction-ending-cohort-first population as the current-period
+        // query (see AVG BIDS / UNIQUE BIDDER comment above), shifted to
+        // [compareFrom, compareTo].
         client.query({
           query: `
-            WITH auction_store AS (
+            WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE auction_number IS NOT NULL
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
             ),
             lot_category AS (
               SELECT v.auction_number AS auction_number, v.lot_number AS lot_number,
@@ -3312,12 +3476,9 @@ export default async function handler(req, res) {
               count() AS total_bid_events,
               uniqExact(lowerUTF8(trim(b.email))) AS unique_participating_bidders
             FROM cms.mart_cms_bid_history_report b
-            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
             LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
-            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-              AND ({store:String} = '' OR s.store_name = {store:String})
-              AND b.email IS NOT NULL AND trim(b.email) != ''
+            WHERE b.email IS NOT NULL AND trim(b.email) != ''
               AND ({category:String} = '' OR lc.lot_category = {category:String})
           `,
           query_params: compareParams,
@@ -3505,6 +3666,7 @@ export default async function handler(req, res) {
         name: row.name,
         store_name: row.store_name,
         starting_time: row.starting_time,
+        ending_time: row.ending_time,
         type: row.type ?? null,
         sub_type: row.sub_type ?? null,
         lots_listed: Number(row.lots_listed ?? 0),

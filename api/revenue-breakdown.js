@@ -71,17 +71,18 @@ const client = createClient({
 // every SUM(breakdown) = Total Service Income check holds by construction,
 // not by coincidence.
 //
-// TREND DATE: uses auction starting_time (the same field already used to
-// scope the whole population), NOT date_time_paid/released_date. Two
-// reasons: (1) it's required to reconcile exactly with Overview's own
-// Service Income figure, which scopes by starting_time — using a
-// different date field for the trend would still let the KPI totals
-// match but would misrepresent this trend as a real day of the same
-// figure; (2) date_time_paid is populated on 'Paid' rows and
-// released_date on 'Released' rows, never both — coalescing them would
-// introduce a second, less-validated date convention. bid_created_at
-// (bid-event activity timestamps) is never used for a settled-revenue
-// metric.
+// TREND DATE: uses auction ending_time (the same field the whole
+// population is now scoped by — an auction belongs to the period in which
+// it ENDS, per the canonical historical-attribution rule applied
+// dashboard-wide), NOT starting_time and NOT date_time_paid/released_date.
+// Three reasons: (1) it's required to reconcile exactly with Overview's own
+// Service Income figure, which scopes by ending_time — using a different
+// date field for the trend would still let the KPI totals match but would
+// misrepresent this trend as a real day of the same figure; (2)
+// date_time_paid is populated on 'Paid' rows and released_date on
+// 'Released' rows, never both — coalescing them would introduce a second,
+// less-validated date convention; (3) bid_created_at (bid-event activity
+// timestamps) is never used for a settled-revenue metric.
 //
 // FILTERS: Store + Date Range only, matching every other real tab. No
 // category filter — this is its own tab, not coupled to Overview's
@@ -100,10 +101,11 @@ export default async function handler(req, res) {
             auction_number,
             any(store_name) AS auction_store_name,
             any(name) AS auction_name,
-            min(starting_time) AS auction_starting_time
+            min(starting_time) AS auction_starting_time,
+            any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),
@@ -153,6 +155,7 @@ export default async function handler(req, res) {
           a.auction_store_name AS store_name,
           a.auction_name AS auction_name,
           a.auction_starting_time AS starting_time,
+          a.auction_ending_time AS ending_time,
           at.auction_type AS auction_type
 
         FROM settled_lots sl
@@ -182,6 +185,7 @@ export default async function handler(req, res) {
       auction_name: row.auction_name,
       auction_type: row.auction_type ?? null,
       starting_time: row.starting_time,
+      ending_time: row.ending_time,
       bid_amount: Number(row.bid_amount ?? 0),
       buyers_premium_income: Number(row.buyers_premium_income ?? 0),
       commission_income: Number(row.commission_income ?? 0),

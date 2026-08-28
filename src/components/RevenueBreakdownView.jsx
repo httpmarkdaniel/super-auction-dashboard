@@ -146,7 +146,7 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
 
     const dayMap = new Map();
     for (const r of rows) {
-      const day = String(r.starting_time || "").slice(0, 10);
+      const day = String(r.ending_time || "").slice(0, 10);
       if (!day) continue;
       if (!dayMap.has(day)) dayMap.set(day, 0);
       dayMap.set(day, dayMap.get(day) + r.buyers_premium_income + r.commission_income);
@@ -377,7 +377,7 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
 
       <StorySection
         title="Revenue Over Time"
-        insight="Total Service Income by day, using each contributing auction's starting_time — the same date field this page's totals are already scoped by, so this trend always sums exactly to the total above."
+        insight="Total Service Income by day, using each contributing auction's ending_time — the same date field this page's totals are already scoped by (an auction belongs to the period in which it ends), so this trend always sums exactly to the total above."
         last
       >
         <Card title="By Day">

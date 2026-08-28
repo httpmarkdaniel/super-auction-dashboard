@@ -119,7 +119,7 @@ export default function AuctionSummaryModal({ open, onClose, title, subtitle, ro
                     <tr key={`${r.auctionNumber}-detail`} className="border-t border-gridline">
                       <td colSpan={9} className="py-3 pl-4 bg-plane">
                         <div className="text-[13px] text-muted mb-2">
-                          {r.auctionNumber} · {formatManila(r.startingTime)}
+                          {r.auctionNumber} · Ending {formatManila(r.endingTime)}
                         </div>
                         {r.participating && r.winning && (
                           <AuctionBidderComposition participating={r.participating} winning={r.winning} />

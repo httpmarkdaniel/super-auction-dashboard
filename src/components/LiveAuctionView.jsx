@@ -230,6 +230,8 @@ function AuctionCard({ auction }) {
 
       <div className="mb-4">
         <AuctionProgressBar
+          auctionNumber={auction.auction_number}
+          auctionName={auction.name}
           timelineStart={auction.timeline_start}
           officialStartTime={auction.starting_time}
           endingTime={auction.ending_time}

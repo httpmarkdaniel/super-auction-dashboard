@@ -102,8 +102,9 @@ const SETTLED_STATUSES = ["Paid", "Released"];
 // (per lot and rolled up per auction, New vs Returning via the same
 // bidder_first_ever definition leaderboards.js already uses) is included.
 //
-// FILTERS: Store + Date Range (auction starting_time), matching every
-// other real tab in this app. No category filter in this phase — Full
+// FILTERS: Store + Date Range (auction ending_time — an auction belongs
+// to the period it ENDS in, not the period it started in; see the
+// ENDING_TIME COHORT task). No category filter in this phase — Full
 // Auction Detail is its own tab, not coupled to Overview's category
 // selector.
 // =========================================================
@@ -124,8 +125,14 @@ export default async function handler(req, res) {
             min(starting_time) AS auction_starting_time,
             max(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          -- Canonical historical reporting rule: an auction belongs to the
+          -- period in which it ENDS, not the period in which it started
+          -- (e.g. an auction starting Jul 30 and ending Aug 2 belongs to
+          -- August, not July) — see the ENDING_TIME COHORT task. Full
+          -- Auction Detail already displayed ending_time; this is the fix
+          -- that makes the actual filtered population match it.
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number, store_name
         ),

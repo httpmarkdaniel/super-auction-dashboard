@@ -48,6 +48,18 @@ const client = createClient({
 // active across several hours counts once in each hour it has activity in
 // — never counting individual bids or lots as auctions.
 //
+// Scope note: PARTICIPATING above is an activity-time signal (which hour
+// of day real bid EVENTS landed in, scoped by bid_created_at itself,
+// mirroring overview.js's hourlyResult) while WINNING below is an
+// auction-cohort signal (which auctions' settled lots to include, scoped
+// by ending_time, the canonical historical-attribution rule), then
+// separately attributed to an hour via its own winning bid's timestamp.
+// These are deliberately two different scoping bases for two different
+// questions ("when did bidding happen" vs "which auctions concluded here")
+// — the global PARTICIPATING >= WINNING invariant is therefore evaluated
+// per-hour on this endpoint's own terms, not assumed to hold arithmetically
+// the way it does for the same-cohort UNION queries elsewhere in this app.
+//
 // WINNING per hour — settled (Paid/Released) lots, identity resolved via
 // the canonical BIDDER_IDENTITY_CTES bridge (api/_bidderIdentity.js),
 // exactly as api/leaderboards.js's settledCompositionResult already does.
@@ -159,8 +171,12 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          -- Canonical historical reporting rule: an auction belongs to the
+          -- period it ENDS in, not the period it started in — same
+          -- selected_auctions scoping convention as every other settled/
+          -- winning cohort query in this codebase.
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 

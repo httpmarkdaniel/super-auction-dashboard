@@ -47,102 +47,127 @@ export default async function handler(req, res) {
     // the kind of silent metric drift this phase is required to avoid. See
     // the Architecture Audit / Phase 2A report for the deferred plan.
     // ---------------------------------------------------------
+    // ---------------------------------------------------------
+    // GLOBAL INVARIANT: Participating >= Winning always holds, because
+    // Participating is the real deduplicated UNION of (A) every bidder with
+    // a real bid-history event on an auction in this cohort and (B) every
+    // settled lot's resolved winning identity in this same cohort — see
+    // perAuctionParticipatingUnionQuery below for the identical technique
+    // at per-auction grain. A winner who never generated a bid-history
+    // event (a Negotiated sale with no online bidding) is still counted
+    // once via side (B) — never fabricated bid activity, just a real
+    // resolved identity. This guarantees Winning subset-of Participating
+    // structurally, not via Math.max()/addition.
+    //
+    // Auction cohort: ending_time in range (an auction belongs to the
+    // period it ENDS in — see the ENDING_TIME COHORT task), same
+    // selected_auctions definition settledCompositionQuery below uses, so
+    // the two cards are always comparing the same auctions. category, when
+    // set, is applied identically to both sides (lot_category join on the
+    // bid-history side, settled_lots HAVING on the winning side) so a
+    // category-scoped comparison (e.g. "Vehicles and Automotive") never
+    // mixes an all-category Participating count against a category-scoped
+    // Winning count.
+    // ---------------------------------------------------------
     const compositionQuery = {
       query: `
-        WITH auction_store AS (
-          SELECT DISTINCT
-            auction_number,
-            store_name
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE auction_number IS NOT NULL
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
         ),
 
-        bidder_first_bid AS (
+        lot_category AS (
           SELECT
-            lowerUTF8(trim(email)) AS bidder_key,
-            min(bid_created_at) AS first_bid_at
-
-          FROM cms.mart_cms_bid_history_report
-
-          WHERE bid_created_at IS NOT NULL
-            AND email IS NOT NULL
-            AND trim(email) != ''
-
-          GROUP BY bidder_key
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
         ),
 
-        period_bidders AS (
+        -- Every real bidder on an auction in this cohort — no bid_created_at
+        -- date filter (an auction is never split by when within its run a
+        -- bid happened, same rule as the ending_time cohort itself).
+        bid_history_bidders AS (
           SELECT
             lowerUTF8(trim(b.email)) AS bidder_key,
             sum(b.bid_amount) AS bid_amount
-
           FROM cms.mart_cms_bid_history_report b
-
-          INNER JOIN auction_store s
-            ON b.auction_number = s.auction_number
-
-          WHERE b.bid_created_at >= toDateTime(
-              concat({from:String}, ' 00:00:00'),
-              'Asia/Manila'
-            )
-
-            AND b.bid_created_at < addDays(
-              toDateTime(
-                concat({to:String}, ' 00:00:00'),
-                'Asia/Manila'
-              ),
-              1
-            )
-
-            AND (
-              {store:String} = ''
-              OR s.store_name = {store:String}
-            )
-
-            AND b.email IS NOT NULL
-            AND trim(b.email) != ''
-
+          INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+          LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+          WHERE b.email IS NOT NULL AND trim(b.email) != ''
+            AND ({category:String} = '' OR lc.lot_category = {category:String})
           GROUP BY bidder_key
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.or_number) AS or_number,
+            any(v.date_time_paid) AS date_time_paid,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+          WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+          HAVING ({category:String} = '' OR lot_category = {category:String})
+        ),
+
+        ${BIDDER_IDENTITY_CTES},
+
+        winning_bidder_keys AS (
+          SELECT DISTINCT rli.resolved_email AS bidder_key
+          FROM settled_lots sl
+          INNER JOIN resolved_lot_identity rli
+            ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+          WHERE rli.resolved_email IS NOT NULL
+        ),
+
+        union_bidder_keys AS (
+          SELECT bidder_key FROM bid_history_bidders
+          UNION DISTINCT
+          SELECT bidder_key FROM winning_bidder_keys
         )
 
+        -- New/Returning classification uses bidder_first_ever (from
+        -- BIDDER_IDENTITY_CTES — covers BOTH competitive bid-history AND
+        -- negotiated-purchase first participation), joined via LEFT JOIN,
+        -- NOT the narrower bid-history-only bidder_first_bid via INNER
+        -- JOIN — a negotiated winner with zero bid-history rows has no
+        -- entry in a bid-history-only lookup at all, so an INNER JOIN
+        -- there would silently drop them from Participating entirely,
+        -- which is exactly how a real Winning > Participating violation
+        -- was found during this task's own validation (see
+        -- perAuctionParticipatingUnionQuery's identical, already-correct
+        -- technique below). A union member resolving through neither path
+        -- is genuinely unclassified — counted in the total, never
+        -- guessed into New or Returning.
         SELECT
-          countIf(
-            f.first_bid_at >= toDateTime(
-              concat({from:String}, ' 00:00:00'),
-              'Asia/Manila'
-            )
-          ) AS new_bidders,
+          countIf(fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS new_bidders,
+          countIf(fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS returning_bidders,
+          sumIf(ifNull(bha.bid_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS new_bidders_bid_amount,
+          sumIf(ifNull(bha.bid_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS returning_bidders_bid_amount,
+          countIf(fe.first_ever_at IS NULL) AS unclassified_bidders,
+          sumIf(ifNull(bha.bid_amount, 0), fe.first_ever_at IS NULL) AS unclassified_bid_amount
 
-          countIf(
-            f.first_bid_at < toDateTime(
-              concat({from:String}, ' 00:00:00'),
-              'Asia/Manila'
-            )
-          ) AS returning_bidders,
+        FROM union_bidder_keys u
 
-          sumIf(
-            p.bid_amount,
-            f.first_bid_at >= toDateTime(
-              concat({from:String}, ' 00:00:00'),
-              'Asia/Manila'
-            )
-          ) AS new_bidders_bid_amount,
+        LEFT JOIN bidder_first_ever fe
+          ON u.bidder_key = fe.fe_key
 
-          sumIf(
-            p.bid_amount,
-            f.first_bid_at < toDateTime(
-              concat({from:String}, ' 00:00:00'),
-              'Asia/Manila'
-            )
-          ) AS returning_bidders_bid_amount
-
-        FROM period_bidders p
-
-        INNER JOIN bidder_first_bid f
-          ON p.bidder_key = f.bidder_key
+        LEFT JOIN bid_history_bidders bha
+          ON u.bidder_key = bha.bidder_key
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // Now heavy (BIDDER_IDENTITY_CTES) — see settledCompositionQuery's
+      // identical safety-net comment below.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
     // =========================================================
@@ -298,8 +323,10 @@ export default async function handler(req, res) {
     // api/overview.js: xv3.mart_auction_vendor_analysis, status IN
     // ('Paid','Released'), deduped by (auction_number, lot_number),
     // authoritative amount = bid_amount, scoped by the auction's
-    // starting_time (not any vendor_analysis-native date field — see
-    // overview.js for why). Optionally further scoped by category —
+    // ending_time (the canonical historical reporting rule — an auction
+    // belongs to the period it ENDS in — not any vendor_analysis-native
+    // date field — see overview.js for why). Optionally further scoped by
+    // category —
     // same additive-only convention as settledVendorsResult/
     // settledBiddersResult below and every category-scoped query in
     // api/overview.js: a post-aggregation HAVING on the per-lot canonical
@@ -326,8 +353,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -428,8 +455,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -563,8 +590,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -687,8 +714,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -753,8 +780,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -888,45 +915,34 @@ export default async function handler(req, res) {
     // PRODUCTION INCIDENT (2026-08-28): all 7 queries used to run via one
     // Promise.all. Investigated system.query_log around a real "(total)
     // memory limit exceeded ... While executing AggregatingTransform"
-    // production failure and found:
+    // production failure and found 4 of the 7 each touch the full
+    // BIDDER_IDENTITY_CTES bridge (or an equivalent partial bridge),
+    // reading ~19M rows and peaking at roughly 350-510MB of their own.
+    // Fixed by serializing those 4 (never more than ~500MB added to shared
+    // server memory at any instant, instead of up to ~2GB from all 4 at
+    // once) while the genuinely light queries stayed concurrent. See the
+    // commit that introduced this split for the full incident writeup.
     //
-    // - 4 of the 7 queries (settledCompositionQuery, settledPerAuctionQuery,
-    //   perAuctionParticipatingUnionQuery, settledBiddersQuery) each touch
-    //   either the full BIDDER_IDENTITY_CTES bridge (postings + payments +
-    //   customers + cms_bidder_registrations, plus two unscoped all-history
-    //   scans for first-ever-participation) or an equivalent partial bridge
-    //   — every one of them reads ~19M rows (an unscoped scan of
-    //   cms.mart_cms_bid_history_report) and peaks at roughly 350-510MB of
-    //   its own, per repeated measurement against system.query_log.
-    // - The other 3 (compositionQuery, perAuctionQuery, settledVendorsQuery)
-    //   are far lighter: 30-150MB peak, no identity bridge or a much
-    //   smaller one.
-    // - The failing requests themselves were NOT the dominant memory
-    //   consumer at the time: system.query_log shows a separate, unrelated
-    //   Superset workload sharing this ClickHouse instance firing batches
-    //   of 4-5 concurrent queries at 3-12.5GB each in the same 1-2 second
-    //   windows as our failures (e.g. one Superset query alone used 12.52
-    //   GiB). That's the primary reason the server's total RSS was already
-    //   near the 28.21 GiB ceiling — outside this application's control.
-    //   But our own 4 heavy queries running concurrently (up to ~2GB
-    //   combined peak) was real, avoidable added pressure on an
-    //   already-strained shared server, and is the one thing this endpoint
-    //   can control. Bounding it here is a legitimate reliability
-    //   improvement regardless of what else is sharing the instance.
-    //
-    // FIX: light queries stay concurrent (their combined peak is small and
-    // safe); the 4 heavy queries are serialized so this endpoint never adds
-    // more than ONE heavy query's peak (~500MB) to shared server memory at
-    // any instant, instead of up to ~2GB from all 4 at once. Trades some
-    // latency (heavy queries no longer overlap) for materially lower peak
-    // memory — see the reliability-over-speed instruction this responds to.
+    // GLOBAL BIDDER INVARIANT (this task): compositionQuery was redesigned
+    // to guarantee Participating >= Winning (the real bid-history-UNION-
+    // winners technique, not Math.max()/addition — see its own comment),
+    // which requires the same BIDDER_IDENTITY_CTES bridge settledComposition
+    // Query already uses. That moves it from the light batch into the
+    // heavy serial chain below — 5 heavy queries now instead of 4, still
+    // never overlapping each other, so peak added memory per request is
+    // unchanged (~500MB, whichever single heavy query is running) even
+    // though total request latency rises a bit further. perAuctionQuery
+    // stays light and concurrent — it's no longer read by anything (see
+    // App.jsx's participatingByAuction, now sourced from
+    // perAuctionParticipatingUnion instead) but is left in place rather
+    // than removed, to keep this change scoped to correctness, not cleanup.
     // ---------------------------------------------------------
-    const [compositionResult, perAuctionResult, settledVendorsResult] = await Promise.all([
-      client.query(compositionQuery),
+    const [perAuctionResult, settledVendorsResult] = await Promise.all([
       client.query(perAuctionQuery),
       client.query(settledVendorsQuery),
     ]);
 
+    const compositionResult = await client.query(compositionQuery);
     const settledCompositionResult = await client.query(settledCompositionQuery);
     const settledPerAuctionResult = await client.query(settledPerAuctionQuery);
     const perAuctionParticipatingUnionResult = await client.query(perAuctionParticipatingUnionQuery);
@@ -1056,13 +1072,15 @@ export default async function handler(req, res) {
         unclassified_lots: Number(row.settled_unclassified_lots ?? 0),
       })),
 
-      // Full Auction Detail ONLY — real deduplicated UNION of bid-history
-      // participants and resolved winning bidders, per auction. See the
-      // perAuctionParticipatingUnionResult query comment above for the
-      // full rule (Participating >= Winning, Bid Activity never
-      // fabricated for winner-only bidders). Never consumed by Overview's
-      // own drilldown — that reuses perAuctionBiddingActivity/
-      // perAuctionComposition unmodified, on purpose.
+      // Real deduplicated UNION of bid-history participants and resolved
+      // winning bidders, per auction. See the perAuctionParticipatingUnionResult
+      // query comment above for the full rule (Participating >= Winning,
+      // Bid Activity never fabricated for winner-only bidders). Now also
+      // consumed by Overview's own Auctions Concluded/Lots Sold drilldown
+      // (see App.jsx's participatingByAuction) — the older
+      // perAuctionBiddingActivity (bid-history-only, no winner union)
+      // could show Participating < Winning for a Negotiated auction with
+      // no bid-history at all, violating the global invariant.
       perAuctionParticipatingUnion: perAuctionParticipatingUnionRows.map((row) => ({
         auction_number: row.auction_number,
         total_bidders: Number(row.participating_bidders ?? 0),
@@ -1077,10 +1095,15 @@ export default async function handler(req, res) {
         unclassified_bid_amount: Number(row.participating_unclassified_bid_amount ?? 0),
       })),
 
-      // Preserved, not deleted: the previous bid-history cumulative-
-      // activity-based composition (sum of every bid EVENT per bidder,
-      // not settled value). Kept under its own names so nothing built on
-      // the old numbers silently breaks.
+      // GLOBAL BIDDER INVARIANT: compositionQuery above now computes the
+      // real deduplicated UNION of bid-history participants and resolved
+      // winning bidders (same technique as perAuctionParticipatingUnion,
+      // collapsed to one overall row instead of per-auction) — no longer
+      // the pure bid-history-activity-only definition this field's name
+      // suggests. Field name kept unchanged (still feeds Overview's
+      // top-level "Participating Bidders" card via participatingComposition)
+      // so nothing built on this field needs to change, only what it
+      // guarantees: Winning is now always <= this value, structurally.
       bidding_activity_composition: {
         new_bidders: Number(
           composition.new_bidders ?? 0,
@@ -1096,6 +1119,21 @@ export default async function handler(req, res) {
 
         returning_bidders_bid_amount: Number(
           composition.returning_bidders_bid_amount ?? 0,
+        ),
+
+        // Unclassified: a union member (real bidder or resolved winner)
+        // whose identity resolves through neither the competitive nor the
+        // negotiated first-ever-participation bridge — kept for internal
+        // reconciliation visibility only, same convention as settled
+        // Winning's own unclassified_bid_amount above; never surfaced as a
+        // normal third UI category. Its peso amount is already folded into
+        // returning_bidders_bid_amount (real money must land somewhere),
+        // its count is not (never guessed into New or Returning).
+        unclassified_bidders: Number(
+          composition.unclassified_bidders ?? 0,
+        ),
+        unclassified_bid_amount: Number(
+          composition.unclassified_bid_amount ?? 0,
         ),
       },
 

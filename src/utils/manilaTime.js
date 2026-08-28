@@ -16,13 +16,31 @@ function parseParts(chDateTime) {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export function formatManila(chDateTime, { withDate = true } = {}) {
+export function formatManila(chDateTime, { withDate = true, withYear = false } = {}) {
   const p = parseParts(chDateTime);
   if (!p) return "—";
   const hour12 = p.h % 12 === 0 ? 12 : p.h % 12;
   const ampm = p.h < 12 ? "AM" : "PM";
   const time = `${hour12}:${String(p.mi).padStart(2, "0")} ${ampm}`;
-  return withDate ? `${MONTHS[p.mo - 1]} ${p.d}, ${time}` : time;
+  if (!withDate) return time;
+  return withYear ? `${MONTHS[p.mo - 1]} ${p.d}, ${p.y}, ${time}` : `${MONTHS[p.mo - 1]} ${p.d}, ${time}`;
+}
+
+// Same formatting as formatManila, but for a real epoch ms instant (e.g.
+// Date.now()) rather than a ClickHouse wall-clock string — used only for
+// "current moment" displays (the Active Auction Timeline's Current
+// milestone), never for stored data timestamps. The Philippines' fixed
+// UTC+8 offset makes the +8h shift exact, not an approximation.
+export function formatManilaFromEpochMs(ms, { withDate = true, withYear = false } = {}) {
+  if (ms == null || Number.isNaN(ms)) return "—";
+  const d = new Date(ms + 8 * 3600 * 1000);
+  const h = d.getUTCHours();
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  const ampm = h < 12 ? "AM" : "PM";
+  const time = `${hour12}:${String(d.getUTCMinutes()).padStart(2, "0")} ${ampm}`;
+  if (!withDate) return time;
+  const monthLabel = MONTHS[d.getUTCMonth()];
+  return withYear ? `${monthLabel} ${d.getUTCDate()}, ${d.getUTCFullYear()}, ${time}` : `${monthLabel} ${d.getUTCDate()}, ${time}`;
 }
 
 // Real epoch ms for a Manila wall-clock string — the Philippines' fixed
