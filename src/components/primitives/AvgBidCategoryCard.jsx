@@ -1,17 +1,17 @@
-import { CATEGORY_NAMES } from "../../../api/_category.js";
 import { formatPeso, formatCompactPeso } from "../../utils/format";
 
 // Category-aware Avg Bid / Auction and Avg Bid / Sold Lot cards — see
 // App.jsx's avgBidCategoryBreakdown comment for the underlying data (every
 // canonical category always present, null-filled when a category had zero
-// settled results this period). `category`/`onCategoryChange` are a LOCAL
-// selector scoped to just these two cards, shared so switching one switches
-// both (see HeroKPIs.jsx) — UNLESS `locked` is true, meaning the Overview's
-// own global Category filter already picked a specific category: in that
-// case the dropdown is replaced with a static label so the card can never
-// show a category that contradicts the global filter, and `onCategoryChange`
-// is not called. Metric-specific value/pct fields are picked via `metric`
-// ("auction" | "soldLot") so this one component serves both cards.
+// settled results this period). `category` is driven ENTIRELY by the
+// single Overview-wide Category filter (HeroKPIs passes globalCategory
+// straight through) — there is no local selector here anymore, so this
+// card can never show a category the Overview filter doesn't. Clicking a
+// category row (All Categories state) or the KPI itself (specific-category
+// state) calls onClickCategory, which navigates to Full Auction Detail
+// scoped to that category — never a local modal. Metric-specific
+// value/pct fields are picked via `metric` ("auction" | "soldLot") so this
+// one component serves both cards.
 function PctBadge({ pct }) {
   if (pct === null || pct === undefined) return null;
   const rising = pct >= 0;
@@ -32,8 +32,6 @@ export default function AvgBidCategoryCard({
   compareLabel,
   categoryBreakdown,
   category,
-  locked = false,
-  onCategoryChange,
   onClickCategory,
 }) {
   const valueKey = metric === "auction" ? "avgBidPerAuction" : "avgBidPerSoldLot";
@@ -44,37 +42,13 @@ export default function AvgBidCategoryCard({
 
   return (
     <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
-      <div className="flex items-start justify-between gap-2 mb-2.5">
-        <div className="flex items-center gap-1.5 min-w-0">
-          {icon && <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{icon}</span>}
-          <span className="eyebrow truncate">{eyebrow}</span>
-          {methodology && (
-            <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">
-              i
-            </span>
-          )}
-        </div>
-        {locked ? (
-          <span
-            title="Set by the Overview Category filter"
-            className="text-[12.5px] font-medium bg-plane border border-gridline rounded px-1.5 py-1 text-muted shrink-0 max-w-[130px] truncate"
-          >
-            {category}
+      <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
+        {icon && <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{icon}</span>}
+        <span className="eyebrow truncate">{eyebrow}</span>
+        {methodology && (
+          <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">
+            i
           </span>
-        ) : (
-          <select
-            value={category}
-            onClick={(e) => e.stopPropagation()}
-            onChange={(e) => onCategoryChange(e.target.value)}
-            className="text-[12.5px] font-medium bg-plane border border-gridline rounded px-1.5 py-1 text-ink shrink-0 max-w-[120px]"
-          >
-            <option value="">All Categories</option>
-            {CATEGORY_NAMES.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
         )}
       </div>
 

@@ -300,9 +300,15 @@ function mapLotForDetail(l) {
   };
 }
 
-export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, title = "Order Workbench · Auction Detail", initialQuery = "" }) {
+export default function AuctionSummaryTable({
+  data: lots,
+  bidderActivity = {},
+  title = "Order Workbench · Auction Detail",
+  categoryFilter = "",
+  onClearCategoryFilter,
+}) {
   const [open, setOpen] = useState(true);
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [bidderModalAuction, setBidderModalAuction] = useState(null);
@@ -313,6 +319,12 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let filtered = auctions.filter((r) => {
+      // categoryFilter is an EXACT match on the canonical category (set by
+      // navigating here from an Overview category click) — a real scoped
+      // filter, independent of the free-text search below, never blended
+      // into it. The free-text box still searches auction #/name/branch/
+      // category on top of that, same as before.
+      if (categoryFilter && r.category !== categoryFilter) return false;
       if (!q) return true;
       return (
         r.auctionNumber.toLowerCase().includes(q) ||
@@ -329,7 +341,7 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
       return sort.dir === "asc" ? cmp : -cmp;
     });
     return filtered;
-  }, [auctions, query, sort]);
+  }, [auctions, query, sort, categoryFilter]);
 
   // 10 auctions per page, client-side over the already-in-memory filtered/
   // sorted rows — no re-fetch per page. Any change to the filter or sort
@@ -370,6 +382,23 @@ export default function AuctionSummaryTable({ data: lots, bidderActivity = {}, t
 
       {open && (
         <div className="px-6 pb-5">
+          {categoryFilter && (
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center gap-1.5 bg-navySoft text-navy text-[13.5px] font-semibold rounded-lg pl-2.5 pr-1.5 h-7">
+                Category: {categoryFilter}
+                {onClearCategoryFilter && (
+                  <button
+                    type="button"
+                    onClick={onClearCategoryFilter}
+                    aria-label="Clear category filter"
+                    className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-navy/15"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
             <div className="flex items-center gap-2 bg-plane border border-gridline rounded-lg px-3 h-8 w-full sm:w-[260px]">
               <span className="text-muted text-[14.5px]">⌕</span>

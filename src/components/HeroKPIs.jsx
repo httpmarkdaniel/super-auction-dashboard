@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
 import AvgBidCategoryCard from "./primitives/AvgBidCategoryCard";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
-import AvgBidDrilldownModal from "./primitives/AvgBidDrilldownModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import { formatPeso } from "../utils/format";
@@ -43,36 +42,27 @@ const METHODOLOGY = {
     "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
 };
 
-export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "" }) {
+export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "", onSelectCategory }) {
   const {
     heroKPIs,
     unsoldLots,
     operationsDetail,
     auctionSummary,
     avgBidCategoryBreakdown,
-    avgBidCategoryAuctions,
     serviceIncomeLots,
     categoryBreakdown,
     branchBreakdown,
     comparison,
   } = overview;
   const [drilldown, setDrilldown] = useState(null);
-  const [localAvgBidCategory, setLocalAvgBidCategory] = useState("");
-  const [drilldownCategory, setDrilldownCategory] = useState("");
 
-  // Once the Overview-wide Category filter picks a specific category, the
-  // Avg Bid cards must reflect that same category — never a contradicting
-  // local choice (e.g. global=General Merchandise while a card still shows
-  // Vehicles and Automotive). The local selector only has a say while the
-  // global filter is "All Categories"; AvgBidCategoryCard hides/disables
-  // its own dropdown whenever locked is true.
-  const avgBidCategoryLocked = Boolean(globalCategory);
-  const avgBidCategory = avgBidCategoryLocked ? globalCategory : localAvgBidCategory;
-
-  function openAvgBidDrilldown(metric, category) {
-    setDrilldownCategory(category);
-    setDrilldown(metric);
-  }
+  // The Avg Bid cards no longer carry their own local category selector —
+  // they simply reflect the single Overview-wide Category filter
+  // (globalCategory, set in App.jsx's scope bar), so they can never show a
+  // category that contradicts it. Clicking a category row (All Categories
+  // state) or the KPI itself (specific-category state) navigates to Full
+  // Auction Detail via onSelectCategory — never a local modal.
+  const avgBidCategory = globalCategory;
 
   const lotsByAuction = useMemo(() => {
     const map = new Map();
@@ -95,16 +85,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
   const settledAuctionSummary = useMemo(
     () => auctionSummary.filter((a) => a.settledLotCount > 0),
     [auctionSummary],
-  );
-
-  // Avg Bid drilldowns' contributing-auction rows: scoped to the LOCAL
-  // category selector when a specific category was clicked (from either
-  // card's dropdown or one of the All-Categories breakdown rows), else the
-  // same broad settledAuctionSummary as before (now Category-labeled — see
-  // App.jsx's dominantCategoryByAuction).
-  const avgBidDrilldownRows = useMemo(
-    () => (drilldownCategory ? avgBidCategoryAuctions.filter((a) => a.category === drilldownCategory) : settledAuctionSummary),
-    [drilldownCategory, avgBidCategoryAuctions, settledAuctionSummary],
   );
 
   return (
@@ -139,9 +119,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             compareLabel={compareLabel}
             categoryBreakdown={avgBidCategoryBreakdown}
             category={avgBidCategory}
-            locked={avgBidCategoryLocked}
-            onCategoryChange={setLocalAvgBidCategory}
-            onClickCategory={(category) => openAvgBidDrilldown("avgBidPerAuction", category)}
+            onClickCategory={onSelectCategory}
           />
           <AvgBidCategoryCard
             icon={ICONS.target}
@@ -152,9 +130,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             compareLabel={compareLabel}
             categoryBreakdown={avgBidCategoryBreakdown}
             category={avgBidCategory}
-            locked={avgBidCategoryLocked}
-            onCategoryChange={setLocalAvgBidCategory}
-            onClickCategory={(category) => openAvgBidDrilldown("avgBidPerSoldLot", category)}
+            onClickCategory={onSelectCategory}
           />
         </div>
       </div>
@@ -238,24 +214,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         title="Auctions Concluded"
         subtitle={`${rangeLabel} · ${settledAuctionSummary.length} auctions contributed settled value`}
         rows={settledAuctionSummary}
-        lotsByAuction={lotsByAuction}
-      />
-      <AvgBidDrilldownModal
-        open={drilldown === "avgBidPerAuction"}
-        onClose={() => setDrilldown(null)}
-        metric="auction"
-        category={drilldownCategory}
-        rangeLabel={rangeLabel}
-        rows={avgBidDrilldownRows}
-        lotsByAuction={lotsByAuction}
-      />
-      <AvgBidDrilldownModal
-        open={drilldown === "avgBidPerSoldLot"}
-        onClose={() => setDrilldown(null)}
-        metric="soldLot"
-        category={drilldownCategory}
-        rangeLabel={rangeLabel}
-        rows={avgBidDrilldownRows}
         lotsByAuction={lotsByAuction}
       />
       <AuctionSummaryModal

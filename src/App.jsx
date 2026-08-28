@@ -84,7 +84,6 @@ const EMPTY_OVERVIEW = {
 
   categoryBreakdown: [],
   avgBidCategoryBreakdown: [],
-  avgBidCategoryAuctions: [],
   branchBreakdown: [],
   branchTally: [],
   categoryTally: [],
@@ -278,30 +277,14 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     };
   });
 
-  // Shared by auctionSummary and avgBidCategoryAuctions below — same
-  // per-auction Participating/Winning breakdowns api/leaderboards.js
-  // already computes, reused (not refetched) for both drilldowns.
+  // Shared by auctionSummary below — same per-auction Participating/
+  // Winning breakdowns api/leaderboards.js already computes, reused (not
+  // refetched) for the drilldown.
   const winningByAuction = new Map(
     (leaderboards.perAuctionComposition || []).map((a) => [a.auction_number, a]),
   );
   const participatingByAuction = new Map(
     (leaderboards.perAuctionBiddingActivity || []).map((a) => [a.auction_number, a]),
-  );
-
-  // Dominant category (by settled bid amount) per auction, derived from the
-  // same avg_bid_category_auctions rows — display-only context for the
-  // All-Categories Avg Bid drilldown's Category column (an auction can in
-  // principle span lots of more than one category; this names the one
-  // that actually moved the auction's settled total).
-  const topCategoryByAuction = new Map();
-  for (const row of kpis.avg_bid_category_auctions || []) {
-    const existing = topCategoryByAuction.get(row.auction_number);
-    if (!existing || Number(row.settled_bid_amount) > existing.amount) {
-      topCategoryByAuction.set(row.auction_number, { category: row.category, amount: Number(row.settled_bid_amount) });
-    }
-  }
-  const dominantCategoryByAuction = new Map(
-    [...topCategoryByAuction].map(([auctionNumber, v]) => [auctionNumber, v.category]),
   );
 
   const channelRows = categories.channels || [];
@@ -739,12 +722,6 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           startingTime: a.starting_time,
           type: a.type ?? null,
           subType: a.sub_type ?? null,
-          // Dominant category (by settled bid amount) among this auction's
-          // lots — display-only context for the All-Categories Avg Bid
-          // drilldown (section 9/10); settledBidAmount/settledLotCount
-          // below remain the FULL auction totals, never re-scoped to just
-          // this category. See avgBidCategoryAuctions/dominantCategoryByAuction.
-          category: dominantCategoryByAuction.get(a.auction_number) ?? null,
           lotsListed: Number(a.lots_listed) || 0,
           lotsSold: Number(a.lots_sold) || 0,
           lotsUnsold: Number(a.lots_unsold) || 0,
@@ -772,46 +749,6 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         };
       });
     })(),
-
-    // Auction-grain, per-category slice behind the Avg Bid cards' LOCAL
-    // category drilldown (section 9) — same per-auction bidder composition
-    // reuse as auctionSummary above, zero extra requests. Independent of
-    // the sidebar's global Category filter (see api/overview.js's AVG BID
-    // BY CATEGORY (AUCTION-LEVEL) query comment).
-    avgBidCategoryAuctions: (kpis.avg_bid_category_auctions || []).map((a) => {
-      const w = winningByAuction.get(a.auction_number) || {};
-      const p = participatingByAuction.get(a.auction_number) || {};
-      return {
-        auctionNumber: a.auction_number,
-        category: a.category,
-        name: a.name,
-        storeName: a.store_name,
-        startingTime: a.starting_time,
-        type: a.type ?? null,
-        subType: a.sub_type ?? null,
-        settledBidAmount: Number(a.settled_bid_amount) || 0,
-        settledLotCount: Number(a.settled_lot_count) || 0,
-        participating: {
-          total: Number(p.participating_bidders) || 0,
-          newBidders: Number(p.participating_new_bidders) || 0,
-          returningBidders: Number(p.participating_returning_bidders) || 0,
-          activity: Number(p.participating_bid_amount) || 0,
-          newActivity: Number(p.participating_new_bid_amount) || 0,
-          returningActivity: Number(p.participating_returning_bid_amount) || 0,
-        },
-        winning: {
-          total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),
-          newBidders: Number(w.new_bidders) || 0,
-          returningBidders: Number(w.returning_bidders) || 0,
-          amount:
-            (Number(w.new_bidders_bid_amount) || 0) +
-            (Number(w.returning_bidders_bid_amount) || 0) +
-            (Number(w.unclassified_bid_amount) || 0),
-          newAmount: Number(w.new_bidders_bid_amount) || 0,
-          returningAmount: (Number(w.returning_bidders_bid_amount) || 0) + (Number(w.unclassified_bid_amount) || 0),
-        },
-      };
-    }),
 
     avgBidCategoryBreakdown,
 
@@ -888,7 +825,6 @@ function OverviewTab({
   compareLabel,
   loading,
   error,
-  store,
   categoryOptions,
   selectedCategory,
   onCategoryChange,
@@ -913,23 +849,17 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Overview-level scope: Store/Date are set in the Topbar (shown here
-          read-only for context); Category is the one true Overview-wide
-          filter — changing it re-scopes every category-scopable metric
-          below (Total Bid Amount, Avg Bid cards, Bid Trend, Bidder
+      {/* The ONE Overview-wide Category filter — Store/Date already have
+          their own dedicated controls in the Topbar, so they're not
+          repeated here. Changing this re-scopes every category-scopable
+          metric below (Total Bid Amount, Avg Bid cards, Bid Trend, Bidder
           Composition, Bid Value by Category & Branch, Top Vendors &
-          Bidders), while Registration → Bidder stays global by design (its
-          source mart has no category dimension). This is the ONLY Category
-          control on Overview — the Avg Bid cards' own local selector
-          (HeroKPIs) defers to it once a specific category is chosen here. */}
+          Bidders); Registration → Bidder stays global by design (its
+          source mart has no category dimension). The Avg Bid cards have no
+          selector of their own — they simply reflect this value. */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
-        <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Overview Scope</span>
+        <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Category</span>
         <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
-          <span className="text-muted font-medium">Store</span>
-          <span className="font-semibold text-ink">{store}</span>
-        </div>
-        <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
-          <span className="text-muted font-medium">Category</span>
           <select
             value={selectedCategory}
             onChange={(e) => onCategoryChange(e.target.value)}
@@ -942,10 +872,6 @@ function OverviewTab({
               </option>
             ))}
           </select>
-        </div>
-        <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
-          <span className="text-muted font-medium">Date</span>
-          <span className="font-semibold text-ink">{rangeLabel}</span>
         </div>
       </div>
 
@@ -967,6 +893,7 @@ function OverviewTab({
           rangeLabel={rangeLabel}
           compareLabel={compareLabel}
           globalCategory={selectedCategory}
+          onSelectCategory={onSelectCategory}
         />
       </div>
 
@@ -1081,12 +1008,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] =
     useState(false);
 
-  // Pre-applied Full Auction Detail search text when arriving from an
-  // Overview category click (see AuctionSummaryTable's own free-text
-  // "auction #, name, branch, or category" filter — reused as-is rather
-  // than building a second, parallel category-filter mechanism). Cleared
-  // whenever the user navigates to Full Auction Detail any other way.
-  const [fadInitialQuery, setFadInitialQuery] = useState("");
+  // Full Auction Detail's own category scope, set when arriving from an
+  // Overview category click (an exact-match filter on the canonical
+  // category — see AuctionSummaryTable's categoryFilter, distinct from its
+  // free-text search). Cleared whenever the user navigates to Full Auction
+  // Detail any other way, or clears it explicitly there.
+  const [fadCategory, setFadCategory] = useState("");
 
   const contentRef = useRef(null);
 
@@ -1099,17 +1026,17 @@ export default function App() {
   }
 
   // Branch click: reuse the existing global Store filter — Full Auction
-  // Detail already scopes by it. Category click: pre-fill the existing
-  // free-text search with the canonical category name. Both preserve the
-  // currently selected global date range (untouched) and land on Full
-  // Auction Detail, never a duplicate page.
+  // Detail already scopes by it. Category click: set Full Auction Detail's
+  // own category scope (exact match, not a free-text search). Both
+  // preserve the currently selected global date range (untouched) and land
+  // on Full Auction Detail, never a duplicate page.
   function goToFullAuctionDetailForBranch(branch) {
     setStore(branch);
-    setFadInitialQuery("");
+    setFadCategory("");
     setTab("Full Auction Detail");
   }
   function goToFullAuctionDetailForCategory(category) {
-    setFadInitialQuery(category);
+    setFadCategory(category);
     setTab("Full Auction Detail");
   }
 
@@ -1234,7 +1161,6 @@ export default function App() {
               overview={overview}
               rangeLabel={rangeLabel}
               compareLabel={compareLabel}
-              store={store}
               loading={overviewLoading}
               error={overviewError}
               categoryOptions={CATEGORY_TABS}
@@ -1309,7 +1235,8 @@ export default function App() {
               dateRange={dateRange}
               rangeLabel={rangeLabel}
               refreshNonce={refreshNonce}
-              initialQuery={fadInitialQuery}
+              category={fadCategory}
+              onClearCategory={() => setFadCategory("")}
             />
           )}
 
