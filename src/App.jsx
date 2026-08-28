@@ -83,6 +83,8 @@ const EMPTY_OVERVIEW = {
   },
 
   categoryBreakdown: [],
+  avgBidCategoryBreakdown: [],
+  avgBidCategoryAuctions: [],
   branchBreakdown: [],
   branchTally: [],
   categoryTally: [],
@@ -235,6 +237,72 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       ),
       ...withHoverDetail(c),
     }));
+
+  // Avg Bid / Auction and Avg Bid / Sold Lot cards' own local category
+  // breakdown — every canonical category always present (null-filled when
+  // a category had zero settled results this period, never a fabricated
+  // ₱0 average — see api/overview.js's settledCategoryResult, which is
+  // independent of the sidebar's global Category filter by design).
+  const avgBidCategoryMap = new Map(categoryRows.map((c) => [c.category, c]));
+  const avgBidCategoryPrevMap = new Map(
+    (kpis.comparison?.categories || []).map((c) => [c.category, c]),
+  );
+  function pctChangeSafe(curr, prev) {
+    return curr != null && prev != null && prev > 0 ? ((curr - prev) / prev) * 100 : null;
+  }
+  const avgBidCategoryBreakdown = CATEGORY_TABS.map((name) => {
+    const row = avgBidCategoryMap.get(name);
+    const bidAmount = row ? Number(row.bid_amount) || 0 : 0;
+    const auctionCount = row ? Number(row.auction_count) || 0 : 0;
+    const lotsSold = row ? Number(row.lots_sold) || 0 : 0;
+    const avgBidPerAuction = auctionCount > 0 ? bidAmount / auctionCount : null;
+    const avgBidPerSoldLot = lotsSold > 0 ? bidAmount / lotsSold : null;
+
+    const prevRow = avgBidCategoryPrevMap.get(name);
+    const prevBidAmount = prevRow ? Number(prevRow.bid_amount) || 0 : 0;
+    const prevAuctionCount = prevRow ? Number(prevRow.auction_count) || 0 : 0;
+    const prevLotsSold = prevRow ? Number(prevRow.lots_sold) || 0 : 0;
+    const prevAvgBidPerAuction = prevAuctionCount > 0 ? prevBidAmount / prevAuctionCount : null;
+    const prevAvgBidPerSoldLot = prevLotsSold > 0 ? prevBidAmount / prevLotsSold : null;
+
+    return {
+      category: name,
+      hasData: auctionCount > 0,
+      bidAmount,
+      auctionCount,
+      lotsSold,
+      avgBidPerAuction,
+      avgBidPerSoldLot,
+      avgBidPerAuctionPct: pctChangeSafe(avgBidPerAuction, prevAvgBidPerAuction),
+      avgBidPerSoldLotPct: pctChangeSafe(avgBidPerSoldLot, prevAvgBidPerSoldLot),
+    };
+  });
+
+  // Shared by auctionSummary and avgBidCategoryAuctions below — same
+  // per-auction Participating/Winning breakdowns api/leaderboards.js
+  // already computes, reused (not refetched) for both drilldowns.
+  const winningByAuction = new Map(
+    (leaderboards.perAuctionComposition || []).map((a) => [a.auction_number, a]),
+  );
+  const participatingByAuction = new Map(
+    (leaderboards.perAuctionBiddingActivity || []).map((a) => [a.auction_number, a]),
+  );
+
+  // Dominant category (by settled bid amount) per auction, derived from the
+  // same avg_bid_category_auctions rows — display-only context for the
+  // All-Categories Avg Bid drilldown's Category column (an auction can in
+  // principle span lots of more than one category; this names the one
+  // that actually moved the auction's settled total).
+  const topCategoryByAuction = new Map();
+  for (const row of kpis.avg_bid_category_auctions || []) {
+    const existing = topCategoryByAuction.get(row.auction_number);
+    if (!existing || Number(row.settled_bid_amount) > existing.amount) {
+      topCategoryByAuction.set(row.auction_number, { category: row.category, amount: Number(row.settled_bid_amount) });
+    }
+  }
+  const dominantCategoryByAuction = new Map(
+    [...topCategoryByAuction].map(([auctionNumber, v]) => [auctionNumber, v.category]),
+  );
 
   const channelRows = categories.channels || [];
 
@@ -661,12 +729,6 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // Concluded drilldown's per-auction bidder composition costs zero
     // extra requests.
     auctionSummary: (() => {
-      const winningByAuction = new Map(
-        (leaderboards.perAuctionComposition || []).map((a) => [a.auction_number, a]),
-      );
-      const participatingByAuction = new Map(
-        (leaderboards.perAuctionBiddingActivity || []).map((a) => [a.auction_number, a]),
-      );
       return (kpis.auction_summary || []).map((a) => {
         const w = winningByAuction.get(a.auction_number) || {};
         const p = participatingByAuction.get(a.auction_number) || {};
@@ -677,6 +739,12 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           startingTime: a.starting_time,
           type: a.type ?? null,
           subType: a.sub_type ?? null,
+          // Dominant category (by settled bid amount) among this auction's
+          // lots — display-only context for the All-Categories Avg Bid
+          // drilldown (section 9/10); settledBidAmount/settledLotCount
+          // below remain the FULL auction totals, never re-scoped to just
+          // this category. See avgBidCategoryAuctions/dominantCategoryByAuction.
+          category: dominantCategoryByAuction.get(a.auction_number) ?? null,
           lotsListed: Number(a.lots_listed) || 0,
           lotsSold: Number(a.lots_sold) || 0,
           lotsUnsold: Number(a.lots_unsold) || 0,
@@ -704,6 +772,48 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         };
       });
     })(),
+
+    // Auction-grain, per-category slice behind the Avg Bid cards' LOCAL
+    // category drilldown (section 9) — same per-auction bidder composition
+    // reuse as auctionSummary above, zero extra requests. Independent of
+    // the sidebar's global Category filter (see api/overview.js's AVG BID
+    // BY CATEGORY (AUCTION-LEVEL) query comment).
+    avgBidCategoryAuctions: (kpis.avg_bid_category_auctions || []).map((a) => {
+      const w = winningByAuction.get(a.auction_number) || {};
+      const p = participatingByAuction.get(a.auction_number) || {};
+      return {
+        auctionNumber: a.auction_number,
+        category: a.category,
+        name: a.name,
+        storeName: a.store_name,
+        startingTime: a.starting_time,
+        type: a.type ?? null,
+        subType: a.sub_type ?? null,
+        settledBidAmount: Number(a.settled_bid_amount) || 0,
+        settledLotCount: Number(a.settled_lot_count) || 0,
+        participating: {
+          total: Number(p.participating_bidders) || 0,
+          newBidders: Number(p.participating_new_bidders) || 0,
+          returningBidders: Number(p.participating_returning_bidders) || 0,
+          activity: Number(p.participating_bid_amount) || 0,
+          newActivity: Number(p.participating_new_bid_amount) || 0,
+          returningActivity: Number(p.participating_returning_bid_amount) || 0,
+        },
+        winning: {
+          total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),
+          newBidders: Number(w.new_bidders) || 0,
+          returningBidders: Number(w.returning_bidders) || 0,
+          amount:
+            (Number(w.new_bidders_bid_amount) || 0) +
+            (Number(w.returning_bidders_bid_amount) || 0) +
+            (Number(w.unclassified_bid_amount) || 0),
+          newAmount: Number(w.new_bidders_bid_amount) || 0,
+          returningAmount: (Number(w.returning_bidders_bid_amount) || 0) + (Number(w.unclassified_bid_amount) || 0),
+        },
+      };
+    }),
+
+    avgBidCategoryBreakdown,
 
     bidTrend: kpis.bid_trend || [],
 

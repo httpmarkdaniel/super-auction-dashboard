@@ -1337,6 +1337,91 @@ export default async function handler(req, res) {
     const auctionSummaryRows = await auctionSummaryResult.json();
 
     // ---------------------------------------------------------
+    // AVG BID BY CATEGORY (AUCTION-LEVEL) — powers the Overview Avg Bid /
+    // Auction and Avg Bid / Sold Lot cards' own LOCAL category selector.
+    // Same settled population/grain as AUCTION-LEVEL SUMMARY above
+    // (Paid/Released, auction_number + lot_number, same Date/Store scope),
+    // but grouped by (auction_number, canonical category) instead of
+    // collapsed to one row per auction, and deliberately NOT constrained by
+    // the sidebar's {category:String} filter — same independence as
+    // settledCategoryResult's Category Breakdown below. The LOCAL selector
+    // is a second, independent slice of the same Date/Store scope, never
+    // the sidebar's global Category filter. One bounded query covering all
+    // four categories — never one query per category (no N+1).
+    // ---------------------------------------------------------
+    const avgBidCategoryAuctionResult = await client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT
+            auction_number,
+            any(name) AS auction_name,
+            any(store_name) AS auction_store_name,
+            any(starting_time) AS auction_starting_time,
+            any(sub_type) AS auction_sub_type
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+          GROUP BY auction_number
+        ),
+
+        auction_type AS (
+          SELECT auction_number, any(type) AS auction_type
+          FROM xv3.auctions
+          WHERE auction_number IS NOT NULL
+          GROUP BY auction_number
+        ),
+
+        lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+            any(v.bid_amount) AS bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY v.auction_number, v.lot_number
+        )
+
+        SELECT
+          l.auction_number AS auction_number,
+          l.lot_category AS category,
+          any(a.auction_name) AS name,
+          any(a.auction_store_name) AS store_name,
+          any(a.auction_starting_time) AS starting_time,
+          any(a.auction_sub_type) AS sub_type,
+          any(at.auction_type) AS type,
+
+          sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
+          countIf(status IN ('Paid', 'Released')) AS settled_lot_count
+
+        FROM lots l
+
+        INNER JOIN selected_auctions a
+          ON l.auction_number = a.auction_number
+
+        LEFT JOIN auction_type at
+          ON l.auction_number = at.auction_number
+
+        GROUP BY l.auction_number, l.lot_category
+        HAVING settled_lot_count > 0
+        ORDER BY settled_bid_amount DESC
+      `,
+      query_params: { from, to, store },
+      format: "JSONEachRow",
+    });
+
+    const avgBidCategoryAuctionRows = await avgBidCategoryAuctionResult.json();
+
+    // ---------------------------------------------------------
     // BID TREND — always daily, one point per calendar day in range.
     //
     // WINNING side: same settled_lots population as Total Bid Amount,
@@ -2898,7 +2983,7 @@ export default async function handler(req, res) {
     if (compareFrom && compareTo) {
       const compareParams = { from: compareFrom, to: compareTo, store, category };
 
-      const [cmpSettledResult, cmpLotStatusResult, cmpServiceIncomeResult, cmpRegistrationResult] = await Promise.all([
+      const [cmpSettledResult, cmpLotStatusResult, cmpServiceIncomeResult, cmpRegistrationResult, cmpCategoryResult] = await Promise.all([
         client.query({
           query: `
             WITH selected_auctions AS (
@@ -3011,12 +3096,50 @@ export default async function handler(req, res) {
           query_params: compareParams,
           format: "JSONEachRow",
         }),
+        // Previous-period counterpart of settledCategoryResult below — same
+        // Date/Store scope shifted to [compareFrom, compareTo], same
+        // deliberate independence from the sidebar's {category:String}
+        // filter, powering the Avg Bid cards' per-category comparison
+        // (section 6/7) with the SAME category on both sides, never the
+        // blended All-Categories previous value.
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(v.bid_amount) AS lot_bid_amount,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+            )
+            SELECT
+              category,
+              sum(ifNull(lot_bid_amount, 0)) AS bid_amount,
+              countDistinct(auction_number) AS auction_count,
+              count() AS lots_sold
+            FROM settled_lots
+            GROUP BY category
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
       ]);
 
       const cmpSettled = (await cmpSettledResult.json())[0] ?? {};
       const cmpLotStatus = (await cmpLotStatusResult.json())[0] ?? {};
       const cmpServiceIncome = (await cmpServiceIncomeResult.json())[0] ?? {};
       const cmpRegistration = (await cmpRegistrationResult.json())[0] ?? {};
+      const cmpCategoryRows = await cmpCategoryResult.json();
 
       const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
       const cmpAuctionsConcluded = Number(cmpSettled.auctions_concluded ?? 0);
@@ -3059,6 +3182,18 @@ export default async function handler(req, res) {
           registeredCustomers > 0 ? (participatingRegisteredBidders / registeredCustomers) * 100 : null,
           cmpRegistered > 0 ? (cmpParticipatingRegistered / cmpRegistered) * 100 : null,
         ),
+
+        // Previous-period category-level Avg Bid aggregates — same shape as
+        // the top-level `categories` field below, one row per canonical
+        // category that had settled activity in [compareFrom, compareTo].
+        // A category absent here had zero settled results last period
+        // (safe division downstream, never a fabricated ₱0 average).
+        categories: cmpCategoryRows.map((row) => ({
+          category: row.category,
+          bid_amount: Number(row.bid_amount ?? 0),
+          auction_count: Number(row.auction_count ?? 0),
+          lots_sold: Number(row.lots_sold ?? 0),
+        })),
       };
     }
 
@@ -3145,6 +3280,22 @@ export default async function handler(req, res) {
         lots_listed: Number(row.lots_listed ?? 0),
         lots_sold: Number(row.lots_sold ?? 0),
         lots_unsold: Number(row.lots_unsold ?? 0),
+        settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+        settled_lot_count: Number(row.settled_lot_count ?? 0),
+      })),
+
+      // Auction-grain, per-category slice of the same settled population as
+      // auction_summary above — see AVG BID BY CATEGORY (AUCTION-LEVEL)
+      // query comment above. Powers the Avg Bid cards' local category
+      // drilldown; independent of the sidebar's Category filter.
+      avg_bid_category_auctions: avgBidCategoryAuctionRows.map((row) => ({
+        auction_number: row.auction_number,
+        category: row.category,
+        name: row.name,
+        store_name: row.store_name,
+        starting_time: row.starting_time,
+        type: row.type ?? null,
+        sub_type: row.sub_type ?? null,
         settled_bid_amount: Number(row.settled_bid_amount ?? 0),
         settled_lot_count: Number(row.settled_lot_count ?? 0),
       })),

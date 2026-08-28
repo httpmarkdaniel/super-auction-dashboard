@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
+import AvgBidCategoryCard from "./primitives/AvgBidCategoryCard";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import AvgBidDrilldownModal from "./primitives/AvgBidDrilldownModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
@@ -43,8 +44,26 @@ const METHODOLOGY = {
 };
 
 export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel }) {
-  const { heroKPIs, unsoldLots, operationsDetail, auctionSummary, serviceIncomeLots, categoryBreakdown, branchBreakdown, comparison } = overview;
+  const {
+    heroKPIs,
+    unsoldLots,
+    operationsDetail,
+    auctionSummary,
+    avgBidCategoryBreakdown,
+    avgBidCategoryAuctions,
+    serviceIncomeLots,
+    categoryBreakdown,
+    branchBreakdown,
+    comparison,
+  } = overview;
   const [drilldown, setDrilldown] = useState(null);
+  const [avgBidCategory, setAvgBidCategory] = useState("");
+  const [drilldownCategory, setDrilldownCategory] = useState("");
+
+  function openAvgBidDrilldown(metric, category) {
+    setDrilldownCategory(category);
+    setDrilldown(metric);
+  }
 
   const lotsByAuction = useMemo(() => {
     const map = new Map();
@@ -67,6 +86,16 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
   const settledAuctionSummary = useMemo(
     () => auctionSummary.filter((a) => a.settledLotCount > 0),
     [auctionSummary],
+  );
+
+  // Avg Bid drilldowns' contributing-auction rows: scoped to the LOCAL
+  // category selector when a specific category was clicked (from either
+  // card's dropdown or one of the All-Categories breakdown rows), else the
+  // same broad settledAuctionSummary as before (now Category-labeled — see
+  // App.jsx's dominantCategoryByAuction).
+  const avgBidDrilldownRows = useMemo(
+    () => (drilldownCategory ? avgBidCategoryAuctions.filter((a) => a.category === drilldownCategory) : settledAuctionSummary),
+    [drilldownCategory, avgBidCategoryAuctions, settledAuctionSummary],
   );
 
   return (
@@ -92,21 +121,29 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
             onClick={() => setDrilldown("auctionsConcluded")}
             extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.auctions_concluded_pct }] : []}
           />
-          <StatTile
+          <AvgBidCategoryCard
             icon={ICONS.chart}
             eyebrow="Avg Bid / Auction"
-            value={heroKPIs.avgBidPerAuction != null ? formatPeso(heroKPIs.avgBidPerAuction) : "—"}
+            metric="auction"
             methodology={METHODOLOGY.avgBidPerAuction}
-            onClick={() => setDrilldown("avgBidPerAuction")}
-            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.avg_bid_per_auction_pct }] : []}
+            rangeLabel={rangeLabel}
+            compareLabel={compareLabel}
+            categoryBreakdown={avgBidCategoryBreakdown}
+            category={avgBidCategory}
+            onCategoryChange={setAvgBidCategory}
+            onClickCategory={(category) => openAvgBidDrilldown("avgBidPerAuction", category)}
           />
-          <StatTile
+          <AvgBidCategoryCard
             icon={ICONS.target}
             eyebrow="Avg Bid / Sold Lot"
-            value={heroKPIs.avgBidPerSoldLot != null ? formatPeso(heroKPIs.avgBidPerSoldLot) : "—"}
+            metric="soldLot"
             methodology={METHODOLOGY.avgBidPerSoldLot}
-            onClick={() => setDrilldown("avgBidPerSoldLot")}
-            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.avg_bid_per_sold_lot_pct }] : []}
+            rangeLabel={rangeLabel}
+            compareLabel={compareLabel}
+            categoryBreakdown={avgBidCategoryBreakdown}
+            category={avgBidCategory}
+            onCategoryChange={setAvgBidCategory}
+            onClickCategory={(category) => openAvgBidDrilldown("avgBidPerSoldLot", category)}
           />
         </div>
       </div>
@@ -195,16 +232,18 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel 
         open={drilldown === "avgBidPerAuction"}
         onClose={() => setDrilldown(null)}
         metric="auction"
+        category={drilldownCategory}
         rangeLabel={rangeLabel}
-        rows={settledAuctionSummary}
+        rows={avgBidDrilldownRows}
         lotsByAuction={lotsByAuction}
       />
       <AvgBidDrilldownModal
         open={drilldown === "avgBidPerSoldLot"}
         onClose={() => setDrilldown(null)}
         metric="soldLot"
+        category={drilldownCategory}
         rangeLabel={rangeLabel}
-        rows={settledAuctionSummary}
+        rows={avgBidDrilldownRows}
         lotsByAuction={lotsByAuction}
       />
       <AuctionSummaryModal

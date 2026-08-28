@@ -25,7 +25,7 @@ function formatManila(iso) {
 // auctions) rather than trusting a separately-passed KPI figure, so the
 // on-screen formula always reconciles to the rows shown below it by
 // construction. No extra request — rows were already fetched once.
-export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel, rows, lotsByAuction }) {
+export default function AvgBidDrilldownModal({ open, onClose, metric, category = "", rangeLabel, rows, lotsByAuction }) {
   const [expanded, setExpanded] = useState(null);
   const [page, setPage] = useState(0);
 
@@ -53,8 +53,13 @@ export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel
   }
 
   const isAuctionMetric = metric === "auction";
-  const title = isAuctionMetric ? "Avg Bid / Auction · Contributing Auctions" : "Avg Bid / Sold Lot · Contributing Auctions";
-  const subtitle = `${rangeLabel} · ${totals.auctionsCount} auctions contributed settled value`;
+  const baseTitle = isAuctionMetric ? "Avg Bid / Auction · Contributing Auctions" : "Avg Bid / Sold Lot · Contributing Auctions";
+  const title = category ? `${baseTitle} · ${category}` : baseTitle;
+  const subtitle = category
+    ? `${category} · ${rangeLabel} · ${totals.auctionsCount} auctions contributed settled value`
+    : `${rangeLabel} · ${totals.auctionsCount} auctions contributed settled value`;
+  const showCategoryColumn = !category;
+  const columnCount = showCategoryColumn ? 9 : 8;
 
   return (
     <Modal open={open} onClose={onClose} title={title} subtitle={subtitle}>
@@ -91,6 +96,7 @@ export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel
               <th className="text-left font-medium pb-2 pr-4">Name</th>
               <th className="text-left font-medium pb-2 pr-4">Type</th>
               <th className="text-left font-medium pb-2 pr-4">Sub Type</th>
+              {showCategoryColumn && <th className="text-left font-medium pb-2 pr-4">Category</th>}
               <th className="text-right font-medium pb-2 pr-4">Lots Sold</th>
               <th className="text-right font-medium pb-2 pr-4">Total Bid Amount</th>
               <th className="text-right font-medium pb-2 text-navy">
@@ -115,7 +121,8 @@ export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel
                     <td className="py-2 pr-4 text-ink max-w-[200px] truncate" title={r.name}>{r.name || "—"}</td>
                     <td className="py-2 pr-4 text-ink">{r.type || "—"}</td>
                     <td className="py-2 pr-4 text-ink">{r.subType || "—"}</td>
-                    <td className="py-2 pr-4 text-right tabular text-ink">{r.lotsSold}</td>
+                    {showCategoryColumn && <td className="py-2 pr-4 text-ink">{r.category || "—"}</td>}
+                    <td className="py-2 pr-4 text-right tabular text-ink">{r.lotsSold ?? r.settledLotCount}</td>
                     <td className="py-2 pr-4 text-right tabular text-ink">{formatPeso(r.settledBidAmount)}</td>
                     <td className="py-2 text-right tabular text-navy font-semibold">
                       {isAuctionMetric
@@ -125,7 +132,7 @@ export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel
                   </tr>
                   {isOpen && (
                     <tr key={`${r.auctionNumber}-detail`} className="border-t border-gridline">
-                      <td colSpan={8} className="py-3 pl-4 bg-plane">
+                      <td colSpan={columnCount} className="py-3 pl-4 bg-plane">
                         <div className="text-[13px] text-muted mb-2">
                           {r.auctionNumber} · {formatManila(r.startingTime)}
                         </div>
@@ -142,8 +149,8 @@ export default function AvgBidDrilldownModal({ open, onClose, metric, rangeLabel
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-muted text-[14.5px]">
-                  No auctions contributed to this KPI in the selected scope.
+                <td colSpan={columnCount} className="py-6 text-center text-muted text-[14.5px]">
+                  {category ? `No settled results for ${category} in the selected scope.` : "No auctions contributed to this KPI in the selected scope."}
                 </td>
               </tr>
             )}
