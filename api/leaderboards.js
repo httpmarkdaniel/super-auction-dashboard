@@ -411,6 +411,13 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // Safety net, not the primary fix (that's the serialized execution
+      // below) — spills aggregation state to disk instead of growing
+      // memory unbounded if a scope ever pushes this well past its normal
+      // ~350-490MB peak. Same correct result, just slower on the rare
+      // scope that needs it. Set above observed normal peak so it doesn't
+      // trigger on typical requests.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
     // Per-auction breakdown of the same settled/bridge classification —
@@ -509,6 +516,8 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // See settledCompositionQuery's identical comment above.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
     // =========================================================
@@ -663,6 +672,8 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // See settledCompositionQuery's identical comment above.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
     // =========================================================
@@ -867,25 +878,59 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
+      // See settledCompositionQuery's identical comment above — this is
+      // the heaviest of the 7 by rows read (~19M, an unscoped bid_history
+      // scan for bidder_first_competitive).
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
-    const [
-      compositionResult,
-      perAuctionResult,
-      settledCompositionResult,
-      settledPerAuctionResult,
-      perAuctionParticipatingUnionResult,
-      settledVendorsResult,
-      settledBiddersResult,
-    ] = await Promise.all([
+    // ---------------------------------------------------------
+    // PRODUCTION INCIDENT (2026-08-28): all 7 queries used to run via one
+    // Promise.all. Investigated system.query_log around a real "(total)
+    // memory limit exceeded ... While executing AggregatingTransform"
+    // production failure and found:
+    //
+    // - 4 of the 7 queries (settledCompositionQuery, settledPerAuctionQuery,
+    //   perAuctionParticipatingUnionQuery, settledBiddersQuery) each touch
+    //   either the full BIDDER_IDENTITY_CTES bridge (postings + payments +
+    //   customers + cms_bidder_registrations, plus two unscoped all-history
+    //   scans for first-ever-participation) or an equivalent partial bridge
+    //   — every one of them reads ~19M rows (an unscoped scan of
+    //   cms.mart_cms_bid_history_report) and peaks at roughly 350-510MB of
+    //   its own, per repeated measurement against system.query_log.
+    // - The other 3 (compositionQuery, perAuctionQuery, settledVendorsQuery)
+    //   are far lighter: 30-150MB peak, no identity bridge or a much
+    //   smaller one.
+    // - The failing requests themselves were NOT the dominant memory
+    //   consumer at the time: system.query_log shows a separate, unrelated
+    //   Superset workload sharing this ClickHouse instance firing batches
+    //   of 4-5 concurrent queries at 3-12.5GB each in the same 1-2 second
+    //   windows as our failures (e.g. one Superset query alone used 12.52
+    //   GiB). That's the primary reason the server's total RSS was already
+    //   near the 28.21 GiB ceiling — outside this application's control.
+    //   But our own 4 heavy queries running concurrently (up to ~2GB
+    //   combined peak) was real, avoidable added pressure on an
+    //   already-strained shared server, and is the one thing this endpoint
+    //   can control. Bounding it here is a legitimate reliability
+    //   improvement regardless of what else is sharing the instance.
+    //
+    // FIX: light queries stay concurrent (their combined peak is small and
+    // safe); the 4 heavy queries are serialized so this endpoint never adds
+    // more than ONE heavy query's peak (~500MB) to shared server memory at
+    // any instant, instead of up to ~2GB from all 4 at once. Trades some
+    // latency (heavy queries no longer overlap) for materially lower peak
+    // memory — see the reliability-over-speed instruction this responds to.
+    // ---------------------------------------------------------
+    const [compositionResult, perAuctionResult, settledVendorsResult] = await Promise.all([
       client.query(compositionQuery),
       client.query(perAuctionQuery),
-      client.query(settledCompositionQuery),
-      client.query(settledPerAuctionQuery),
-      client.query(perAuctionParticipatingUnionQuery),
       client.query(settledVendorsQuery),
-      client.query(settledBiddersQuery),
     ]);
+
+    const settledCompositionResult = await client.query(settledCompositionQuery);
+    const settledPerAuctionResult = await client.query(settledPerAuctionQuery);
+    const perAuctionParticipatingUnionResult = await client.query(perAuctionParticipatingUnionQuery);
+    const settledBiddersResult = await client.query(settledBiddersQuery);
 
     const [
       compositionRows,
