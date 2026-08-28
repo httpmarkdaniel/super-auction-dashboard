@@ -19,11 +19,11 @@
   /* Scorecard/KPI title typography — deliberately NOT .eyebrow's condensed
      display font/all-caps/tracking treatment (that's reserved for section/
      table headings). Normal UI sans, dark (same primary text color as
-     everywhere else — no gray), title case as authored, semibold, compact.
-     Hierarchy comes from scale/weight against the KPI value below it, not
-     from a different typeface or color. */
+     everywhere else — no gray), title case as authored, regular weight,
+     compact. Hierarchy comes from weight/scale against the bold KPI value
+     below it, not from the title's own typeface, color, or weight. */
   .kpi-label {
-    @apply text-[13px] font-sans font-semibold text-ink;
+    @apply text-[13px] font-sans font-normal text-ink;
   }
   /* BOPIS card language: flat white, thin border, soft shadow, no colored
      top rule — one shared look for cards, tiles, and floating overlays. */
