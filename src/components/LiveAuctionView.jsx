@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLiveAuctionEvents, useAuctionLotDetail } from "../useOnlineBidding";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 import { formatManila, isEndingSoon } from "../utils/manilaTime";
+import { buildAuctionActivityEvents } from "../utils/auctionActivityEvents";
 import { ALL_STORES } from "../mockData";
 import StorySection from "./primitives/StorySection";
 import BidActivityBar from "./primitives/BidActivityBar";
@@ -186,6 +187,22 @@ function LotRow({ lot, auction }) {
 function DetailedLotsSection({ auctionNumber }) {
   const { auction, lots, loading, error } = useAuctionLotDetail(auctionNumber);
 
+  // Real auction-wide activity events — built entirely from the lots
+  // already fetched above (each lot's own bid_events), never a second
+  // request. See src/utils/auctionActivityEvents.js for exactly which
+  // event types this data actually supports.
+  const activityEvents = useMemo(
+    () =>
+      auction
+        ? buildAuctionActivityEvents({
+            lots,
+            timelineStart: auction.timeline_start,
+            endingTime: auction.ending_time,
+          })
+        : null,
+    [auction, lots],
+  );
+
   if (error) {
     return <div className="text-center text-toneRedText text-[15.5px] py-4">Couldn't load lot detail: {error}</div>;
   }
@@ -195,13 +212,26 @@ function DetailedLotsSection({ auctionNumber }) {
   if (!auction) return null;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-      {lots.map((lot) => (
-        <LotRow key={lot.lot_number} lot={lot} auction={auction} />
-      ))}
-      {lots.length === 0 && !loading && (
-        <div className="text-center text-ink text-[15.5px] py-8 lg:col-span-2">No lots found for this auction.</div>
-      )}
+    <div className="mt-4">
+      <div className="mb-4">
+        <div className="text-muted text-[13.5px] mb-1.5">Auction Timeline &amp; Activity</div>
+        <AuctionProgressBar
+          auctionNumber={auction.auction_number}
+          auctionName={auction.name}
+          timelineStart={auction.timeline_start}
+          officialStartTime={auction.starting_time}
+          endingTime={auction.ending_time}
+          activityEvents={activityEvents}
+        />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {lots.map((lot) => (
+          <LotRow key={lot.lot_number} lot={lot} auction={auction} />
+        ))}
+        {lots.length === 0 && !loading && (
+          <div className="text-center text-ink text-[15.5px] py-8 lg:col-span-2">No lots found for this auction.</div>
+        )}
+      </div>
     </div>
   );
 }
