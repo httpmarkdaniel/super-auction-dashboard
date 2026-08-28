@@ -930,7 +930,7 @@ export default async function handler(req, res) {
     // Same latest-per-lot definition as TOTAL BID AMOUNT above — see that
     // comment for why sum(bid_amount) across events is the wrong metric.
     // ---------------------------------------------------------
-    const todayBidResult = await client.query({
+    const todayBidResultPromise = client.query({
       query: `
     WITH auction_store AS (
       SELECT DISTINCT
@@ -1006,242 +1006,12 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const todayBidRows = await todayBidResult.json();
-    const todayBid = todayBidRows[0] ?? {};
-
-    const todayManila = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Manila",
-    }).format(new Date());
-
     // ---------------------------------------------------------
-    // TOTAL BID AMOUNT (SETTLED) — the business definition of
-    // "Total Bid Amount" going forward.
-    //
-    // Population: xv3.mart_auction_vendor_analysis, status IN ('Paid',
-    // 'Released') only — a lot that's still being bid on, or won but not
-    // yet paid/released, does not count. Authoritative amount field is
-    // bid_amount (the hammer price) — NOT sold_price, which is bid_amount
-    // + buyer's premium (confirmed against real rows: sold_price =
-    // bid_amount * 1.15 exactly matching each row's own buyers_premium
-    // field). sold_price already belongs to Service Income, a separate
-    // metric — using it here would double-count the premium.
-    //
-    // vendor_analysis fans out one row per item_barcode within a lot, all
-    // sharing the same bid_amount — deduped via GROUP BY auction_number,
-    // lot_number + any() (verified: 97.4% of duplicate-key rows agree on
-    // every value; the rest only disagree on status mid-transition).
-    //
-    // Scoped by the auction's starting_time (same convention as the
-    // "lots"/sold_lots queries elsewhere in this file), not by any
-    // settlement-timestamp field on vendor_analysis — those fields
-    // (date_time_paid/released_date) are populated for only ~60-87% of
-    // rows, whereas starting_time via productivity_report covers ~100%
-    // of rows that have a real auction_number.
-    // ---------------------------------------------------------
-    const settledTotalResult = await client.query({
-      query: `
-        WITH selected_auctions AS (
-          SELECT DISTINCT
-            auction_number,
-            store_name
-          FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-            AND (
-              {store:String} = ''
-              OR store_name = {store:String}
-            )
-        ),
-
-        settled_lots AS (
-          SELECT
-            v.auction_number AS auction_number,
-            v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount,
-            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
-
-          FROM xv3.mart_auction_vendor_analysis v
-
-          INNER JOIN selected_auctions a
-            ON v.auction_number = a.auction_number
-
-          WHERE v.status IN ('Paid', 'Released')
-            AND v.auction_number IS NOT NULL
-            AND v.lot_number IS NOT NULL
-
-          GROUP BY
-            v.auction_number,
-            v.lot_number
-
-          -- Post-aggregation filter on the per-lot canonical lot_category
-          -- (any() of a single dedup'd name) — never on raw pre-GROUP BY
-          -- rows, so this always agrees with settledCategoryResult's
-          -- identical any()-based classification. See type=lots' comment.
-          HAVING (
-            {category:String} = ''
-            OR lot_category = {category:String}
-          )
-        )
-
-        SELECT
-          sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount,
-          countDistinct(auction_number) AS settled_auction_count,
-          count() AS settled_lot_count
-
-        FROM settled_lots
-      `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
-
-    const settledTotalRows = await settledTotalResult.json();
-    const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
-    // Denominator for Avg Bid / Sold Lot — count() over the EXACT same
-    // settled_lots population as settled_total_bid_amount above, never the
-    // broader lot_status "sold_lots" figure (Outstanding/Paid/Unpaid/
-    // Released) computed later in this file, which is a different
-    // population from a different query. Keeping the numerator and
-    // denominator from the same CTE is what makes SUM(settled bid)/COUNT
-    // (settled lots) a correct per-lot average rather than a mismatched
-    // ratio between two different lot populations.
-    const settledLotCount = Number(settledTotalRows[0]?.settled_lot_count ?? 0);
-    // "Total Auctions" for CategoryView: no existing Overview definition
-    // scopes "auction count" by date range + category (Active Auctions is
-    // a "right now" concept, unrelated to either) — this is a natural
-    // derived count from the SAME settled population as Total Bid Amount
-    // above, not a fabricated new business metric, but it is a judgment
-    // call rather than an already-validated definition. Flagged in the
-    // implementation report.
-    const settledAuctionCount = Number(settledTotalRows[0]?.settled_auction_count ?? 0);
-
-    // NOTE: Today's Bid Amount no longer uses a settled (Paid/Released)
-    // definition — see todayBidResult above (warehouse-only, latest bid
-    // per lot from cms.mart_cms_bid_history_report for today's Asia/Manila
-    // calendar day), wired into the response as todays_bid_amount below.
-    // Total Bid Amount (settled, range-scoped) is unaffected by this.
-
-    // ---------------------------------------------------------
-    // SERVICE INCOME (SETTLED)
-    //
-    // Same population as Total Bid Amount above: status IN ('Paid',
-    // 'Released'), deduped by auction_number + lot_number, same
-    // starting_time/date-range/store scoping. Two components:
-    //
-    // - Buyer's Premium Income = sold_price - bid_amount. buyers_premium is
-    //   a PERCENTAGE RATE, not a peso amount (proven: sold_price =
-    //   bid_amount * (1 + buyers_premium/100) exactly, 0 mismatches across
-    //   511 real settled rows) — so the peso figure is the difference, not
-    //   sum(buyers_premium) directly.
-    // - Commission Income = bid_amount * commission / 100. commission is
-    //   also a percentage rate (varies by vendor/auction agreement — 0, 10,
-    //   17, 18, 20, 25, 29, 30, 35 observed), a vendor-side commission rate,
-    //   not a peso Service Fee — same reasoning as buyers_premium above.
-    //
-    // Both rate fields are consistent across a lot's item_barcode fan-out
-    // rows (verified: 0 lots with >1 distinct value for either field across
-    // 484 settled lots), so any() is a safe dedup here, same as bid_amount.
-    // ---------------------------------------------------------
-    const settledServiceIncomeResult = await client.query({
-      query: `
-        WITH selected_auctions AS (
-          SELECT DISTINCT
-            auction_number,
-            store_name
-          FROM xv3.mart_auction_productivity_report
-          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-            AND (
-              {store:String} = ''
-              OR store_name = {store:String}
-            )
-        ),
-
-        settled_lots AS (
-          SELECT
-            v.auction_number AS auction_number,
-            v.lot_number AS lot_number,
-            any(v.bid_amount) AS lot_bid_amount,
-            any(v.sold_price) AS lot_sold_price,
-            any(v.commission) AS lot_commission_pct,
-            max(ifNull(v.reserved_price, 0)) AS lot_reserved_price,
-            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
-
-          FROM xv3.mart_auction_vendor_analysis v
-
-          INNER JOIN selected_auctions a
-            ON v.auction_number = a.auction_number
-
-          WHERE v.status IN ('Paid', 'Released')
-            AND v.auction_number IS NOT NULL
-            AND v.lot_number IS NOT NULL
-
-          GROUP BY
-            v.auction_number,
-            v.lot_number
-
-          -- Post-aggregation filter on the per-lot canonical lot_category —
-          -- see type=lots' identical comment.
-          HAVING (
-            {category:String} = ''
-            OR lot_category = {category:String}
-          )
-        )
-
-        SELECT
-          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS service_income_buyers_premium,
-          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission,
-          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount_for_rates,
-
-          -- Reserve Price Performance — CategoryView only, computed here to
-          -- reuse the exact same settled_lots population rather than a
-          -- separate query. A lot only has a meaningful reserve comparison
-          -- when reserved_price > 0 (many settled lots never had a reserve
-          -- set at all) — lots with reserved_price = 0 are excluded from
-          -- this specific classification entirely, never treated as "at or
-          -- below" a reserve that doesn't exist.
-          countIf(lot_reserved_price > 0 AND lot_bid_amount <= lot_reserved_price) AS sold_at_or_below_reserve,
-          countIf(lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS sold_above_reserve,
-
-          -- Average premium over reserve, for the sold-above-reserve subset
-          -- only: SUM(excess) / SUM(reserve), a value-weighted ratio — NOT
-          -- a naive average of each lot's own percentage, which would let a
-          -- single tiny-reserve lot with a huge % skew the result. 0 when
-          -- no lot in scope sold above its reserve (avoids a division by
-          -- zero producing a meaningless percentage).
-          sumIf(lot_bid_amount - lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_excess,
-          sumIf(lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_base
-
-        FROM settled_lots
-      `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
-
-    const settledServiceIncomeRows = await settledServiceIncomeResult.json();
-    const serviceIncomeBuyersPremium = Number(settledServiceIncomeRows[0]?.service_income_buyers_premium ?? 0);
-    const serviceIncomeCommission = Number(settledServiceIncomeRows[0]?.service_income_commission ?? 0);
-
-    // Weighted-average rates for CategoryView's Commission & Fees section:
-    // SUM(income component) / SUM(bid_amount) — a value-weighted blended
-    // rate, deliberately NOT an AVG() of each lot's own buyers_premium/
-    // commission percentage field. A naive per-lot average would weight a
-    // ₱200 lot the same as a ₱200,000 lot, which misrepresents "what % of
-    // this category's real money became premium/commission." 0 when there
-    // is no settled bid amount in scope (avoids a division by zero).
-    const settledBidAmountForRates = Number(settledServiceIncomeRows[0]?.settled_bid_amount_for_rates ?? 0);
-    const avgBuyersPremiumPct =
-      settledBidAmountForRates > 0 ? (serviceIncomeBuyersPremium / settledBidAmountForRates) * 100 : 0;
-    const avgCommissionPct =
-      settledBidAmountForRates > 0 ? (serviceIncomeCommission / settledBidAmountForRates) * 100 : 0;
-
-    const soldAtOrBelowReserve = Number(settledServiceIncomeRows[0]?.sold_at_or_below_reserve ?? 0);
-    const soldAboveReserve = Number(settledServiceIncomeRows[0]?.sold_above_reserve ?? 0);
-    const aboveReserveExcess = Number(settledServiceIncomeRows[0]?.above_reserve_excess ?? 0);
-    const aboveReserveBase = Number(settledServiceIncomeRows[0]?.above_reserve_base ?? 0);
-    const avgPremiumOverReservePct = aboveReserveBase > 0 ? (aboveReserveExcess / aboveReserveBase) * 100 : 0;
-
-    // ---------------------------------------------------------
-    // AUCTION-LEVEL SUMMARY (Overview KPI drilldowns)
+    // AUCTION-LEVEL SUMMARY (Overview KPI drilldowns) — moved up so that
+    // TOTAL BID AMOUNT below can be derived from it in JS instead of running
+    // its own duplicate scan (Phase 2B: verified byte-identical against the
+    // prior standalone query across MTD/YTD, every canonical category, and
+    // per-branch, using real production data — see commit notes).
     //
     // One row per auction contributing to this scope, covering every
     // Overview KPI that clicks through to an auction-first drilldown
@@ -1252,12 +1022,17 @@ export default async function handler(req, res) {
     // resolution and "Sold" population (Outstanding/Paid/Unpaid/Released)
     // as the type=lots drilldown/summary lotStatusResult above.
     // settled_bid_amount/settled_lot_count are the SAME Paid/Released-only
-    // population as settled_total_bid_amount above, just grouped by
-    // auction instead of collapsed to a scalar — so
-    // SUM(settled_bid_amount) here reconciles exactly to Total Bid Amount,
-    // and COUNT(*) reconciles to Auctions Concluded.
+    // population as TOTAL BID AMOUNT below, just grouped by auction instead
+    // of collapsed to a scalar — so SUM(settled_bid_amount) here reconciles
+    // exactly to Total Bid Amount, and COUNT of rows with settled_lot_count
+    // > 0 reconciles to Auctions Concluded.
+    //
+    // Phase 2B: runs concurrently with todayBidResult and
+    // settledServiceIncomeResult below (bounded 3-query batch — none of
+    // these three read a JS value the others produce, only static
+    // queryParams) instead of one-at-a-time, to cut wall-clock round trips.
     // ---------------------------------------------------------
-    const auctionSummaryResult = await client.query({
+    const auctionSummaryResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT
@@ -1334,7 +1109,285 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
+    // ---------------------------------------------------------
+    // SERVICE INCOME (SETTLED)
+    //
+    // Same population as Total Bid Amount below: status IN ('Paid',
+    // 'Released'), deduped by auction_number + lot_number, same
+    // starting_time/date-range/store scoping. Two components:
+    //
+    // - Buyer's Premium Income = sold_price - bid_amount. buyers_premium is
+    //   a PERCENTAGE RATE, not a peso amount (proven: sold_price =
+    //   bid_amount * (1 + buyers_premium/100) exactly, 0 mismatches across
+    //   511 real settled rows) — so the peso figure is the difference, not
+    //   sum(buyers_premium) directly.
+    // - Commission Income = bid_amount * commission / 100. commission is
+    //   also a percentage rate (varies by vendor/auction agreement — 0, 10,
+    //   17, 18, 20, 25, 29, 30, 35 observed), a vendor-side commission rate,
+    //   not a peso Service Fee — same reasoning as buyers_premium above.
+    //
+    // Both rate fields are consistent across a lot's item_barcode fan-out
+    // rows (verified: 0 lots with >1 distinct value for either field across
+    // 484 settled lots), so any() is a safe dedup here, same as bid_amount.
+    //
+    // Phase 2B: kept as its OWN independent query rather than folded into
+    // auctionSummaryResult's per-lot CTE. Investigated a merge (computing
+    // sold_price/commission there via a status-conditioned aggregate) and
+    // found a real, if tiny, drift at YTD scope: ClickHouse's any()/max() are
+    // non-deterministic when a lot's item_barcode rows already agree on
+    // status but genuinely disagree on the commission rate itself (5 lots
+    // out of 5,916 checked in production, e.g. one lot's 4 "Released" rows
+    // recording commission as both 15 and 18) — a different query shape can
+    // pick a different arbitrary row. Per this phase's abort-on-drift rule,
+    // this query stays independent (runs concurrently with todayBidResult/
+    // auctionSummaryResult below instead, which IS safe — parallelizing
+    // doesn't change which row any() picks, only merging the SQL does).
+    // ---------------------------------------------------------
+    const settledServiceIncomeResultPromise = client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount,
+            any(v.sold_price) AS lot_sold_price,
+            any(v.commission) AS lot_commission_pct,
+            max(ifNull(v.reserved_price, 0)) AS lot_reserved_price,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category —
+          -- see type=lots' identical comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
+        )
+
+        SELECT
+          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS service_income_buyers_premium,
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS service_income_commission,
+          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount_for_rates,
+
+          -- Reserve Price Performance — CategoryView only, computed here to
+          -- reuse the exact same settled_lots population rather than a
+          -- separate query. A lot only has a meaningful reserve comparison
+          -- when reserved_price > 0 (many settled lots never had a reserve
+          -- set at all) — lots with reserved_price = 0 are excluded from
+          -- this specific classification entirely, never treated as "at or
+          -- below" a reserve that doesn't exist.
+          countIf(lot_reserved_price > 0 AND lot_bid_amount <= lot_reserved_price) AS sold_at_or_below_reserve,
+          countIf(lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS sold_above_reserve,
+
+          -- Average premium over reserve, for the sold-above-reserve subset
+          -- only: SUM(excess) / SUM(reserve), a value-weighted ratio — NOT
+          -- a naive average of each lot's own percentage, which would let a
+          -- single tiny-reserve lot with a huge % skew the result. 0 when
+          -- no lot in scope sold above its reserve (avoids a division by
+          -- zero producing a meaningless percentage).
+          sumIf(lot_bid_amount - lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_excess,
+          sumIf(lot_reserved_price, lot_reserved_price > 0 AND lot_bid_amount > lot_reserved_price) AS above_reserve_base
+
+        FROM settled_lots
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // ---------------------------------------------------------
+    // TOTAL BID AMOUNT (SETTLED) — the business definition of
+    // "Total Bid Amount" going forward.
+    //
+    // Population: xv3.mart_auction_vendor_analysis, status IN ('Paid',
+    // 'Released') only — a lot that's still being bid on, or won but not
+    // yet paid/released, does not count. Authoritative amount field is
+    // bid_amount (the hammer price) — NOT sold_price, which is bid_amount
+    // + buyer's premium (confirmed against real rows: sold_price =
+    // bid_amount * 1.15 exactly matching each row's own buyers_premium
+    // field). sold_price already belongs to Service Income, a separate
+    // metric — using it here would double-count the premium.
+    //
+    // vendor_analysis fans out one row per item_barcode within a lot, all
+    // sharing the same bid_amount — deduped via GROUP BY auction_number,
+    // lot_number + any() (verified: 97.4% of duplicate-key rows agree on
+    // every value; the rest only disagree on status mid-transition).
+    //
+    // Scoped by the auction's starting_time (same convention as the
+    // "lots"/sold_lots queries elsewhere in this file), not by any
+    // settlement-timestamp field on vendor_analysis — those fields
+    // (date_time_paid/released_date) are populated for only ~60-87% of
+    // rows, whereas starting_time via productivity_report covers ~100%
+    // of rows that have a real auction_number.
+    //
+    // Phase 2B: investigated deriving this from auctionSummaryResult's
+    // settled_bid_amount/settled_lot_count instead of running its own query
+    // (both are nominally "the same settled population"), and initial tests
+    // (MTD across every category, YTD across every branch) matched exactly.
+    // A wider check surfaced a real, reproducible counter-example though:
+    // auction 127SUC lot 5 has TWO item_barcode rows with genuinely
+    // different descriptions and statuses (one Unsold item whose name
+    // happens to contain "car", one Paid "Chair And Table Stand"). This
+    // query's any(category) is computed only over the Paid/Released-
+    // filtered rows (correctly resolving "Chair And Table Stand" ->
+    // General Merchandise), whereas auctionSummaryResult's any(category) is
+    // computed over ALL rows before the status filter is applied server-
+    // side, so it can pick the Unsold row's name instead and misclassify
+    // the lot as Vehicles and Automotive — a real, if rare, drift (confirmed
+    // via direct ClickHouse diagnostic; not floating-point noise). Per this
+    // phase's abort-on-drift rule, this stays its OWN independent query
+    // (still runs concurrently with todayBidResult/auctionSummaryResult/
+    // settledServiceIncomeResult below — parallelizing doesn't change which
+    // rows any() sees, only merging the SQL does).
+    // ---------------------------------------------------------
+    const settledTotalResultPromise = client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number,
+            store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE starting_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND starting_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        settled_lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(v.bid_amount) AS lot_bid_amount,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.status IN ('Paid', 'Released')
+            AND v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+
+          -- Post-aggregation filter on the per-lot canonical lot_category
+          -- (any() of a single dedup'd name) — never on raw pre-GROUP BY
+          -- rows, so this always agrees with settledCategoryResult's
+          -- identical any()-based classification. See type=lots' comment.
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
+        )
+
+        SELECT
+          sum(ifNull(lot_bid_amount, 0)) AS settled_total_bid_amount,
+          countDistinct(auction_number) AS settled_auction_count,
+          count() AS settled_lot_count
+
+        FROM settled_lots
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // Bounded 4-query batch: none of these read a JS value another one of
+    // them produces — only static queryParams/from/to/store/category — so
+    // running them concurrently changes wall-clock time only, never results.
+    const [todayBidResult, auctionSummaryResult, settledServiceIncomeResult, settledTotalResult] =
+      await Promise.all([
+        todayBidResultPromise,
+        auctionSummaryResultPromise,
+        settledServiceIncomeResultPromise,
+        settledTotalResultPromise,
+      ]);
+
+    const todayBidRows = await todayBidResult.json();
+    const todayBid = todayBidRows[0] ?? {};
+
+    const todayManila = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+    }).format(new Date());
+
     const auctionSummaryRows = await auctionSummaryResult.json();
+
+    const settledTotalRows = await settledTotalResult.json();
+    const settledTotalBidAmount = Number(settledTotalRows[0]?.settled_total_bid_amount ?? 0);
+    // Denominator for Avg Bid / Sold Lot — count() over the EXACT same
+    // settled_lots population as settled_total_bid_amount above, never the
+    // broader lot_status "sold_lots" figure (Outstanding/Paid/Unpaid/
+    // Released) computed later in this file, which is a different
+    // population from a different query. Keeping the numerator and
+    // denominator from the same CTE is what makes SUM(settled bid)/COUNT
+    // (settled lots) a correct per-lot average rather than a mismatched
+    // ratio between two different lot populations.
+    const settledLotCount = Number(settledTotalRows[0]?.settled_lot_count ?? 0);
+    // "Total Auctions" for CategoryView: no existing Overview definition
+    // scopes "auction count" by date range + category (Active Auctions is
+    // a "right now" concept, unrelated to either) — this is a natural
+    // derived count from the SAME settled population as Total Bid Amount
+    // above, not a fabricated new business metric, but it is a judgment
+    // call rather than an already-validated definition. Flagged in the
+    // implementation report.
+    const settledAuctionCount = Number(settledTotalRows[0]?.settled_auction_count ?? 0);
+
+    // NOTE: Today's Bid Amount no longer uses a settled (Paid/Released)
+    // definition — see todayBidResult above (warehouse-only, latest bid
+    // per lot from cms.mart_cms_bid_history_report for today's Asia/Manila
+    // calendar day), wired into the response as todays_bid_amount below.
+    // Total Bid Amount (settled, range-scoped) is unaffected by this.
+
+    const settledServiceIncomeRows = await settledServiceIncomeResult.json();
+    const serviceIncomeBuyersPremium = Number(settledServiceIncomeRows[0]?.service_income_buyers_premium ?? 0);
+    const serviceIncomeCommission = Number(settledServiceIncomeRows[0]?.service_income_commission ?? 0);
+
+    // Weighted-average rates for CategoryView's Commission & Fees section:
+    // SUM(income component) / SUM(bid_amount) — a value-weighted blended
+    // rate, deliberately NOT an AVG() of each lot's own buyers_premium/
+    // commission percentage field. A naive per-lot average would weight a
+    // ₱200 lot the same as a ₱200,000 lot, which misrepresents "what % of
+    // this category's real money became premium/commission." 0 when there
+    // is no settled bid amount in scope (avoids a division by zero).
+    const settledBidAmountForRates = Number(settledServiceIncomeRows[0]?.settled_bid_amount_for_rates ?? 0);
+    const avgBuyersPremiumPct =
+      settledBidAmountForRates > 0 ? (serviceIncomeBuyersPremium / settledBidAmountForRates) * 100 : 0;
+    const avgCommissionPct =
+      settledBidAmountForRates > 0 ? (serviceIncomeCommission / settledBidAmountForRates) * 100 : 0;
+
+    const soldAtOrBelowReserve = Number(settledServiceIncomeRows[0]?.sold_at_or_below_reserve ?? 0);
+    const soldAboveReserve = Number(settledServiceIncomeRows[0]?.sold_above_reserve ?? 0);
+    const aboveReserveExcess = Number(settledServiceIncomeRows[0]?.above_reserve_excess ?? 0);
+    const aboveReserveBase = Number(settledServiceIncomeRows[0]?.above_reserve_base ?? 0);
+    const avgPremiumOverReservePct = aboveReserveBase > 0 ? (aboveReserveExcess / aboveReserveBase) * 100 : 0;
 
     // ---------------------------------------------------------
     // BID TREND — always daily, one point per calendar day in range.
@@ -1598,7 +1651,7 @@ export default async function handler(req, res) {
     // reasoning as ACTIVE AUCTIONS RIGHT NOW above, which is also
     // deliberately global for this reason).
     // ---------------------------------------------------------
-    const registrationResult = await client.query({
+    const registrationResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number
@@ -1623,10 +1676,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const registrationRows = await registrationResult.json();
-    const registeredCustomers = Number(registrationRows[0]?.registered ?? 0);
-    const participatingRegisteredBidders = Number(registrationRows[0]?.participating ?? 0);
-
     // ---------------------------------------------------------
     // FOR APPROVAL
     //
@@ -1639,7 +1688,7 @@ export default async function handler(req, res) {
     // for_approval_bid_amount are structurally guaranteed for the same
     // from/to/store.
     // ---------------------------------------------------------
-    const forApprovalResult = await client.query({
+    const forApprovalResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT
@@ -1694,10 +1743,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const forApprovalRows = await forApprovalResult.json();
-    const forApprovalLots = Number(forApprovalRows[0]?.for_approval_lots ?? 0);
-    const forApprovalBidAmount = Number(forApprovalRows[0]?.for_approval_bid_amount ?? 0);
-
     // ---------------------------------------------------------
     // BID VALUE BY BRANCH (SETTLED)
     //
@@ -1708,7 +1753,7 @@ export default async function handler(req, res) {
     // sum(branches.bid_amount) == total_bid_amount, since both are sums
     // over the exact same rows, category filter included.
     // ---------------------------------------------------------
-    const settledBranchResult = await client.query({
+    const settledBranchResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT
@@ -1769,8 +1814,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const settledBranchRows = await settledBranchResult.json();
-
     // ---------------------------------------------------------
     // BID VALUE BY CATEGORY (SETTLED)
     //
@@ -1781,7 +1824,7 @@ export default async function handler(req, res) {
     // "Uncategorized" fallback is structurally possible here. This
     // guarantees sum(categories.bid_amount) == total_bid_amount.
     // ---------------------------------------------------------
-    const settledCategoryResult = await client.query({
+    const settledCategoryResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT
@@ -1847,6 +1890,27 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
+    // Bounded 4-query batch: registration/for-approval/branch/category are
+    // all independent scalar-or-grouped aggregates over static queryParams —
+    // none depends on another's JS result, so running them concurrently
+    // only changes wall-clock time.
+    const [registrationResult, forApprovalResult, settledBranchResult, settledCategoryResult] =
+      await Promise.all([
+        registrationResultPromise,
+        forApprovalResultPromise,
+        settledBranchResultPromise,
+        settledCategoryResultPromise,
+      ]);
+
+    const registrationRows = await registrationResult.json();
+    const registeredCustomers = Number(registrationRows[0]?.registered ?? 0);
+    const participatingRegisteredBidders = Number(registrationRows[0]?.participating ?? 0);
+
+    const forApprovalRows = await forApprovalResult.json();
+    const forApprovalLots = Number(forApprovalRows[0]?.for_approval_lots ?? 0);
+    const forApprovalBidAmount = Number(forApprovalRows[0]?.for_approval_bid_amount ?? 0);
+
+    const settledBranchRows = await settledBranchResult.json();
     const settledCategoryRows = await settledCategoryResult.json();
 
     // ---------------------------------------------------------
@@ -2119,7 +2183,7 @@ export default async function handler(req, res) {
     // timezone argument is required here even though the date-range
     // comparison above doesn't need one.
     // ---------------------------------------------------------
-    const hourlyResult = await client.query({
+    const hourlyResultPromise = client.query({
       query: `
         WITH auction_store AS (
           SELECT DISTINCT auction_number, store_name
@@ -2173,8 +2237,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const hourlyRows = await hourlyResult.json();
-
     // ---------------------------------------------------------
     // CURRENT BID VALUE BY BRANCH (live-corrected, current-standing) —
     // preserved under its own name, no longer exposed as "branches".
@@ -2185,7 +2247,7 @@ export default async function handler(req, res) {
     // sum(current_bid_value_branches.bid_amount) is structurally
     // guaranteed to equal current_bid_value's raw baseline.
     // ---------------------------------------------------------
-    const branchResult = await client.query({
+    const branchResultPromise = client.query({
       query: `
         WITH auction_store AS (
           SELECT DISTINCT
@@ -2242,8 +2304,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const branchRows = await branchResult.json();
-
     // ---------------------------------------------------------
     // CURRENT BID VALUE BY CATEGORY (live-corrected, current-standing) —
     // preserved under its own name, no longer exposed as "categories".
@@ -2256,7 +2316,7 @@ export default async function handler(req, res) {
     // guaranteed to equal current_bid_value's raw baseline exactly, the
     // same way branch does.
     // ---------------------------------------------------------
-    const categoryResult = await client.query({
+    const categoryResultPromise = client.query({
       query: `
         WITH auction_store AS (
           SELECT DISTINCT
@@ -2357,8 +2417,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const categoryRows = await categoryResult.json();
-
     // ---------------------------------------------------------
     // ACTIVE AUCTIONS RIGHT NOW
     //
@@ -2375,7 +2433,7 @@ export default async function handler(req, res) {
     // not referenced in this query's SQL text, so passing it is a no-op
     // even if a caller sent one.
     // ---------------------------------------------------------
-    const activeAuctionResult = await client.query({
+    const activeAuctionResultPromise = client.query({
       query: `
         SELECT
           countDistinct(auction_number) AS active_auctions
@@ -2394,9 +2452,6 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    const activeAuctionRows = await activeAuctionResult.json();
-    const activeAuction = activeAuctionRows[0] ?? {};
-
     // ---------------------------------------------------------
     // LOT STATUS KPIs
     //
@@ -2410,7 +2465,7 @@ export default async function handler(req, res) {
     // unsold_with_reserve_count/value: same Unsold population, filtered
     // to reserved_price > 0 — the "With Reserve Price" KPI.
     // ---------------------------------------------------------
-    const lotStatusResult = await client.query({
+    const lotStatusResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT
@@ -2490,6 +2545,27 @@ export default async function handler(req, res) {
       query_params: queryParams,
       format: "JSONEachRow",
     });
+
+    // Bounded 5-query batch: hourly activity, current-bid-value by branch/
+    // category (a different, live-standing population from the settled
+    // queries above), active-auctions-right-now, and lot status are all
+    // independent of each other and of everything already resolved above —
+    // only static queryParams/store — so this only changes wall-clock time.
+    const [hourlyResult, branchResult, categoryResult, activeAuctionResult, lotStatusResult] =
+      await Promise.all([
+        hourlyResultPromise,
+        branchResultPromise,
+        categoryResultPromise,
+        activeAuctionResultPromise,
+        lotStatusResultPromise,
+      ]);
+
+    const hourlyRows = await hourlyResult.json();
+    const branchRows = await branchResult.json();
+    const categoryRows = await categoryResult.json();
+
+    const activeAuctionRows = await activeAuctionResult.json();
+    const activeAuction = activeAuctionRows[0] ?? {};
 
     const lotStatusRows = await lotStatusResult.json();
     const lotStatus = lotStatusRows[0] ?? {};
