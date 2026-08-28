@@ -296,6 +296,13 @@ export default async function handler(req, res) {
         (row) => row.disposition === "Unsold",
       ).length;
 
+      // Vercel P0 usage fix: purely historical/settled row-level data (no
+      // live fields at all, unlike the main endpoint below) — same
+      // conservative TTL as the already-proven main Overview cache. The
+      // CDN cache key is the full request URL including query string, so
+      // from/to/store/category/type all stay correctly isolated from each
+      // other and from the main (no-type) response.
+      res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
       return res.status(200).json({
         type: "lots",
 
@@ -709,6 +716,10 @@ export default async function handler(req, res) {
       const summaryBuyersPremium = mappedRows.reduce((sum, row) => sum + row.buyers_premium_income, 0);
       const summaryCommission = mappedRows.reduce((sum, row) => sum + row.commission_income, 0);
 
+      // Vercel P0 usage fix: same reasoning as the "lots" drilldown above —
+      // purely historical/settled, no live fields, same conservative TTL
+      // as the main Overview cache.
+      res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
       return res.status(200).json({
         type: "service-income",
 
@@ -3566,9 +3577,13 @@ export default async function handler(req, res) {
     // emits them in the same order with empty values omitted, so identical
     // scopes always produce byte-identical URLs and never collide with a
     // different scope). Only ClickHouse-derived, business-logic-free HTTP
-    // caching — no new infrastructure, no in-process Map. Applies ONLY to
-    // this 200 response; the type=... branches above and the 500 catch
-    // block below are untouched (never cached).
+    // caching — no new infrastructure, no in-process Map. Applies to this
+    // 200 response plus the type=lots/type=service-income drilldowns above
+    // (same Vercel P0 usage fix — those are purely historical/settled,
+    // even safer to cache than this mixed response); the remaining
+    // type=... branches (active-auctions, unsold-lots, settled-lots,
+    // for-approval) and the 500 catch block below are untouched (never
+    // cached).
     //
     // CAVEAT (documented per Phase 2C's explicit instructions): this
     // response mixes historical/settled fields (Total Bid Amount, Service

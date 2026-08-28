@@ -25,10 +25,10 @@ import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
 import { useLiveOverview } from "./useLiveOverview";
-import { useLiveBidCorrection } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange, comparisonLabel } from "./utils/dateRange";
 import { formatPeso } from "./utils/format";
+import { onTabVisible } from "./utils/visibility";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -1112,13 +1112,24 @@ export default function App() {
     setLastUpdated(new Date());
   }, []);
 
+  // Vercel P0 usage fix: a backgrounded/minimized browser tab must not
+  // keep generating server load every 30s forever. The interval itself
+  // keeps running on its own clock (nothing to recreate), but the tick
+  // skips triggerRefresh entirely while document.hidden; onTabVisible
+  // fires exactly one immediate refresh the moment the tab is
+  // foregrounded again, then the normal 30s cadence resumes.
   useEffect(() => {
-    const id = setInterval(
-      triggerRefresh,
-      AUTO_REFRESH_MS,
-    );
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      triggerRefresh();
+    }, AUTO_REFRESH_MS);
 
-    return () => clearInterval(id);
+    const unsubscribe = onTabVisible(triggerRefresh);
+
+    return () => {
+      clearInterval(id);
+      unsubscribe();
+    };
   }, [triggerRefresh]);
 
   const realStores = useStoreList();
@@ -1161,11 +1172,16 @@ export default function App() {
 
   const compareLabel = comparisonLabel(dateRange);
 
-  const bidCorrectionDelta =
-    useLiveBidCorrection(
-      live?.overview?.auctions,
-      refreshNonce,
-    );
+  // DISABLED (Vercel P0 usage fix): useLiveOverview never populates a real
+  // `overview.auctions` array — it only inherits MOCK_OVERVIEW's 10 fake
+  // auction numbers (see mockApiData.js), so this was firing 10 wasted
+  // /api/live-bid-amounts calls every 30s, unconditionally regardless of
+  // tab, for a correction that could never resolve to anything real. This
+  // has always evaluated to 0 in production since the mock auction
+  // numbers can never resolve — no behavior change. Re-enable only once
+  // overview.auctions carries genuine live auction_numbers from a real
+  // source.
+  const bidCorrectionDelta = 0;
 
   const overview = useMemo(() => {
     if (!live) {

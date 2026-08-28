@@ -8,7 +8,6 @@ import { MOCK_STORE_DETAIL } from "../mockApiData";
 import { formatPeso } from "../utils/format";
 import { buildStoreStoryline } from "../insights";
 import { resolveDateRange } from "../utils/dateRange";
-import { useLiveBidCorrection } from "../useLiveBidding";
 
 // MOCKED — real fetch disconnected, see src/mockApiData.js. Restore fetch() below to re-wire.
 function useStoreDetail(store, dateRangeKey, refreshNonce = 0) {
@@ -64,9 +63,13 @@ function useStoreDetail(store, dateRangeKey, refreshNonce = 0) {
 
 export default function StoreView({ store, dateRange, refreshNonce }) {
   const { data: live, loading, error } = useStoreDetail(store, dateRange, refreshNonce);
-  // Deferred, non-blocking correction of the stale ClickHouse snapshot for
-  // auctions still live right now at this branch — see useLiveBidCorrection.
-  const bidCorrectionDelta = useLiveBidCorrection(live?.auctions, refreshNonce);
+  // DISABLED (Vercel P0 usage fix): useStoreDetail is itself MOCKED (see
+  // above) and only ever returns MOCK_STORE_DETAIL's fake auction numbers,
+  // so this was firing wasted /api/live-bid-amounts calls with no possible
+  // real result whenever the Stores tab was open on a specific branch. No
+  // behavior change (this always evaluated to 0 in production). Re-enable
+  // only once useStoreDetail returns genuine live auction_numbers.
+  const bidCorrectionDelta = 0;
 
   if (store === ALL_STORES) {
     return (

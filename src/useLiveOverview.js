@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { resolveDateRange, resolveComparisonRange } from "./utils/dateRange";
+import { onTabVisible } from "./utils/visibility";
 import {
   MOCK_OVERVIEW,
   MOCK_LEADERBOARDS,
@@ -326,11 +327,21 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
 
     load();
 
-    const interval = setInterval(load, 30_000);
+    // Vercel P0 usage fix: skip the recurring fetch entirely while this
+    // browser tab is backgrounded/minimized (the interval keeps its own
+    // single clock running — nothing new to schedule), and catch up with
+    // exactly one immediate load() the moment it's foregrounded again.
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      load();
+    }, 30_000);
+
+    const unsubscribe = onTabVisible(load);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
+      unsubscribe();
     };
   }, [dateRangeKey, store, category, refreshNonce, active]);
 
