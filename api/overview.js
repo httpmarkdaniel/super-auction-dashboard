@@ -1903,6 +1903,18 @@ export default async function handler(req, res) {
           GROUP BY
             v.auction_number,
             v.lot_number
+
+          -- Respects the sidebar's global Category filter (unlike the
+          -- Avg Bid cards' own LOCAL category slice — see
+          -- avgBidCategoryAuctionResult's comment) so that when a specific
+          -- category is selected, this Category Breakdown collapses to
+          -- just that one category (sum reconciles to the now-category-
+          -- scoped Total Bid Amount), same convention as
+          -- settledBranchResult just above.
+          HAVING (
+            {category:String} = ''
+            OR category = {category:String}
+          )
         )
 
         SELECT

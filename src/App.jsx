@@ -888,6 +888,7 @@ function OverviewTab({
   compareLabel,
   loading,
   error,
+  store,
   categoryOptions,
   selectedCategory,
   onCategoryChange,
@@ -912,6 +913,42 @@ function OverviewTab({
         </div>
       )}
 
+      {/* Overview-level scope: Store/Date are set in the Topbar (shown here
+          read-only for context); Category is the one true Overview-wide
+          filter — changing it re-scopes every category-scopable metric
+          below (Total Bid Amount, Avg Bid cards, Bid Trend, Bidder
+          Composition, Bid Value by Category & Branch, Top Vendors &
+          Bidders), while Registration → Bidder stays global by design (its
+          source mart has no category dimension). This is the ONLY Category
+          control on Overview — the Avg Bid cards' own local selector
+          (HeroKPIs) defers to it once a specific category is chosen here. */}
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Overview Scope</span>
+        <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+          <span className="text-muted font-medium">Store</span>
+          <span className="font-semibold text-ink">{store}</span>
+        </div>
+        <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+          <span className="text-muted font-medium">Category</span>
+          <select
+            value={selectedCategory}
+            onChange={(e) => onCategoryChange(e.target.value)}
+            className="font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[180px]"
+          >
+            <option value="">All Categories</option>
+            {categoryOptions.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+          <span className="text-muted font-medium">Date</span>
+          <span className="font-semibold text-ink">{rangeLabel}</span>
+        </div>
+      </div>
+
       <div className="mb-8">
         <LiveAuctionActivity
           todaysBidAmount={overview.heroKPIs.todaysBidAmount}
@@ -929,6 +966,7 @@ function OverviewTab({
           overview={overview}
           rangeLabel={rangeLabel}
           compareLabel={compareLabel}
+          globalCategory={selectedCategory}
         />
       </div>
 
@@ -936,22 +974,6 @@ function OverviewTab({
         title="Bid Trend"
         insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
       >
-        <div className="flex items-center justify-end gap-1.5 mb-3">
-          <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold">Overview Category</span>
-          <div className="flex items-center bg-surface1 border border-gridline rounded-lg px-2.5 h-8">
-            <select
-              value={selectedCategory}
-              onChange={(e) => onCategoryChange(e.target.value)}
-              className="text-[14px] font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[160px]"
-            >
-              <option value="">All Categories</option>
-              {categoryOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <BidTrendChart data={overview.bidTrend} rangeLabel={rangeLabel} />
       </StorySection>
 
@@ -1212,6 +1234,7 @@ export default function App() {
               overview={overview}
               rangeLabel={rangeLabel}
               compareLabel={compareLabel}
+              store={store}
               loading={overviewLoading}
               error={overviewError}
               categoryOptions={CATEGORY_TABS}
