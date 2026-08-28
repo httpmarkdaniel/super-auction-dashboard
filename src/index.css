@@ -16,15 +16,14 @@
   .eyebrow {
     @apply text-[16px] tracking-[0.08em] uppercase text-ink font-semibold font-display;
   }
-  /* Scorecard/KPI title color — same shape as .eyebrow (used for section/
-     table headings, which stay dark) but muted, so a KPI tile's title
-     recedes behind its own value. ink2 (--text-secondary) is the
-     design system's existing "muted, theme-aware" secondary-text token
-     (~#5b6573 light / #a3adba dark, both close to Tailwind gray-500)
-     already defined but previously unused anywhere — reused here rather
-     than hardcoding a new gray. */
+  /* Scorecard/KPI title typography — deliberately NOT .eyebrow's condensed
+     display font/all-caps/tracking treatment (that's reserved for section/
+     table headings). Normal UI sans, dark (same primary text color as
+     everywhere else — no gray), title case as authored, semibold, compact.
+     Hierarchy comes from scale/weight against the KPI value below it, not
+     from a different typeface or color. */
   .kpi-label {
-    @apply text-[16px] tracking-[0.08em] uppercase text-ink2 font-semibold font-display;
+    @apply text-[13px] font-sans font-semibold text-ink;
   }
   /* BOPIS card language: flat white, thin border, soft shadow, no colored
      top rule — one shared look for cards, tiles, and floating overlays. */

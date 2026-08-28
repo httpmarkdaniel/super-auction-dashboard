@@ -6,25 +6,6 @@ import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import { formatPeso } from "../utils/format";
 
-function Icon({ path }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {path}
-    </svg>
-  );
-}
-
-const ICONS = {
-  sales: <Icon path={<path d="M3 17l6-6 4 4 8-8M21 3h-6v6" />} />,
-  gavel: <Icon path={<path d="M14 6l4 4M5 15l4 4M9.5 3.5l6 6-6.5 6.5-6-6zM13.5 14l6 6M2 22l5-5" />} />,
-  box: <Icon path={<><path d="M3 8l9-5 9 5-9 5-9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" /></>} />,
-  chart: <Icon path={<><path d="M3 3v18h18" /><path d="M7 15l4-4 3 3 5-6" /></>} />,
-  target: <Icon path={<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /></>} />,
-  clock: <Icon path={<><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>} />,
-  wallet: <Icon path={<><path d="M3 7a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M17 12h.01" /></>} />,
-  users: <Icon path={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>} />,
-};
-
 const METHODOLOGY = {
   totalBidAmount:
     "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the contributing auctions.",
@@ -94,7 +75,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         <div className="eyebrow mb-2">Auction Performance · {rangeLabel}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatTile
-            icon={ICONS.sales}
             eyebrow={`Total Bid Amount · ${rangeLabel}`}
             value={formatPeso(heroKPIs.totalBidAmount)}
             sub="Settled · Paid & Released"
@@ -103,7 +83,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.total_bid_amount_pct }] : []}
           />
           <StatTile
-            icon={ICONS.gavel}
             eyebrow="Auctions Concluded"
             value={heroKPIs.auctionsConcluded}
             methodology={METHODOLOGY.auctionsConcluded}
@@ -111,7 +90,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.auctions_concluded_pct }] : []}
           />
           <AvgBidCategoryCard
-            icon={ICONS.chart}
             eyebrow="Avg Bid / Auction"
             metric="auction"
             methodology={METHODOLOGY.avgBidPerAuction}
@@ -122,7 +100,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             onClickCategory={onSelectCategory}
           />
           <AvgBidCategoryCard
-            icon={ICONS.target}
             eyebrow="Avg Bid / Sold Lot"
             metric="soldLot"
             methodology={METHODOLOGY.avgBidPerSoldLot}
@@ -140,7 +117,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         <div className="eyebrow mb-2">Business Health · {rangeLabel}</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatTile
-          icon={ICONS.box}
           eyebrow="Lots Sold / Listed"
           value={`${heroKPIs.lotsSold} / ${heroKPIs.lotsListed}`}
           sub={`${sellThroughPct}% sell-through`}
@@ -153,7 +129,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         />
         <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
           <div className="flex items-center gap-1.5 mb-2.5">
-            <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.users}</span>
             <span className="kpi-label">Registration → Bidder</span>
             <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
           </div>
@@ -179,7 +154,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
           </div>
         </div>
         <StatTile
-          icon={ICONS.wallet}
           eyebrow="Service Income"
           value={formatPeso(heroKPIs.serviceIncome)}
           sub="HMR revenue · Paid & Released"

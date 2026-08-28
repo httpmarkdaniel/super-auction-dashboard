@@ -12,7 +12,7 @@ export default function BidderPopulationCard({ title, total, newCount, returning
 
   return (
     <div className="border border-gridline rounded-lg p-4 bg-plane">
-      <div className="text-[13px] uppercase tracking-wide text-ink2 font-semibold mb-1">{title}</div>
+      <div className="kpi-label mb-1">{title}</div>
       <div className="font-display text-[28px] leading-none text-ink mb-1">{total}</div>
       <div className="text-[13.5px] text-ink mb-3">
         {newCount} New · {returningCount} Returning
