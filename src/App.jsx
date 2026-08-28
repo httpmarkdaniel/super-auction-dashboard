@@ -4,7 +4,7 @@ import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
-import LiveAuctionActivity from "./components/LiveAuctionActivity";
+import LiveMiniCard from "./components/primitives/LiveMiniCard";
 import CategoryStrip from "./components/CategoryStrip";
 import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
@@ -27,6 +27,7 @@ import { useLiveOverview } from "./useLiveOverview";
 import { useLiveBidCorrection } from "./useLiveBidding";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange, comparisonLabel } from "./utils/dateRange";
+import { formatPeso } from "./utils/format";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -67,6 +68,9 @@ const EMPTY_OVERVIEW = {
     registeredCustomers: 0,
     participatingRegisteredBidders: 0,
     registrationConversionPct: null,
+    totalBidEvents: 0,
+    uniqueParticipatingBidders: 0,
+    avgBidsPerUniqueBidder: null,
   },
 
   unsoldLots: {
@@ -110,6 +114,7 @@ const EMPTY_OVERVIEW = {
 
   auctionSummary: [],
   bidTrend: [],
+  bidderEngagement: [],
   comparison: null,
 
   topVendors: [],
@@ -641,6 +646,15 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         Number(kpis.registered_customers) > 0
           ? (Number(kpis.participating_registered_bidders) / Number(kpis.registered_customers)) * 100
           : null,
+
+      // AVG BIDS / UNIQUE BIDDER — bidder engagement/intensity (Total Bid
+      // Events ÷ Unique Participating Bidders), NOT a peso metric. See
+      // api/overview.js's AVG BIDS / UNIQUE BIDDER query comment. null
+      // (rendered as "—") when nobody participated, never a fabricated 0.
+      totalBidEvents: Number(kpis.total_bid_events) || 0,
+      uniqueParticipatingBidders: Number(kpis.unique_participating_bidders) || 0,
+      avgBidsPerUniqueBidder:
+        kpis.avg_bids_per_unique_bidder != null ? Number(kpis.avg_bids_per_unique_bidder) : null,
     },
 
     unsoldLots: {
@@ -753,6 +767,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     avgBidCategoryBreakdown,
 
     bidTrend: kpis.bid_trend || [],
+
+    // Per-bidder drilldown behind the Avg Bids / Unique Bidder scorecard —
+    // see api/overview.js's AVG BIDS / UNIQUE BIDDER query comment.
+    // Already-fetched, already-sorted (bid_events desc) — no extra request.
+    bidderEngagement: kpis.bidder_engagement || [],
 
     // Dynamic period-over-period comparison — see api/overview.js's
     // DYNAMIC COMPARISON PERIOD query comment. null when not computed.
@@ -875,14 +894,28 @@ function OverviewTab({
         </div>
       </div>
 
-      <div className="mb-8">
-        <LiveAuctionActivity
-          todaysBidAmount={overview.heroKPIs.todaysBidAmount}
-          activeAuctionsNow={overview.heroKPIs.activeAuctionsNow}
-          updatedAt={updatedAt}
-          onClickActiveAuctions={onGoLive}
-        />
-      </div>
+      <StorySection
+        title="Bid Trend"
+        insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px] gap-4 items-stretch">
+          <BidTrendChart data={overview.bidTrend} rangeLabel={rangeLabel} />
+          <div className="flex flex-col gap-3">
+            <LiveMiniCard
+              label="Today's Bid"
+              value={formatPeso(overview.heroKPIs.todaysBidAmount)}
+              sub="Current standing bid value"
+            />
+            <LiveMiniCard
+              label="Active Auctions"
+              value={overview.heroKPIs.activeAuctionsNow}
+              sub="Auction events live now"
+              onClick={onGoLive}
+            />
+            <div className="text-[12px] text-muted text-right pr-1">Updated {updatedAt}</div>
+          </div>
+        </div>
+      </StorySection>
 
       <div className="mb-8">
         <div className="mb-3">
@@ -896,13 +929,6 @@ function OverviewTab({
           onSelectCategory={onSelectCategory}
         />
       </div>
-
-      <StorySection
-        title="Bid Trend"
-        insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
-      >
-        <BidTrendChart data={overview.bidTrend} rangeLabel={rangeLabel} />
-      </StorySection>
 
       <StorySection
         title="Bidder Composition"

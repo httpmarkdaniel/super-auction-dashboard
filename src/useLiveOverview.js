@@ -176,6 +176,14 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               registered_customers: liveOverview.registered_customers ?? 0,
               participating_registered_bidders: liveOverview.participating_registered_bidders ?? 0,
 
+              // Avg Bids / Unique Bidder — bidder engagement/intensity, see
+              // api/overview.js's AVG BIDS / UNIQUE BIDDER query comment.
+              // null avg (never a fabricated 0) when nobody participated.
+              total_bid_events: liveOverview.total_bid_events ?? 0,
+              unique_participating_bidders: liveOverview.unique_participating_bidders ?? 0,
+              avg_bids_per_unique_bidder: liveOverview.avg_bids_per_unique_bidder ?? null,
+              bidder_engagement: liveOverview.bidder_engagement ?? [],
+
               // Dynamic period-over-period comparison — null when not
               // computed (see api/overview.js's DYNAMIC COMPARISON PERIOD
               // query comment), never a fabricated delta.

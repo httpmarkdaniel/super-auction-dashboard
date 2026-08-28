@@ -1890,16 +1890,117 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    // Bounded 4-query batch: registration/for-approval/branch/category are
-    // all independent scalar-or-grouped aggregates over static queryParams —
-    // none depends on another's JS result, so running them concurrently
-    // only changes wall-clock time.
-    const [registrationResult, forApprovalResult, settledBranchResult, settledCategoryResult] =
+    // ---------------------------------------------------------
+    // AVG BIDS / UNIQUE BIDDER — bidder engagement/intensity, NOT a peso
+    // metric. One row per bidder (canonical Participating identity — same
+    // lowerUTF8(trim(email)) bidder_key + bidder_first_bid New/Returning
+    // classification already used by BID TREND's participating side and
+    // the branch/category bidder-composition queries above; NOT the
+    // separate BIDDER_IDENTITY_CTES bridge used for WINNING/settled
+    // bidders, which is a different identity resolution for a different
+    // population), scoped to the SAME Date + Store + Category as every
+    // other Overview figure.
+    //
+    // bid_events = count() of real bid_history rows (actual bid EVENTS,
+    // never a distinct-lot or distinct-auction count) for that bidder.
+    // auctions_participated = uniqExact(auction_number) for that bidder in
+    // this same scope. bid_activity_amount = sum(bid_amount), the same
+    // "Participating" activity-amount definition used elsewhere (never
+    // settled/winning value).
+    //
+    // This single bidder-grain query serves BOTH the new scorecard's
+    // scalar totals (SUM(bid_events) / COUNT(rows) here in JS below — a
+    // plain COUNT partitions safely across a GROUP BY, unlike a distinct-
+    // bidder count, so this reconciles exactly, no separate query needed)
+    // AND its click-through per-bidder drilldown — no query-per-bidder, no
+    // separate all-history payload.
+    // ---------------------------------------------------------
+    const bidderEngagementResultPromise = client.query({
+      query: `
+        WITH auction_store AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE auction_number IS NOT NULL
+        ),
+
+        lot_category AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        bidder_first_bid AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bid_created_at) AS first_bid_at
+          FROM cms.mart_cms_bid_history_report
+          WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+          GROUP BY bidder_key
+        ),
+
+        bidder_activity AS (
+          SELECT
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            any(b.email) AS display_email,
+            count() AS bid_events,
+            uniqExact(b.auction_number) AS auctions_participated,
+            sum(b.bid_amount) AS bid_activity_amount
+
+          FROM cms.mart_cms_bid_history_report b
+
+          INNER JOIN auction_store s
+            ON b.auction_number = s.auction_number
+
+          LEFT JOIN lot_category lc
+            ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+
+          WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR s.store_name = {store:String})
+            AND b.email IS NOT NULL AND trim(b.email) != ''
+            AND ({category:String} = '' OR lc.lot_category = {category:String})
+
+          GROUP BY bidder_key
+        )
+
+        SELECT
+          ba.bidder_key AS bidder_key,
+          ba.display_email AS display_email,
+          ba.bid_events AS bid_events,
+          ba.auctions_participated AS auctions_participated,
+          ba.bid_activity_amount AS bid_activity_amount,
+          -- Same New/Returning boundary as every other Participating query
+          -- in this file (first-ever bid at/after this period's start) —
+          -- computed in SQL, never re-derived from a parsed timestamp in
+          -- JS, so it can never disagree with ClickHouse's own comparison.
+          f.first_bid_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila') AS is_new
+
+        FROM bidder_activity ba
+
+        INNER JOIN bidder_first_bid f
+          ON ba.bidder_key = f.bidder_key
+
+        ORDER BY bid_events DESC
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // Bounded 5-query batch: registration/for-approval/branch/category/
+    // bidder-engagement are all independent scalar-or-grouped aggregates
+    // over static queryParams — none depends on another's JS result, so
+    // running them concurrently only changes wall-clock time.
+    const [registrationResult, forApprovalResult, settledBranchResult, settledCategoryResult, bidderEngagementResult] =
       await Promise.all([
         registrationResultPromise,
         forApprovalResultPromise,
         settledBranchResultPromise,
         settledCategoryResultPromise,
+        bidderEngagementResultPromise,
       ]);
 
     const registrationRows = await registrationResult.json();
@@ -1912,6 +2013,28 @@ export default async function handler(req, res) {
 
     const settledBranchRows = await settledBranchResult.json();
     const settledCategoryRows = await settledCategoryResult.json();
+
+    const bidderEngagementRows = await bidderEngagementResult.json();
+
+    // A plain count() partitions safely across the bidder_key GROUP BY, so
+    // summing it back here is exact — never at risk of the distinct-count
+    // double-counting that ruled out merging elsewhere in this file.
+    const totalBidEvents = bidderEngagementRows.reduce((sum, row) => sum + Number(row.bid_events ?? 0), 0);
+    const uniqueParticipatingBidders = bidderEngagementRows.length;
+    const avgBidsPerUniqueBidder = uniqueParticipatingBidders > 0 ? totalBidEvents / uniqueParticipatingBidders : null;
+
+    const bidderEngagement = bidderEngagementRows.map((row) => {
+      const bidEvents = Number(row.bid_events ?? 0);
+      const auctionsParticipated = Number(row.auctions_participated ?? 0);
+      return {
+        bidder: row.display_email ?? row.bidder_key,
+        is_new: Boolean(Number(row.is_new)),
+        bid_events: bidEvents,
+        auctions_participated: auctionsParticipated,
+        avg_bids_per_auction_participated: auctionsParticipated > 0 ? bidEvents / auctionsParticipated : null,
+        bid_activity_amount: Number(row.bid_activity_amount ?? 0),
+      };
+    });
 
     // ---------------------------------------------------------
     // BRANCH / CATEGORY BIDDER COMPOSITION (for the Overview hover panel)
@@ -2984,7 +3107,14 @@ export default async function handler(req, res) {
     if (compareFrom && compareTo) {
       const compareParams = { from: compareFrom, to: compareTo, store, category };
 
-      const [cmpSettledResult, cmpLotStatusResult, cmpServiceIncomeResult, cmpRegistrationResult, cmpCategoryResult] = await Promise.all([
+      const [
+        cmpSettledResult,
+        cmpLotStatusResult,
+        cmpServiceIncomeResult,
+        cmpRegistrationResult,
+        cmpCategoryResult,
+        cmpBidderEngagementResult,
+      ] = await Promise.all([
         client.query({
           query: `
             WITH selected_auctions AS (
@@ -3134,6 +3264,41 @@ export default async function handler(req, res) {
           query_params: compareParams,
           format: "JSONEachRow",
         }),
+        // Previous-period scalar counterpart of bidderEngagementResult
+        // above, for the Avg Bids / Unique Bidder delta only — no per-
+        // bidder grain needed here (the drilldown is current-period only),
+        // so this is a plain count()/uniqExact() over the same filtered
+        // bid_history population, same Date/Store/Category scope shifted
+        // to [compareFrom, compareTo].
+        client.query({
+          query: `
+            WITH auction_store AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE auction_number IS NOT NULL
+            ),
+            lot_category AS (
+              SELECT v.auction_number AS auction_number, v.lot_number AS lot_number,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+            )
+            SELECT
+              count() AS total_bid_events,
+              uniqExact(lowerUTF8(trim(b.email))) AS unique_participating_bidders
+            FROM cms.mart_cms_bid_history_report b
+            INNER JOIN auction_store s ON b.auction_number = s.auction_number
+            LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+            WHERE b.bid_created_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND b.bid_created_at < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR s.store_name = {store:String})
+              AND b.email IS NOT NULL AND trim(b.email) != ''
+              AND ({category:String} = '' OR lc.lot_category = {category:String})
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
       ]);
 
       const cmpSettled = (await cmpSettledResult.json())[0] ?? {};
@@ -3141,6 +3306,7 @@ export default async function handler(req, res) {
       const cmpServiceIncome = (await cmpServiceIncomeResult.json())[0] ?? {};
       const cmpRegistration = (await cmpRegistrationResult.json())[0] ?? {};
       const cmpCategoryRows = await cmpCategoryResult.json();
+      const cmpBidderEngagement = (await cmpBidderEngagementResult.json())[0] ?? {};
 
       const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
       const cmpAuctionsConcluded = Number(cmpSettled.auctions_concluded ?? 0);
@@ -3153,6 +3319,8 @@ export default async function handler(req, res) {
         Number(cmpServiceIncome.service_income_buyers_premium ?? 0) + Number(cmpServiceIncome.service_income_commission ?? 0);
       const cmpRegistered = Number(cmpRegistration.registered ?? 0);
       const cmpParticipatingRegistered = Number(cmpRegistration.participating ?? 0);
+      const cmpTotalBidEvents = Number(cmpBidderEngagement.total_bid_events ?? 0);
+      const cmpUniqueParticipatingBidders = Number(cmpBidderEngagement.unique_participating_bidders ?? 0);
 
       // Safe % change: null (never a fabricated number) whenever the prior
       // period had nothing to compare against.
@@ -3182,6 +3350,10 @@ export default async function handler(req, res) {
         registration_conversion_pct: pctChange(
           registeredCustomers > 0 ? (participatingRegisteredBidders / registeredCustomers) * 100 : null,
           cmpRegistered > 0 ? (cmpParticipatingRegistered / cmpRegistered) * 100 : null,
+        ),
+        avg_bids_per_unique_bidder_pct: pctChange(
+          avgBidsPerUniqueBidder,
+          cmpUniqueParticipatingBidders > 0 ? cmpTotalBidEvents / cmpUniqueParticipatingBidders : null,
         ),
 
         // Previous-period category-level Avg Bid aggregates — same shape as
@@ -3343,6 +3515,21 @@ export default async function handler(req, res) {
       // CONVERSION query comment above for cohort definition.
       registered_customers: registeredCustomers,
       participating_registered_bidders: participatingRegisteredBidders,
+
+      // Avg Bids / Unique Bidder — bidder engagement/intensity, NOT a peso
+      // metric. total_bid_events / unique_participating_bidders, both from
+      // the SAME bidder-grain query (see AVG BIDS / UNIQUE BIDDER comment
+      // above) so they always reconcile against each other and against
+      // bidder_engagement below by construction. null (rendered as "—")
+      // when nobody participated in this scope, never a fabricated 0.
+      total_bid_events: totalBidEvents,
+      unique_participating_bidders: uniqueParticipatingBidders,
+      avg_bids_per_unique_bidder: avgBidsPerUniqueBidder,
+
+      // Per-bidder drilldown for the Avg Bids / Unique Bidder scorecard —
+      // one row per canonical Participating bidder identity in this scope,
+      // already sorted by bid_events descending (see the query above).
+      bidder_engagement: bidderEngagement,
 
       // For Approval: lots whose resolved for_approval_status is exactly
       // 'For Approval', independent of lifecycle status (Unsold/Outstanding/

@@ -4,6 +4,7 @@ import AvgBidCategoryCard from "./primitives/AvgBidCategoryCard";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
+import BidderEngagementModal from "./primitives/BidderEngagementModal";
 import { formatPeso } from "../utils/format";
 
 const METHODOLOGY = {
@@ -21,6 +22,8 @@ const METHODOLOGY = {
     "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots.",
   registration:
     "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
+  avgBidsPerUniqueBidder:
+    "Total real bid events ÷ unique participating bidders in the selected scope — a measure of bidder engagement/intensity, not a peso figure. Higher means the average bidder places more bids; lower means bidders participate more shallowly. Click to see the per-bidder breakdown.",
 };
 
 export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "", onSelectCategory }) {
@@ -33,6 +36,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
     serviceIncomeLots,
     categoryBreakdown,
     branchBreakdown,
+    bidderEngagement,
     comparison,
   } = overview;
   const [drilldown, setDrilldown] = useState(null);
@@ -112,10 +116,10 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         </div>
       </div>
 
-      {/* BUSINESS HEALTH */}
+      {/* BUSINESS / BIDDER EFFICIENCY */}
       <div>
-        <div className="panel-title mb-2">Business Health · {rangeLabel}</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="panel-title mb-2">Business / Bidder Efficiency · {rangeLabel}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatTile
           eyebrow="Lots Sold / Listed"
           value={`${heroKPIs.lotsSold} / ${heroKPIs.lotsListed}`}
@@ -153,6 +157,22 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">{METHODOLOGY.registration}</div>
           </div>
         </div>
+        <StatTile
+          eyebrow="Avg Bids / Unique Bidder"
+          value={heroKPIs.avgBidsPerUniqueBidder != null ? heroKPIs.avgBidsPerUniqueBidder.toFixed(1) : "—"}
+          sub={
+            heroKPIs.uniqueParticipatingBidders > 0
+              ? `${heroKPIs.totalBidEvents} bids · ${heroKPIs.uniqueParticipatingBidders} bidders`
+              : "No bidder activity"
+          }
+          methodology={METHODOLOGY.avgBidsPerUniqueBidder}
+          onClick={() => setDrilldown("avgBidsPerUniqueBidder")}
+          extraDeltas={
+            comparison && comparison.avg_bids_per_unique_bidder_pct != null
+              ? [{ label: compareLabel, pct: comparison.avg_bids_per_unique_bidder_pct }]
+              : []
+          }
+        />
         <StatTile
           eyebrow="Service Income"
           value={formatPeso(heroKPIs.serviceIncome)}
@@ -197,6 +217,12 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         subtitle={`${rangeLabel} · every listed lot regardless of settlement status`}
         rows={auctionSummary}
         lotsByAuction={lotsByAuction}
+      />
+      <BidderEngagementModal
+        open={drilldown === "avgBidsPerUniqueBidder"}
+        onClose={() => setDrilldown(null)}
+        rows={bidderEngagement}
+        rangeLabel={rangeLabel}
       />
     </div>
   );
