@@ -4,7 +4,7 @@ export default function Card({ title, subtitle, action, className = "", children
       {(title || action) && (
         <div className="flex items-start justify-between mb-1">
           <div>
-            {title && <div className="eyebrow">{title}</div>}
+            {title && <div className="panel-title">{title}</div>}
             {subtitle && <div className="text-[14.5px] text-ink mt-0.5">{subtitle}</div>}
           </div>
           {action}

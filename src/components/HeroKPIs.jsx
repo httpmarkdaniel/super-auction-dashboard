@@ -72,7 +72,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
     <div className="flex flex-col gap-5">
       {/* AUCTION PERFORMANCE */}
       <div>
-        <div className="eyebrow mb-2">Auction Performance · {rangeLabel}</div>
+        <div className="panel-title mb-2">Auction Performance · {rangeLabel}</div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatTile
             eyebrow={`Total Bid Amount · ${rangeLabel}`}
@@ -114,7 +114,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
 
       {/* BUSINESS HEALTH */}
       <div>
-        <div className="eyebrow mb-2">Business Health · {rangeLabel}</div>
+        <div className="panel-title mb-2">Business Health · {rangeLabel}</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatTile
           eyebrow="Lots Sold / Listed"
