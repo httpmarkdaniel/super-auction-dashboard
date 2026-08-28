@@ -6,30 +6,39 @@ import { ALL_STORES } from "./mockData";
 // api/payables.js itself. Store filter still applies. No category param:
 // category allocation isn't mathematically safe for this table (see
 // api/payables.js and VendorPayablesBreakdown.jsx for the evidence).
-export function useVendorPayables(store, refreshNonce = 0) {
+//
+// detail: { q, sortKey, sortDir, page, pageSize } — the Full Detail
+// table's search/sort/pagination state (Architecture Phase 2A). Only a
+// real STORE change (or the very first load) blanks the view into the
+// full "Loading…" state; a refreshNonce tick or a detail-table
+// search/sort/page change is treated as a background refresh — current
+// content stays visible until the new page arrives, same pattern as
+// useCategoryOverview.js.
+export function useVendorPayables(store, refreshNonce = 0, detail = {}) {
+  const { q = "", sortKey = "amount", sortDir = "desc", page = 0, pageSize = 50 } = detail;
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
-  // Tracks the user's actual selection so a background refresh (refreshNonce
-  // alone ticking, from the app-wide 30s auto-refresh timer) can be told
-  // apart from a real store change. Only a real change (or the very first
-  // load, when there's no data yet) should blank the view into the
-  // "Loading…" state; a same-store background refresh should keep the
-  // current content visible and swap in fresh data once it arrives — same
-  // pattern useCategoryOverview.js already uses for CategoryView.
   const inputsRef = useRef({ store });
 
   useEffect(() => {
     let cancelled = false;
 
-    const inputsChanged = inputsRef.current.store !== store;
+    const storeChanged = inputsRef.current.store !== store;
     inputsRef.current = { store };
 
     async function load() {
       setState((s) =>
-        inputsChanged || !s.data ? { ...s, loading: true, error: null } : { ...s, error: null }
+        storeChanged || !s.data ? { ...s, loading: true, error: null } : { ...s, error: null }
       );
 
-      const params = new URLSearchParams(store !== ALL_STORES ? { store } : {})
+      const params = new URLSearchParams({
+        ...(store !== ALL_STORES ? { store } : {}),
+        ...(q ? { q } : {}),
+        sortKey,
+        sortDir,
+        page: String(page),
+        pageSize: String(pageSize),
+      })
         .toString()
         .replace(/\+/g, "%20");
 
@@ -54,7 +63,7 @@ export function useVendorPayables(store, refreshNonce = 0) {
     return () => {
       cancelled = true;
     };
-  }, [store, refreshNonce]);
+  }, [store, refreshNonce, q, sortKey, sortDir, page, pageSize]);
 
   return state;
 }

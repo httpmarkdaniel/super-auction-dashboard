@@ -68,9 +68,38 @@ const client = createClient({
 
 const PAID_STATUSES = ["Remitted", "Released"];
 
+// Detail-table search/sort — same fields/logic VendorPayablesBreakdown.jsx
+// used to run client-side over all 9,229 rows (Architecture Audit: 3.25MB
+// payload, fetched whether or not the "See Full Detail" section was ever
+// opened). Moved server-side so only one page of rows ever crosses the
+// wire; the aggregate KPIs below are computed from the full deduped row
+// set exactly as before and are NOT affected by these params.
+const DETAIL_SORTERS = {
+  payableId: (r) => r.payable_id,
+  vendor: (r) => r.vendor ?? "",
+  storeName: (r) => r.payable_store_name ?? "",
+  auction: (r) => (Number(r.distinct_auction_count) > 1 ? "Multiple" : r.single_auction_number || ""),
+  salesPeriod: (r) => r.payable_remarks ?? "",
+  status: (r) => r.payment_status ?? "",
+  bidAmount: (r) => Number(r.total_bid_amount) || 0,
+  commission: (r) => Number(r.total_commission) || 0,
+  amount: (r) => Number(r.total_payable_amount) || 0,
+  generateDate: (r) => r.generate_date ?? "",
+  remittedDate: (r) => r.remitted_date ?? "",
+};
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 200;
+
 export default async function handler(req, res) {
   try {
-    const { store = "" } = req.query;
+    const {
+      store = "",
+      q = "",
+      sortKey = "amount",
+      sortDir = "desc",
+      page = "0",
+      pageSize = String(DEFAULT_PAGE_SIZE),
+    } = req.query;
     const queryParams = { store };
 
     // One row per payable_id — the authoritative, non-duplicating grain
@@ -160,8 +189,49 @@ export default async function handler(req, res) {
     const monthsSorted = [...byMonth.keys()].sort();
     const trendMonths = monthsSorted.slice(-12);
 
-    // Auction name (only meaningful/attempted for single-auction payables)
-    const singleAuctionNumbers = [...new Set(rows.map((r) => r.single_auction_number).filter(Boolean))];
+    // ---------------------------------------------------------
+    // FULL DETAIL — search + sort + pagination (Architecture Phase 2A).
+    // Previously every one of the ~9,229 deduped payable rows was
+    // serialized into the response (a ~3.25MB payload) on every load,
+    // whether or not the "See Full Detail" section was ever opened, and
+    // whether or not a search/sort narrowed it. The underlying ClickHouse
+    // scan is unchanged (still one query, all rows, needed for the
+    // aggregate KPIs above) — only what crosses the wire changes: search
+    // and sort now run here, server-side, over the same already-fetched
+    // `rows`, and only the current page is returned. Totals/aggregates
+    // above are computed from the FULL row set and are never affected by
+    // these params.
+    // ---------------------------------------------------------
+    const searchQuery = String(q).trim().toLowerCase();
+    const filteredRows = searchQuery
+      ? rows.filter((r) => {
+          const vendor = (r.vendor || "").toLowerCase();
+          const storeName = (r.payable_store_name || "").toLowerCase();
+          const auctionLabel =
+            Number(r.distinct_auction_count) > 1
+              ? "multiple"
+              : (r.single_auction_number || "").toLowerCase();
+          return vendor.includes(searchQuery) || storeName.includes(searchQuery) || auctionLabel.includes(searchQuery);
+        })
+      : rows;
+
+    const sorter = DETAIL_SORTERS[sortKey] || DETAIL_SORTERS.amount;
+    const dir = sortDir === "asc" ? 1 : -1;
+    const sortedRows = [...filteredRows].sort((a, b) => {
+      const av = sorter(a);
+      const bv = sorter(b);
+      const cmp = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return cmp * dir;
+    });
+
+    const pageNum = Math.max(0, Number(page) || 0);
+    const pageSizeNum = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(pageSize) || DEFAULT_PAGE_SIZE));
+    const pageRows = sortedRows.slice(pageNum * pageSizeNum, pageNum * pageSizeNum + pageSizeNum);
+
+    // Auction name — only looked up for the current page's rows (was
+    // previously looked up for every distinct single-auction payable
+    // company-wide, regardless of whether it was ever displayed).
+    const singleAuctionNumbers = [...new Set(pageRows.map((r) => r.single_auction_number).filter(Boolean))];
     let auctionNames = {};
     if (singleAuctionNumbers.length > 0) {
       const nameResult = await client.query({
@@ -199,9 +269,15 @@ export default async function handler(req, res) {
       trend_by_month: trendMonths.map((m) => ({ month: m, amount: byMonth.get(m).amount, count: byMonth.get(m).count })),
 
       // Full Detail — one row per payable_id (the authoritative grain),
-      // not per auction and not per raw item. Not capped: the "SUM of
-      // detail rows == Total Payables" invariant must hold exactly.
-      detail: rows.map((r) => ({
+      // not per auction and not per raw item. Paginated as of Architecture
+      // Phase 2A: `detail` is now just the current page (search + sort
+      // applied first, server-side — see DETAIL_SORTERS above), never all
+      // ~9,229 rows. The aggregate KPIs above (total_payables, etc.) are
+      // computed from the FULL row set independently of this page/filter,
+      // so "SUM(category/status buckets) == Total Payables" still holds
+      // exactly — it's only ever been "SUM(detail page) == Total Payables"
+      // that no longer applies, and that was never a stated invariant.
+      detail: pageRows.map((r) => ({
         payable_id: r.payable_id,
         vendor: r.vendor,
         store_name: r.payable_store_name,
@@ -216,6 +292,9 @@ export default async function handler(req, res) {
         generate_date: r.generate_date,
         remitted_date: r.remitted_date,
       })),
+      detail_total_count: sortedRows.length,
+      detail_page: pageNum,
+      detail_page_size: pageSizeNum,
     });
   } catch (err) {
     console.error("Payables API error:", err);

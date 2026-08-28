@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import StorySection from "./primitives/StorySection";
 import StatTile from "./primitives/StatTile";
@@ -6,20 +6,6 @@ import Card from "./primitives/Card";
 import RankedBar from "./primitives/RankedBar";
 import usePalette from "../usePalette";
 import { formatPeso } from "../utils/format";
-
-const SORTERS = {
-  payableId: (r) => r.payableId,
-  vendor: (r) => r.vendor ?? "",
-  storeName: (r) => r.storeName ?? "",
-  auction: (r) => r.auctionLabel ?? "",
-  salesPeriod: (r) => r.salesPeriod ?? "",
-  status: (r) => r.status ?? "",
-  bidAmount: (r) => r.bidAmount,
-  commission: (r) => r.commission,
-  amount: (r) => r.amount,
-  generateDate: (r) => r.generateDate ?? "",
-  remittedDate: (r) => r.remittedDate ?? "",
-};
 
 function SortHeader({ label, sortKey, sort, onSort, align = "left" }) {
   const active = sort.key === sortKey;
@@ -61,11 +47,39 @@ function TrendTooltip({ active, payload, label }) {
 // therefore shown per PAYABLE (the one grain that's actually safe to
 // sum), with an honest "Multiple (N)" / "Unassigned" auction indicator
 // rather than a fabricated split.
-export default function VendorPayablesBreakdown({ data, scopeLabel }) {
+export default function VendorPayablesBreakdown({
+  data,
+  scopeLabel,
+  detailQuery,
+  onDetailQueryChange,
+  detailSort,
+  onDetailSortChange,
+  detailPage,
+  onDetailPageChange,
+  detailPageSize,
+}) {
   const palette = usePalette();
   const [showDetail, setShowDetail] = useState(false);
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState({ key: "amount", dir: "desc" });
+
+  // Local, immediately-responsive text box; the actual server request
+  // (via onDetailQueryChange, owned by PayablesView) is debounced so
+  // typing doesn't fire a request per keystroke — search now runs
+  // server-side over the full payables set instead of an in-memory array
+  // (Architecture Phase 2A: Full Detail used to ship every one of ~9,229
+  // rows, ~3.25MB, on every load; it's paginated now, so client-side
+  // search/sort over "the rows we happen to have in memory" no longer
+  // means "search/sort over everything").
+  const [queryInput, setQueryInput] = useState(detailQuery);
+  useEffect(() => {
+    setQueryInput(detailQuery);
+  }, [detailQuery]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (queryInput !== detailQuery) onDetailQueryChange(queryInput);
+    }, 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryInput]);
 
   const totalPayables = Number(data.total_payables) || 0;
   const paidAmount = Number(data.paid_amount) || 0;
@@ -88,7 +102,10 @@ export default function VendorPayablesBreakdown({ data, scopeLabel }) {
 
   const trend = (data.trend_by_month || []).map((t) => ({ month: t.month, amount: Number(t.amount) || 0 }));
 
-  const detailRows = (data.detail || []).map((d) => ({
+  // Already the current page, already searched/sorted server-side (see
+  // api/payables.js's DETAIL_SORTERS) — no client-side filtering/sorting
+  // left to do here.
+  const rows = (data.detail || []).map((d) => ({
     payableId: d.payable_id,
     vendor: d.vendor,
     storeName: d.store_name,
@@ -104,29 +121,9 @@ export default function VendorPayablesBreakdown({ data, scopeLabel }) {
     remittedDate: d.remitted_date,
   }));
 
-  const rows = (() => {
-    const q = query.trim().toLowerCase();
-    let filtered = detailRows.filter((r) => {
-      if (!q) return true;
-      return (
-        (r.vendor || "").toLowerCase().includes(q) ||
-        (r.storeName || "").toLowerCase().includes(q) ||
-        (r.auctionLabel || "").toLowerCase().includes(q)
-      );
-    });
-    const getter = SORTERS[sort.key];
-    filtered = [...filtered].sort((a, b) => {
-      const av = getter(a);
-      const bv = getter(b);
-      const cmp = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
-      return sort.dir === "asc" ? cmp : -cmp;
-    });
-    return filtered;
-  })();
-
-  function handleSort(key) {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
-  }
+  const detailTotalCount = Number(data.detail_total_count) || 0;
+  const pageCount = Math.max(1, Math.ceil(detailTotalCount / detailPageSize));
+  const clampedPage = Math.min(detailPage, pageCount - 1);
 
   return (
     <>
@@ -195,8 +192,8 @@ export default function VendorPayablesBreakdown({ data, scopeLabel }) {
                 <span className="text-muted text-[14.5px]">⌕</span>
                 <input
                   type="text"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  value={queryInput}
+                  onChange={(e) => setQueryInput(e.target.value)}
                   placeholder="Filter vendor, store, or auction…"
                   className="flex-1 min-w-0 text-[15px] text-ink bg-transparent outline-none placeholder:text-muted"
                 />
@@ -206,17 +203,17 @@ export default function VendorPayablesBreakdown({ data, scopeLabel }) {
                 <table className="w-full text-[15px]">
                   <thead>
                     <tr className="text-ink text-[13px] uppercase tracking-wide">
-                      <SortHeader label="Payable ID" sortKey="payableId" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Auction(s)" sortKey="auction" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Vendor" sortKey="vendor" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Store" sortKey="storeName" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Sales Period" sortKey="salesPeriod" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Payment Status" sortKey="status" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Bid Amount" sortKey="bidAmount" sort={sort} onSort={handleSort} align="right" />
-                      <SortHeader label="Commission" sortKey="commission" sort={sort} onSort={handleSort} align="right" />
-                      <SortHeader label="Payable Amount" sortKey="amount" sort={sort} onSort={handleSort} align="right" />
-                      <SortHeader label="Generate Date" sortKey="generateDate" sort={sort} onSort={handleSort} />
-                      <SortHeader label="Remitted Date" sortKey="remittedDate" sort={sort} onSort={handleSort} />
+                      <SortHeader label="Payable ID" sortKey="payableId" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Auction(s)" sortKey="auction" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Vendor" sortKey="vendor" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Store" sortKey="storeName" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Sales Period" sortKey="salesPeriod" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Payment Status" sortKey="status" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Bid Amount" sortKey="bidAmount" sort={detailSort} onSort={onDetailSortChange} align="right" />
+                      <SortHeader label="Commission" sortKey="commission" sort={detailSort} onSort={onDetailSortChange} align="right" />
+                      <SortHeader label="Payable Amount" sortKey="amount" sort={detailSort} onSort={onDetailSortChange} align="right" />
+                      <SortHeader label="Generate Date" sortKey="generateDate" sort={detailSort} onSort={onDetailSortChange} />
+                      <SortHeader label="Remitted Date" sortKey="remittedDate" sort={detailSort} onSort={onDetailSortChange} />
                     </tr>
                   </thead>
                   <tbody>
@@ -249,6 +246,30 @@ export default function VendorPayablesBreakdown({ data, scopeLabel }) {
                   </tbody>
                 </table>
               </div>
+
+              {detailTotalCount > 0 && (
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-gridline text-[14px]">
+                  <button
+                    type="button"
+                    onClick={() => onDetailPageChange(Math.max(0, clampedPage - 1))}
+                    disabled={clampedPage === 0}
+                    className="font-semibold text-series1 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-muted">
+                    Page {clampedPage + 1} of {pageCount} · {detailTotalCount} payable{detailTotalCount === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onDetailPageChange(Math.min(pageCount - 1, clampedPage + 1))}
+                    disabled={clampedPage >= pageCount - 1}
+                    className="font-semibold text-series1 hover:underline disabled:text-muted disabled:no-underline disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

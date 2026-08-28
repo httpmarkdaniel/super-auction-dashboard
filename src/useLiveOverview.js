@@ -28,7 +28,14 @@ function fetchJson(path, params = {}) {
   });
 }
 
-export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce = 0) {
+// active: false pauses fetching AND the 30s poll entirely (no HTTP calls),
+// leaving the last-fetched data in place — for callers whose current page
+// doesn't need this data (see src/App.jsx: Overview/Auction Types/Export
+// are the only consumers of the returned `overview`/`categories`/`lots`
+// data; the Topbar search bar reads `operationsDetail`, itself derived
+// from `lots`, on every page). Flipping back to true re-fetches
+// immediately and resumes the interval — never a silent permanent stall.
+export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce = 0, active = true) {
   const [state, setState] = useState({
     data: {
       overview: MOCK_OVERVIEW,
@@ -48,6 +55,8 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
   });
 
   useEffect(() => {
+    if (!active) return;
+
     let cancelled = false;
 
     async function load() {
@@ -60,46 +69,30 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
         // this can never change any other Overview figure.
         const { from: compareFrom, to: compareTo } = resolveComparisonRange(dateRangeKey);
 
-        const [
-          liveOverview,
-          liveLeaderboards,
-          settledLotsResult,
-          lotsResult,
-          unsoldLotsResult,
-          activeAuctionsResult,
-          serviceIncomeResult,
-          forApprovalResult,
-        ] = await Promise.all([
+        // Four of the six overview `type=` variants that used to fire here
+        // every 30s (settled-lots, unsold-lots, active-auctions,
+        // for-approval) fed row-level arrays that no live component reads —
+        // verified by grepping every consumer of the returned
+        // settledLots/unsoldLotRows/activeAuctionRows/forApprovalLots
+        // fields (App.jsx just carries them through; nothing renders their
+        // contents, only the SCALAR figures already present on
+        // `liveOverview` itself — for_approval_lots, active_auctions,
+        // unsold_lots/unsold_value, etc.). Removed outright rather than
+        // left in "just in case": each was a full extra HTTP round-trip
+        // rebuilding the same settled-lot population from scratch. Only
+        // `type=lots` (Lots Sold/Listed drilldown + operationsDetail + the
+        // Topbar search bar) and `type=service-income` (Service Income
+        // drilldown) are actually consumed, so those two remain.
+        const [liveOverview, liveLeaderboards, lotsResult, serviceIncomeResult] = await Promise.all([
           fetchJson("/api/overview", { from, to, store, category, compareFrom, compareTo }),
           fetchJson("/api/leaderboards", { from, to, store, category }),
 
-          // TOTAL BID AMOUNT DRILLDOWN — the exact settled lots behind
-          // total_bid_amount, sum(bid_amount) reconciles to it exactly.
-          fetchJson("/api/overview", { from, to, store, category, type: "settled-lots" }),
-
-          // LOTS SOLD / LISTED DRILLDOWN
+          // LOTS SOLD / LISTED DRILLDOWN + operationsDetail/search
           fetchJson("/api/overview", { from, to, store, category, type: "lots" }),
 
-          // UNSOLD LOTS + WITH RESERVE PRICE DRILLDOWN (same rows, the
-          // With Reserve view filters client-side by reserved_price > 0)
-          fetchJson("/api/overview", { from, to, store, category, type: "unsold-lots" }),
-
-          // ACTIVE AUCTIONS DRILLDOWN — "right now", independent of the
-          // selected date range AND deliberately independent of category —
-          // an active auction can contain lots from multiple categories, so
-          // "how many auctions contain at least one lot in category X" is a
-          // different, not-yet-agreed metric from today's "auctions in
-          // progress right now" count. See api/overview.js's ACTIVE
-          // AUCTIONS comment for the same reasoning. Still store-scoped.
-          fetchJson("/api/overview", { store, type: "active-auctions" }),
-
           // SERVICE INCOME DRILLDOWN — the exact settled lots behind
-          // Service Income, same population as Total Bid Amount above.
+          // Service Income, same population as Total Bid Amount.
           fetchJson("/api/overview", { from, to, store, category, type: "service-income" }),
-
-          // FOR APPROVAL DRILLDOWN — lots resolved for_approval_status =
-          // 'For Approval', independent of lifecycle status.
-          fetchJson("/api/overview", { from, to, store, category, type: "for-approval" }),
         ]);
 
         if (cancelled) return;
@@ -260,39 +253,19 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
 
             payables: MOCK_PAYABLES,
 
-            // LIVE UNSOLD LOTS drilldown rows (strict status='Unsold') —
-            // used for the Unsold Lots AND With Reserve Price KPIs, which
-            // filters this same array client-side by reservedPrice > 0.
-            // Deliberately separate from `lots.lots` above — see comment
-            // there.
-            unsoldLotRows: (unsoldLotsResult.rows ?? []).map((row) => ({
-              lotNumber: row.lot_number,
-              item: row.name,
-              vendor: row.vendor ?? "—",
-              category: "—",
-              status: "Unsold",
-              approval: row.for_approval_status ?? null,
-              totalBidAmount: 0,
-              reservedPrice: Number(row.reserved_price ?? 0),
-              soldPrice: Number(row.sold_price ?? 0),
-              branch: row.store_name ?? "—",
-              auctionNumber: row.auction_number,
-            })),
-
-            // LIVE TOTAL BID AMOUNT DRILLDOWN — the settled lots summing
-            // exactly to total_bid_amount.
-            settledLots: (settledLotsResult.rows ?? []).map((row) => ({
-              auctionNumber: row.auction_number,
-              lotNumber: row.lot_number,
-              item: row.name,
-              branch: row.store_name,
-              category: row.category,
-              vendor: row.vendor,
-              status: row.status,
-              approval: row.for_approval_status ?? null,
-              bidderName: row.bidder_name,
-              bidAmount: Number(row.bid_amount ?? 0),
-            })),
+            // unsoldLotRows/settledLots/forApprovalLots/activeAuctionRows
+            // used to come from four separate /api/overview requests
+            // (type=unsold-lots/settled-lots/for-approval/active-auctions)
+            // that nothing in the current UI reads — see the removed-fetch
+            // comment above. Kept as empty arrays (not removed from the
+            // shape entirely) so anything still destructuring them keeps
+            // working; the corresponding SCALAR figures (unsold_lots,
+            // for_approval_lots, active_auctions, etc.) still come from
+            // `liveOverview` above, unaffected.
+            unsoldLotRows: [],
+            settledLots: [],
+            forApprovalLots: [],
+            activeAuctionRows: [],
 
             // LIVE SERVICE INCOME DRILLDOWN — the settled lots summing
             // exactly to service_income_total (and each component summing
@@ -311,31 +284,6 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               commissionPct: Number(row.commission_pct ?? 0),
               commissionIncome: Number(row.commission_income ?? 0),
               totalServiceIncome: Number(row.total_service_income ?? 0),
-            })),
-
-            // LIVE FOR APPROVAL DRILLDOWN — lots summing exactly to
-            // for_approval_lots (count) / for_approval_bid_amount (sum).
-            // Not restricted by lifecycle status — status is shown as-is.
-            forApprovalLots: (forApprovalResult.rows ?? []).map((row) => ({
-              auctionNumber: row.auction_number,
-              lotNumber: row.lot_number,
-              item: row.name,
-              branch: row.store_name,
-              vendor: row.vendor,
-              status: row.status,
-              approval: row.for_approval_status ?? null,
-              bidAmount: Number(row.bid_amount ?? 0),
-              reservedPrice: Number(row.reserved_price ?? 0),
-            })),
-
-            // LIVE ACTIVE AUCTIONS DRILLDOWN — auction-level, not lot-level.
-            activeAuctionRows: (activeAuctionsResult.rows ?? []).map((row) => ({
-              auctionNumber: row.auction_number,
-              name: row.name,
-              branch: row.store_name,
-              startingTime: row.starting_time,
-              endingTime: row.ending_time,
-              lotCount: Number(row.lot_count ?? 0),
             })),
           },
 
@@ -376,7 +324,7 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
       cancelled = true;
       clearInterval(interval);
     };
-  }, [dateRangeKey, store, category, refreshNonce]);
+  }, [dateRangeKey, store, category, refreshNonce, active]);
 
   return state;
 }

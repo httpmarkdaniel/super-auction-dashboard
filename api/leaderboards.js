@@ -30,11 +30,24 @@ export default async function handler(req, res) {
       category,
     };
 
-    // =========================================================
-    // OVERALL BIDDER COMPOSITION
-    // Keeps the existing working dashboard definition.
-    // =========================================================
-    const compositionResult = await client.query({
+    // ---------------------------------------------------------
+    // PERFORMANCE NOTE (Architecture Phase 2A): these 7 queries are
+    // independent of each other's results — none reads a value computed by
+    // a prior query before building its own SQL — so they're launched
+    // together via Promise.all below instead of one `await` per query
+    // (previously ~11-12s sequential; each query's own text/semantics are
+    // UNCHANGED). A deeper consolidation (sharing one settled_lots scan
+    // across the 5 queries that each independently rebuild it) was
+    // deliberately NOT done here: 3 of these 5 (compositionResult's
+    // period_bidders, settledCompositionResult, perAuctionResult's
+    // classified_auction_bidders) use uniqExact-style distinct bidder
+    // counts that do NOT sum safely across a per-auction breakdown (a
+    // bidder active in 2 auctions would be double-counted) — merging them
+    // without a verified-safe technique (e.g. WITH TOTALS) risked exactly
+    // the kind of silent metric drift this phase is required to avoid. See
+    // the Architecture Audit / Phase 2A report for the deferred plan.
+    // ---------------------------------------------------------
+    const compositionQuery = {
       query: `
         WITH auction_store AS (
           SELECT DISTINCT
@@ -130,7 +143,7 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // =========================================================
     // PER-AUCTION PARTICIPATING BIDDERS
@@ -141,7 +154,7 @@ export default async function handler(req, res) {
     // A bidder participating in 3 auctions is therefore counted
     // once in EACH of those 3 auctions.
     // =========================================================
-    const perAuctionResult = await client.query({
+    const perAuctionQuery = {
       query: `
         WITH auction_store AS (
           SELECT DISTINCT
@@ -275,7 +288,7 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // =========================================================
     // SETTLED BIDDER COMPOSITION (Paid/Released) — the business
@@ -308,7 +321,7 @@ export default async function handler(req, res) {
     // just this period) falls on/after the selected range's start.
     // Returning = it falls before the selected range's start.
     // =========================================================
-    const settledCompositionResult = await client.query({
+    const settledCompositionQuery = {
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
@@ -398,12 +411,12 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // Per-auction breakdown of the same settled/bridge classification —
     // uses the identical BIDDER_IDENTITY_CTES bridge as settledCompositionResult
     // above, just grouped by auction instead of summed overall.
-    const settledPerAuctionResult = await client.query({
+    const settledPerAuctionQuery = {
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
@@ -496,7 +509,7 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // =========================================================
     // PER-AUCTION PARTICIPATING (UNION) — Full Auction Detail ONLY.
@@ -536,7 +549,7 @@ export default async function handler(req, res) {
     // participating_unclassified_bidders/_bid_amount, never silently
     // folded into Returning.
     // =========================================================
-    const perAuctionParticipatingUnionResult = await client.query({
+    const perAuctionParticipatingUnionQuery = {
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
@@ -650,7 +663,7 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // =========================================================
     // TOP 10 VENDORS (settled) — same Paid/Released settled population as
@@ -658,7 +671,7 @@ export default async function handler(req, res) {
     // row (verified 0% missing across 1.43M Paid/Released rows sampled),
     // no identity bridge needed.
     // =========================================================
-    const settledVendorsResult = await client.query({
+    const settledVendorsQuery = {
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
@@ -709,7 +722,7 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
     // =========================================================
     // TOP 10 BIDDERS (settled, winning bidders only) — uses the same
@@ -724,7 +737,7 @@ export default async function handler(req, res) {
     // population, same bridge, so they're guaranteed identical, not
     // independently recomputed).
     // =========================================================
-    const settledBiddersResult = await client.query({
+    const settledBiddersQuery = {
       query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
@@ -854,15 +867,43 @@ export default async function handler(req, res) {
       `,
       query_params: queryParams,
       format: "JSONEachRow",
-    });
+    };
 
-    const compositionRows = await compositionResult.json();
-    const auctionRows = await perAuctionResult.json();
-    const settledCompositionRows = await settledCompositionResult.json();
-    const settledPerAuctionRows = await settledPerAuctionResult.json();
-    const perAuctionParticipatingUnionRows = await perAuctionParticipatingUnionResult.json();
-    const settledVendorRows = await settledVendorsResult.json();
-    const settledBidderRows = await settledBiddersResult.json();
+    const [
+      compositionResult,
+      perAuctionResult,
+      settledCompositionResult,
+      settledPerAuctionResult,
+      perAuctionParticipatingUnionResult,
+      settledVendorsResult,
+      settledBiddersResult,
+    ] = await Promise.all([
+      client.query(compositionQuery),
+      client.query(perAuctionQuery),
+      client.query(settledCompositionQuery),
+      client.query(settledPerAuctionQuery),
+      client.query(perAuctionParticipatingUnionQuery),
+      client.query(settledVendorsQuery),
+      client.query(settledBiddersQuery),
+    ]);
+
+    const [
+      compositionRows,
+      auctionRows,
+      settledCompositionRows,
+      settledPerAuctionRows,
+      perAuctionParticipatingUnionRows,
+      settledVendorRows,
+      settledBidderRows,
+    ] = await Promise.all([
+      compositionResult.json(),
+      perAuctionResult.json(),
+      settledCompositionResult.json(),
+      settledPerAuctionResult.json(),
+      perAuctionParticipatingUnionResult.json(),
+      settledVendorsResult.json(),
+      settledBiddersResult.json(),
+    ]);
 
     const composition = compositionRows[0] ?? {};
     const settledComposition = settledCompositionRows[0] ?? {};

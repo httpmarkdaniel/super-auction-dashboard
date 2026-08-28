@@ -1066,6 +1066,21 @@ export default function App() {
     ? [ALL_STORES, ...realStores]
     : STORE_OPTIONS;
 
+  // The historical/settled Overview fetch (useLiveOverview) is expensive —
+  // ~4 HTTP requests rebuilding the settled-lot population on every 30s
+  // tick — and was previously running unconditionally regardless of the
+  // active tab (see the Architecture Audit's P0 finding). It's paused
+  // whenever the active tab needs none of its output: Overview itself,
+  // Auction Types (reads overview.channelBreakdown), and Export (reads the
+  // whole overview object) are the only tabs that do. Every other tab
+  // fetches its own data independently and never touched this hook. The
+  // Topbar search bar also reads operationsDetail (derived from this same
+  // data) on every tab — while paused it shows the last-fetched snapshot
+  // rather than going stale-empty, and catches up the moment the user
+  // returns to a tab that needs it (see useLiveOverview.js's `active` param).
+  const needsOverviewData =
+    tab === "Overview" || tab === "Auction Types" || tab === "Export";
+
   const {
     data: live,
     loading: overviewLoading,
@@ -1077,6 +1092,7 @@ export default function App() {
       : store,
     overviewCategory,
     refreshNonce,
+    needsOverviewData,
   );
 
   const rangeLabel =
