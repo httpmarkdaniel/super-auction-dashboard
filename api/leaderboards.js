@@ -908,6 +908,15 @@ export default async function handler(req, res) {
     const composition = compositionRows[0] ?? {};
     const settledComposition = settledCompositionRows[0] ?? {};
 
+    // Phase 2C: cached at Vercel's Edge Network for 60s, keyed implicitly
+    // by the full request URL (from/to/store/category — same stable,
+    // order-consistent query-string convention as api/overview.js's
+    // fetchJson()). Longer TTL than Overview's 30s is safe here: this
+    // response is entirely settled/historical (composition, vendors,
+    // bidders) with no live "right now" concept and no per-user/session
+    // data, so a 60-90s-old snapshot carries no freshness risk beyond what
+    // the 30s frontend poll already tolerates.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
     return res.status(200).json({
       // Settled (Paid/Released) bidder composition — reconciles exactly
       // to api/overview.js's total_bid_amount. See the query comment

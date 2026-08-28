@@ -3201,6 +3201,39 @@ export default async function handler(req, res) {
     // =========================================================
     // SUMMARY RESPONSE
     // =========================================================
+    //
+    // Phase 2C: cached at Vercel's Edge Network for 30s (matching the
+    // frontend's own 30s poll interval — see useLiveOverview.js), keyed
+    // implicitly by the full request URL (from/to/store/category/
+    // compareFrom/compareTo are all query params, and fetchJson() always
+    // emits them in the same order with empty values omitted, so identical
+    // scopes always produce byte-identical URLs and never collide with a
+    // different scope). Only ClickHouse-derived, business-logic-free HTTP
+    // caching — no new infrastructure, no in-process Map. Applies ONLY to
+    // this 200 response; the type=... branches above and the 500 catch
+    // block below are untouched (never cached).
+    //
+    // CAVEAT (documented per Phase 2C's explicit instructions): this
+    // response mixes historical/settled fields (Total Bid Amount, Service
+    // Income, category/branch breakdowns, Bid Trend, etc.) with a handful
+    // of genuinely live fields (todays_bid_amount, current_bid_value,
+    // current_bid_value_today, current_bid_value_branches/_categories,
+    // active_auctions, live_bid_correction_delta/live_corrected_auctions/
+    // unmapped_live_lots) in ONE JSON payload. A clean split (live always
+    // fresh, historical cached) would require bundling ~20 intermediate
+    // query results across every batch above into a separate cache path —
+    // assessed as disproportionate surgery for this phase given Phase 2B's
+    // own experience finding a subtle correctness bug in a smaller, similar
+    // refactor. Net effect: on a cache HIT, the live fields above can be up
+    // to ~30-60s stale (30s fresh window + up to 30s stale-while-revalidate
+    // window) instead of reflecting the exact instant of that request. This
+    // is not a regression in practice — the frontend already only samples
+    // these fields once per 30s poll, so a shared 30-60s-old snapshot is
+    // close to what a single user already experiences; it just means
+    // multiple concurrent tabs/users now sometimes share one snapshot
+    // instead of each re-computing their own. Do not raise this TTL without
+    // separating live from historical fields first.
+    res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
     return res.status(200).json({
       // Business definition of Total Bid Amount: settled (Paid/Released)
       // bid_amount only. See the SETTLED query comments above.
