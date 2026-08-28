@@ -16,7 +16,10 @@ function TimelineTip({ anchorPct, eyebrow, lines }) {
   const left = Math.min(88, Math.max(12, anchorPct));
   return (
     <div
-      className="absolute bottom-full mb-2 -translate-x-1/2 z-50 pointer-events-none"
+      // mb-12 clears the tallest permanent-label tier (see PermanentLabel)
+      // so the two never visually collide when hovering a marker that
+      // already has a permanent label above it.
+      className="absolute bottom-full mb-12 -translate-x-1/2 z-50 pointer-events-none"
       style={{ left: `${left}%` }}
     >
       <div className="floating px-3 py-2 text-[12.5px] leading-tight whitespace-nowrap shadow-lg">
@@ -27,6 +30,28 @@ function TimelineTip({ anchorPct, eyebrow, lines }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ALWAYS-VISIBLE compact label + dashed connector for the handful of
+// genuinely significant events (First Bid / New Leader / Current or
+// Latest Leading Bid / Reserve Met) — this is what makes real bid
+// activity apparent on the card WITHOUT hovering anything. `tier`
+// staggers the connector's height (0 = short/close to the bar, 1 =
+// taller) so two labels landing close together horizontally don't
+// overlap; the richer hover tooltip (TimelineTip) still supplies full
+// detail on top of this.
+function PermanentLabel({ pct, tier, eyebrow, sub }) {
+  const left = Math.min(92, Math.max(8, pct));
+  return (
+    <div
+      className="absolute bottom-full -translate-x-1/2 flex flex-col items-center pointer-events-none z-25"
+      style={{ left: `${left}%` }}
+    >
+      <div className="text-[9.5px] uppercase tracking-wide font-semibold text-ink whitespace-nowrap leading-none">{eyebrow}</div>
+      {sub && <div className="text-[9px] tabular text-series1 whitespace-nowrap leading-none mt-0.5">{sub}</div>}
+      <div className="w-px border-l border-dashed border-navy/40 mt-0.5" style={{ height: tier === 0 ? "10px" : "30px" }} />
     </div>
   );
 }
@@ -167,6 +192,38 @@ export default function AuctionProgressBar({
   const denseClusters = clusters.filter((c) => c.events.length > 1);
   const pinnedEvents = activityEvents?.pinned ?? [];
 
+  // ALWAYS-VISIBLE labels — First Bid and Current/Latest Leading Bid are
+  // always candidates when any real bid exists (each is unique by
+  // construction); Reserve Met joins when present (rare); one
+  // representative New Leader joins ONLY when an unclustered instance
+  // exists (a dense run of leadership changes stays a cluster marker
+  // instead — see clusterEvents' own reasoning), so this never grows
+  // unbounded on a busy auction. Sorted by position, then staggered
+  // between two connector-line heights whenever two candidates land close
+  // enough together to otherwise overlap.
+  const firstBidEvent = pinnedEvents.find((e) => e.types.includes("first-bid"));
+  const currentLeadingEvent = pinnedEvents.find((e) => e.types.includes("current-leading"));
+  const reserveMetEvent = pinnedEvents.find((e) => e.types.includes("reserve-met") && e !== firstBidEvent && e !== currentLeadingEvent);
+  const soloNewLeaders = soloEvents.filter((e) => primaryEventType(e) === "new-leader");
+  const representativeNewLeader = soloNewLeaders[soloNewLeaders.length - 1];
+
+  const labelCandidates = [];
+  if (firstBidEvent) labelCandidates.push({ event: firstBidEvent, eyebrow: "FIRST BID" });
+  if (reserveMetEvent) labelCandidates.push({ event: reserveMetEvent, eyebrow: "RESERVE MET" });
+  if (representativeNewLeader) labelCandidates.push({ event: representativeNewLeader, eyebrow: "NEW LEADER" });
+  if (currentLeadingEvent && currentLeadingEvent !== firstBidEvent) {
+    labelCandidates.push({ event: currentLeadingEvent, eyebrow: ended ? "LATEST BID" : "CURRENT BID" });
+  }
+  labelCandidates.sort((a, b) => a.event.pct - b.event.pct);
+  let lastLabelPct = null;
+  let lastTier = 1;
+  const tieredLabels = labelCandidates.map((c) => {
+    const tier = lastLabelPct !== null && c.event.pct - lastLabelPct < 16 ? (lastTier === 0 ? 1 : 0) : 0;
+    lastLabelPct = c.event.pct;
+    lastTier = tier;
+    return { ...c, tier };
+  });
+
   const tips = {
     start: { eyebrow: "TIMELINE START", lines: [formatManila(timelineStart, { withYear: true })] },
     official: { eyebrow: "OFFICIAL AUCTION START", lines: [formatManila(officialStartTime, { withYear: true })] },
@@ -204,7 +261,10 @@ export default function AuctionProgressBar({
   }
 
   return (
-    <div className="relative pb-1">
+    // Reserve room above the track for the permanent labels (text + up to
+    // the taller connector tier) whenever any exist, so they never bleed
+    // into whatever content sits above this component.
+    <div className="relative pb-1" style={{ paddingTop: tieredLabels.length > 0 ? 46 : 0 }}>
       <div
         className="relative h-3 rounded-full bg-plane border border-gridline overflow-visible cursor-default"
         onMouseEnter={() => setHoverKey("track")}
@@ -293,6 +353,19 @@ export default function AuctionProgressBar({
             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-series2 border border-plane shadow-sm z-20"
             style={{ left: `${event.pct}%` }}
             aria-label={`${primaryEventType(event)} · ${event.bidder} · ${formatPeso(event.bidAmount)} at ${formatManila(event.timestamp)}`}
+          />
+        ))}
+
+        {/* Permanent compact labels for the handful of genuinely
+            significant events — the whole point of this task: real bid
+            activity must be visible WITHOUT hovering anything. */}
+        {tieredLabels.map((l, i) => (
+          <PermanentLabel
+            key={`label-${i}`}
+            pct={l.event.pct}
+            tier={l.tier}
+            eyebrow={l.eyebrow}
+            sub={formatPeso(l.event.bidAmount)}
           />
         ))}
 

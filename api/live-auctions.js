@@ -1,6 +1,15 @@
 import { createClient } from "@clickhouse/client";
 import { getLiveLotsSafe } from "./_liveBids.js";
 
+// Per-lot bid-event cap for the timeline_lots field below — a defensive
+// bound only (no currently-active auction sampled during implementation
+// came close to it: the busiest real lot had well under 10 events). Always
+// keeps that lot's own FIRST event (so an auction-wide "first bid" survives
+// truncation even in a hypothetical extreme case) plus its most recent
+// events up to the cap, so "current/latest leading bid" also always
+// survives.
+const MAX_TIMELINE_EVENTS_PER_LOT = 60;
+
 // Same ClickHouse client configuration as api/overview.js.
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -31,6 +40,14 @@ function bidderKeyOf(row) {
 // Bidding' (verified: not every active auction is Online — 'Live Auction',
 // 'Simulcast', and 'Buy Now' are real, distinct categories on the same
 // table). Store filter still applies.
+//
+// Each auction also carries `timeline_lots` — real per-lot bid_events
+// (see the TIMELINE_LOTS block below), which the frontend's Active
+// Auction Timeline (AuctionProgressBar + src/utils/auctionActivityEvents.js)
+// uses to show First Bid / New Leader / Current Leading Bid markers on
+// the ALWAYS-VISIBLE card progress bar, not just the expanded per-lot
+// detail view — built from bid rows this handler already fetches for
+// Participating/Leading, never a second query or a per-auction request.
 export default async function handler(req, res) {
   try {
     const { store = "" } = req.query;
@@ -323,6 +340,45 @@ export default async function handler(req, res) {
           ? earliestBidThisAuction
           : auctionStartingTime;
 
+      // ---------------------------------------------------------
+      // TIMELINE_LOTS — real bid-event data for the Auction Events card's
+      // own progress-bar timeline (see src/utils/auctionActivityEvents.js
+      // on the frontend, which this feeds unchanged — same shape as Level
+      // 2's per-lot bid_events, just built here from data already fetched
+      // above in this ONE batched query, never a new ClickHouse call and
+      // never per-auction/per-lot/per-bid). was_winning is the exact same
+      // per-lot running-max walk Level 2 computes (never re-derived
+      // differently). reserved_price is not available at this list level
+      // (no vendor_analysis join here) so it's always 0 — Reserve Met
+      // simply never fires on this list-level timeline; it still works on
+      // Level 2's own richer per-lot detail view. Capped per lot (see
+      // MAX_TIMELINE_EVENTS_PER_LOT) to keep this list-wide response
+      // bounded regardless of how much real activity a single lot has.
+      // ---------------------------------------------------------
+      const timelineLots = [];
+      for (const [lotNumber, events] of eventsByLot) {
+        let runningMax = -Infinity;
+        const bidEvents = events.map((e) => {
+          const amount = Number(e.bid_amount ?? 0);
+          const wasWinning = amount >= runningMax;
+          if (amount > runningMax) runningMax = amount;
+          const { hasEmail, email } = bidderKeyOf(e);
+          const name = [e.customer_firstname, e.customer_lastname].filter(Boolean).join(" ").trim() || null;
+          return {
+            timestamp: e.bid_created_at,
+            bid_amount: amount,
+            bidder: name || (hasEmail ? email : null),
+            new_or_returning: hasEmail ? classify(email) : "unclassified",
+            was_winning: wasWinning,
+          };
+        });
+        const cappedBidEvents =
+          bidEvents.length > MAX_TIMELINE_EVENTS_PER_LOT
+            ? [bidEvents[0], ...bidEvents.slice(-(MAX_TIMELINE_EVENTS_PER_LOT - 1))]
+            : bidEvents;
+        timelineLots.push({ lot_number: lotNumber, name: null, reserved_price: 0, bid_events: cappedBidEvents });
+      }
+
       return {
         auction_number: row.auction_number,
         name: row.auction_name,
@@ -334,6 +390,7 @@ export default async function handler(req, res) {
         lots_with_bids: warehouseLots.size,
         current_bid_value: currentBidValue,
         current_bid_source: source,
+        timeline_lots: timelineLots,
         participating: {
           total: participatingMap.size,
           new: pNew,

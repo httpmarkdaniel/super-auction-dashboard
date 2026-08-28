@@ -242,6 +242,21 @@ function AuctionCard({ auction }) {
   const p = auction.participating;
   const l = auction.leading;
 
+  // Real bid-event activity for THIS card's own always-visible timeline —
+  // built from auction.timeline_lots, already included in the Level 1
+  // /api/live-auctions payload (see that endpoint's own comment). No
+  // second request: this is the exact same data every other active
+  // auction's card already receives on the existing 20s poll.
+  const activityEvents = useMemo(
+    () =>
+      buildAuctionActivityEvents({
+        lots: auction.timeline_lots,
+        timelineStart: auction.timeline_start,
+        endingTime: auction.ending_time,
+      }),
+    [auction],
+  );
+
   return (
     <div className="tile px-6 py-5">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
@@ -265,6 +280,7 @@ function AuctionCard({ auction }) {
           timelineStart={auction.timeline_start}
           officialStartTime={auction.starting_time}
           endingTime={auction.ending_time}
+          activityEvents={activityEvents}
         />
       </div>
 
