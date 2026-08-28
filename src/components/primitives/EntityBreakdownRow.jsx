@@ -62,8 +62,12 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
             <div>
               <div className="text-muted text-[12px]">Participating</div>
               <div className="tabular font-medium">{p.total} <span className="text-muted font-normal">({p.newBidders} New · {p.returningBidders} Returning)</span></div>
-              <div className="tabular text-[12px] text-series1 mt-0.5">{formatPeso(p.activity)} activity</div>
-              <div className="tabular text-[11px] text-muted">New {formatPeso(p.newActivity)} · Returning {formatPeso(p.returningActivity)}</div>
+              <div className="tabular text-[12px] mt-0.5">
+                <span className="text-muted">Total Bids</span> <span className="font-medium">{p.totalBids.toLocaleString()}</span>
+              </div>
+              <div className="tabular text-[12px] text-series1">
+                Avg Bids / Unique Bidder {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(1) : "—"}
+              </div>
             </div>
             <div>
               <div className="text-muted text-[12px]">Winning</div>

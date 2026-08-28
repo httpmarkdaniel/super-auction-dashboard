@@ -184,7 +184,7 @@ const SORTERS = {
   branch: (r) => r.branch,
   category: (r) => r.category,
   subType: (r) => r.subType ?? "",
-  startingTime: (r) => r.startingTime ?? "",
+  endingTime: (r) => r.endingTime ?? "",
   lotsListed: (r) => r.lotsListed,
   lotsSold: (r) => r.lotsSold,
   lotsUnsold: (r) => r.lotsUnsold,
@@ -238,7 +238,7 @@ function groupByAuction(lots) {
         auctionName: l.auction_name,
         auctionType: l.auction_type,
         subType: l.sub_type,
-        startingTime: l.starting_time,
+        endingTime: l.ending_time,
         branch: l.store_name,
         categories: new Set(),
         // Only categories with at least one settled (Paid/Released) lot —
@@ -321,7 +321,7 @@ export default function AuctionSummaryTable({
 }) {
   const [open, setOpen] = useState(true);
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState({ key: "startingTime", dir: "desc" });
+  const [sort, setSort] = useState({ key: "endingTime", dir: "desc" });
   const [selectedAuction, setSelectedAuction] = useState(null);
   const [bidderModalAuction, setBidderModalAuction] = useState(null);
   const [page, setPage] = useState(0);
@@ -440,7 +440,7 @@ export default function AuctionSummaryTable({
                   <SortHeader label="Category" sortKey="category" sort={sort} onSort={handleSort} />
                   <SortHeader label="Sub Type" sortKey="subType" sort={sort} onSort={handleSort} />
                   <SortHeader label="Branch" sortKey="branch" sort={sort} onSort={handleSort} />
-                  <SortHeader label="Start" sortKey="startingTime" sort={sort} onSort={handleSort} />
+                  <SortHeader label="Ending Time" sortKey="endingTime" sort={sort} onSort={handleSort} />
                   <SortHeader label="Listed" sortKey="lotsListed" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Sold" sortKey="lotsSold" sort={sort} onSort={handleSort} align="right" />
                   <SortHeader label="Unsold" sortKey="lotsUnsold" sort={sort} onSort={handleSort} align="right" />
@@ -474,7 +474,7 @@ export default function AuctionSummaryTable({
                     </td>
                     <td className="py-2.5 pr-4 text-ink">{r.subType || "—"}</td>
                     <td className="py-2.5 pr-4 text-ink">{r.branch}</td>
-                    <td className="py-2.5 pr-4 text-ink whitespace-nowrap">{formatDate(r.startingTime)}</td>
+                    <td className="py-2.5 pr-4 text-ink whitespace-nowrap">{formatDate(r.endingTime)}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsListed}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsSold}</td>
                     <td className="py-2.5 pr-4 text-right tabular text-ink">{r.lotsUnsold}</td>

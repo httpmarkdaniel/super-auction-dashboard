@@ -5,13 +5,20 @@ import { formatPeso, formatCompactPeso } from "../utils/format";
 // AMOUNT share (New/Returning contribution to this population's total
 // amount), never a bidder-COUNT share — see the task's explicit "Bid Share,
 // not Rate" requirement.
-export default function BidderPopulationCard({ title, total, newCount, returningCount, amountLabel, newAmount, returningAmount }) {
+export default function BidderPopulationCard({ title, total, newCount, returningCount, amountLabel, newAmount, returningAmount, onClick }) {
   const totalAmount = newAmount + returningAmount;
   const newSharePct = totalAmount > 0 ? (newAmount / totalAmount) * 100 : 0;
   const returningSharePct = totalAmount > 0 ? (returningAmount / totalAmount) * 100 : 0;
+  const Wrapper = onClick ? "button" : "div";
 
   return (
-    <div className="border border-gridline rounded-lg p-4 bg-plane">
+    <Wrapper
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={`border border-gridline rounded-lg p-4 bg-plane w-full text-left ${
+        onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""
+      }`}
+    >
       <div className="kpi-label mb-1">{title}</div>
       <div className="font-display text-[28px] leading-none text-ink mb-1">{total}</div>
       <div className="text-[13.5px] text-ink mb-3">
@@ -28,6 +35,6 @@ export default function BidderPopulationCard({ title, total, newCount, returning
         <span>New · {formatPeso(newAmount)} · {newSharePct.toFixed(1)}% share</span>
         <span className="text-right">Returning · {formatPeso(returningAmount)} · {returningSharePct.toFixed(1)}% share</span>
       </div>
-    </div>
+    </Wrapper>
   );
 }

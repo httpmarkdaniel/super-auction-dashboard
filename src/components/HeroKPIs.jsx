@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import StatTile from "./primitives/StatTile";
-import AvgBidCategoryCard from "./primitives/AvgBidCategoryCard";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
@@ -12,10 +11,6 @@ const METHODOLOGY = {
     "Sum of every settled lot's bid amount (status Paid or Released only) across auctions in the selected date range, deduped by auction and lot number. Click to see the contributing auctions.",
   auctionsConcluded:
     "Distinct auction events contributing to the settled Total Bid Amount above — same population, same scope. Click to see them.",
-  avgBidPerAuction:
-    "Total Bid Amount ÷ Auctions Concluded. Click to compare auctions against this average.",
-  avgBidPerSoldLot:
-    "Total Bid Amount ÷ settled sold-lot count (SUM of settled value ÷ COUNT of settled lots, not an average of per-auction averages). Click to compare auctions.",
   lotsSoldListed:
     "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the contributing auctions.",
   serviceIncome:
@@ -26,13 +21,12 @@ const METHODOLOGY = {
     "Total real bid events ÷ unique participating bidders in the selected scope — a measure of bidder engagement/intensity, not a peso figure. Higher means the average bidder places more bids; lower means bidders participate more shallowly. Click to see the per-bidder breakdown.",
 };
 
-export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "", onSelectCategory }) {
+export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "" }) {
   const {
     heroKPIs,
     unsoldLots,
     operationsDetail,
     auctionSummary,
-    avgBidCategoryBreakdown,
     serviceIncomeLots,
     categoryBreakdown,
     branchBreakdown,
@@ -40,14 +34,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
     comparison,
   } = overview;
   const [drilldown, setDrilldown] = useState(null);
-
-  // The Avg Bid cards no longer carry their own local category selector —
-  // they simply reflect the single Overview-wide Category filter
-  // (globalCategory, set in App.jsx's scope bar), so they can never show a
-  // category that contradicts it. Clicking a category row (All Categories
-  // state) or the KPI itself (specific-category state) navigates to Full
-  // Auction Detail via onSelectCategory — never a local modal.
-  const avgBidCategory = globalCategory;
 
   const lotsByAuction = useMemo(() => {
     const map = new Map();
@@ -77,7 +63,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
       {/* AUCTION PERFORMANCE */}
       <div>
         <div className="panel-title mb-2">Auction Performance · {rangeLabel}</div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <StatTile
             eyebrow={`Total Bid Amount · ${rangeLabel}`}
             value={formatPeso(heroKPIs.totalBidAmount)}
@@ -92,26 +78,6 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             methodology={METHODOLOGY.auctionsConcluded}
             onClick={() => setDrilldown("auctionsConcluded")}
             extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.auctions_concluded_pct }] : []}
-          />
-          <AvgBidCategoryCard
-            eyebrow="Avg Bid / Auction"
-            metric="auction"
-            methodology={METHODOLOGY.avgBidPerAuction}
-            rangeLabel={rangeLabel}
-            compareLabel={compareLabel}
-            categoryBreakdown={avgBidCategoryBreakdown}
-            category={avgBidCategory}
-            onClickCategory={onSelectCategory}
-          />
-          <AvgBidCategoryCard
-            eyebrow="Avg Bid / Sold Lot"
-            metric="soldLot"
-            methodology={METHODOLOGY.avgBidPerSoldLot}
-            rangeLabel={rangeLabel}
-            compareLabel={compareLabel}
-            categoryBreakdown={avgBidCategoryBreakdown}
-            category={avgBidCategory}
-            onClickCategory={onSelectCategory}
           />
         </div>
       </div>
@@ -223,6 +189,9 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         onClose={() => setDrilldown(null)}
         rows={bidderEngagement}
         rangeLabel={rangeLabel}
+        totalBidEvents={heroKPIs.totalBidEvents}
+        uniqueParticipatingBidders={heroKPIs.uniqueParticipatingBidders}
+        avgBidsPerUniqueBidder={heroKPIs.avgBidsPerUniqueBidder}
       />
     </div>
   );

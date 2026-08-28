@@ -10,6 +10,7 @@ import BranchStrip from "./components/BranchStrip";
 import Leaderboard from "./components/Leaderboard";
 import BidTrendChart from "./components/BidTrendChart";
 import BidderPopulationCard from "./components/BidderPopulationCard";
+import BidderCompositionModal from "./components/primitives/BidderCompositionModal";
 import CategoryView from "./components/CategoryView";
 import LiveAuctionView from "./components/LiveAuctionView";
 import UpcomingAuctionsView from "./components/UpcomingAuctionsView";
@@ -197,8 +198,12 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // section, never the overall Overview totals.
     const pNew = Number(row.participating_new) || 0;
     const pReturning = Number(row.participating_returning) || 0;
-    const pNewAmt = Number(row.participating_new_amount) || 0;
-    const pReturningAmt = Number(row.participating_returning_amount) || 0;
+    // Total Bids for THIS entity only — see api/overview.js's branch_
+    // bidder_activity/category_bidder_activity CTEs. Avg Bids / Unique
+    // Bidder below is derived from this entity's OWN bid events and
+    // bidder count, never the overall Overview denominator.
+    const pBidEvents = Number(row.participating_bid_events) || 0;
+    const pTotal = pNew + pReturning;
     const wNew = Number(row.winning_new) || 0;
     const wReturning = Number(row.winning_returning) || 0;
     const wNewAmt = Number(row.winning_new_amount) || 0;
@@ -213,12 +218,11 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       avgBidPerAuction: auctionCount > 0 ? bidAmount / auctionCount : null,
       avgBidPerSoldLot: lotsSold > 0 ? bidAmount / lotsSold : null,
       participating: {
-        total: pNew + pReturning,
+        total: pTotal,
         newBidders: pNew,
         returningBidders: pReturning,
-        activity: pNewAmt + pReturningAmt,
-        newActivity: pNewAmt,
-        returningActivity: pReturningAmt,
+        totalBids: pBidEvents,
+        avgBidsPerUniqueBidder: pTotal > 0 ? pBidEvents / pTotal : null,
       },
       winning: {
         total: wNew + wReturning,
@@ -853,6 +857,7 @@ function OverviewTab({
   onGoLive,
 }) {
   const story = buildStoryline();
+  const [bidderCompositionOpen, setBidderCompositionOpen] = useState(false);
 
   return (
     <div>
@@ -932,7 +937,7 @@ function OverviewTab({
 
       <StorySection
         title="Bidder Composition"
-        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it."
+        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it. Click either card for the branch/category breakdown."
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <BidderPopulationCard
@@ -943,6 +948,7 @@ function OverviewTab({
             amountLabel="Bid Activity"
             newAmount={overview.participatingComposition.newBidActivity}
             returningAmount={overview.participatingComposition.returningBidActivity}
+            onClick={() => setBidderCompositionOpen(true)}
           />
           <BidderPopulationCard
             title="Winning Bidders"
@@ -952,9 +958,18 @@ function OverviewTab({
             amountLabel="Winning Bid Amount"
             newAmount={overview.bidderComposition.newBiddersBidAmount}
             returningAmount={overview.bidderComposition.returningBiddersBidAmount}
+            onClick={() => setBidderCompositionOpen(true)}
           />
         </div>
       </StorySection>
+
+      <BidderCompositionModal
+        open={bidderCompositionOpen}
+        onClose={() => setBidderCompositionOpen(false)}
+        branchBreakdown={overview.branchBreakdown}
+        categoryBreakdown={overview.categoryBreakdown}
+        rangeLabel={rangeLabel}
+      />
 
       <StorySection
         title="Bid Value by Category & Branch"
@@ -1196,7 +1211,9 @@ export default function App() {
 
         <div
           ref={contentRef}
-          className="flex-1 overflow-y-auto px-4 py-4 sm:px-6 md:px-10 md:py-8 max-w-[1400px]"
+          className={`flex-1 overflow-y-auto px-4 py-4 sm:px-6 md:px-10 md:py-8 ${
+            tab === "Full Auction Detail" ? "max-w-none" : "max-w-[1400px]"
+          }`}
         >
           {tab === "Overview" && (
             <OverviewTab
