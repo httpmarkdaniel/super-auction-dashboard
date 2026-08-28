@@ -241,6 +241,17 @@ function groupByAuction(lots) {
         startingTime: l.starting_time,
         branch: l.store_name,
         categories: new Set(),
+        // Only categories with at least one settled (Paid/Released) lot —
+        // the "contributing category" test used by categoryFilter below.
+        // Kept separate from `categories` (every lot, any status), which
+        // stays a display-only join string: an auction with an Unsold
+        // Vehicle lot but zero settled Vehicle contribution must not
+        // count as a Vehicles "contributing auction" (see the reconciliation
+        // that traced Overview's Avg Bid/Auction denominator against this
+        // page — categories was being used for an exact-match filter,
+        // which both hid real mixed-category contributors and wrongly
+        // surfaced zero-contribution pure-category auctions).
+        settledCategories: new Set(),
 
         lotsListed: 0,
         lotsSold: 0,
@@ -269,6 +280,7 @@ function groupByAuction(lots) {
       agg.totalBidAmount += Number(l.bid_amount) || 0;
       agg.totalBuyersPremium += Number(l.buyers_premium_income) || 0;
       agg.totalCommission += Number(l.commission_income) || 0;
+      if (l.category) agg.settledCategories.add(l.category);
     }
 
     if (l.for_approval_status === "For Approval") {
@@ -319,12 +331,15 @@ export default function AuctionSummaryTable({
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let filtered = auctions.filter((r) => {
-      // categoryFilter is an EXACT match on the canonical category (set by
-      // navigating here from an Overview category click) — a real scoped
-      // filter, independent of the free-text search below, never blended
-      // into it. The free-text box still searches auction #/name/branch/
-      // category on top of that, same as before.
-      if (categoryFilter && r.category !== categoryFilter) return false;
+      // categoryFilter is a "contributing auction" test — this auction has
+      // at least one settled (Paid/Released) lot classified as
+      // categoryFilter, same population/definition as the Overview Avg Bid
+      // cards' per-category denominator (settledCategoryResult). NOT an
+      // exact match against r.category (a display-only join of every lot's
+      // category across ALL statuses) — that used to both hide real mixed-
+      // category contributors and wrongly surface auctions whose only lot
+      // in this category was Unsold (zero settled contribution).
+      if (categoryFilter && !r.settledCategories.has(categoryFilter)) return false;
       if (!q) return true;
       return (
         r.auctionNumber.toLowerCase().includes(q) ||
