@@ -154,7 +154,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{ICONS.users}</span>
-            <span className="eyebrow">Registration → Bidder</span>
+            <span className="kpi-label">Registration → Bidder</span>
             <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
           </div>
           <div className="font-display text-[36.5px] leading-none text-ink mb-2">

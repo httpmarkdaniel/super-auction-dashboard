@@ -21,7 +21,7 @@ export default function LiveAuctionActivity({ todaysBidAmount, activeAuctionsNow
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-10">
         <div>
-          <div className="eyebrow mb-1.5">Today's Bid</div>
+          <div className="kpi-label mb-1.5">Today's Bid</div>
           <div className="font-display text-[44px] md:text-[52px] leading-none text-ink">{formatPeso(todaysBidAmount)}</div>
           <div className="text-[14px] text-muted mt-2">Current standing bid value</div>
         </div>
@@ -31,7 +31,7 @@ export default function LiveAuctionActivity({ todaysBidAmount, activeAuctionsNow
           onClick={onClickActiveAuctions}
           className="text-left group"
         >
-          <div className="eyebrow mb-1.5 flex items-center gap-1">
+          <div className="kpi-label mb-1.5 flex items-center gap-1">
             Active Auctions
             <span className="text-navy group-hover:translate-x-0.5 transition-transform">→</span>
           </div>

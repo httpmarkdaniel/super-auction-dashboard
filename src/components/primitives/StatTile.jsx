@@ -40,7 +40,7 @@ export default function StatTile({ eyebrow, value, delta, invert, sub, live, ico
               {icon}
             </span>
           )}
-          <span className="eyebrow truncate">{eyebrow}</span>
+          <span className="kpi-label truncate">{eyebrow}</span>
           {hasTip && (
             <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">
               i
