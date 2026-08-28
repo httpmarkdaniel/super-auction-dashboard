@@ -29,7 +29,7 @@ export default function StatTile({ eyebrow, value, delta, invert, sub, live, ico
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 flex-1 min-w-[180px] text-left w-full ${
+      className={`relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 flex-1 min-w-[180px] text-left w-full ${
         hasTip ? "group/tip" : ""
       } ${onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""}`}
     >

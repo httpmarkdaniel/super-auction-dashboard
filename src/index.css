@@ -23,7 +23,7 @@
      compact. Hierarchy comes from weight/scale against the bold KPI value
      below it, not from the title's own typeface, color, or weight. */
   .kpi-label {
-    @apply text-[13px] font-sans font-normal text-ink;
+    @apply text-[13px] leading-none font-sans font-normal text-ink;
   }
   /* Panel/section title — same visual language as .eyebrow (font, tracking,
      caps, color) but regular weight, for a scorecard/panel's uppermost

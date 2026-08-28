@@ -41,7 +41,7 @@ export default function AvgBidCategoryCard({
   const selected = category ? byCategory.get(category) : null;
 
   return (
-    <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
+    <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip">
       <div className="flex items-center gap-1.5 mb-2.5 min-w-0">
         {icon && <span className="flex items-center justify-center w-6 h-6 rounded-md bg-navySoft text-navy shrink-0">{icon}</span>}
         <span className="kpi-label truncate">{eyebrow}</span>

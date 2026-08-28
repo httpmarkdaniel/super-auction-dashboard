@@ -127,7 +127,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             { label: `${unsoldLots.count} unsold · ${formatPeso(unsoldLots.value)} reserve value` },
           ]}
         />
-        <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 py-3.5 group/tip">
+        <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip">
           <div className="flex items-center gap-1.5 mb-2.5">
             <span className="kpi-label">Registration → Bidder</span>
             <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
