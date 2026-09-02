@@ -2,7 +2,7 @@ import Card from "./primitives/Card";
 import EntityBreakdownRow from "./primitives/EntityBreakdownRow";
 import { formatPeso } from "../utils/format";
 
-export default function CategoryStrip({ data: categoryBreakdown, rangeLabel = "Today", onSelectCategory }) {
+export default function CategoryStrip({ data: categoryBreakdown, rangeLabel = "Today", compareLabel, onSelectCategory }) {
   const sorted = [...categoryBreakdown].sort((a, b) => b.bidAmount - a.bidAmount);
   const total = sorted.reduce((s, r) => s + r.bidAmount, 0);
   const max = Math.max(...sorted.map((r) => r.bidAmount), 1);
@@ -26,6 +26,8 @@ export default function CategoryStrip({ data: categoryBreakdown, rangeLabel = "T
             share={r.share}
             max={max}
             detail={r}
+            rangeLabel={rangeLabel}
+            compareLabel={compareLabel}
             onClick={() => onSelectCategory?.(r.category)}
           />
         ))}

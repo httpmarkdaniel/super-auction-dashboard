@@ -5,7 +5,13 @@
 // now" snapshot warrants next to the historical Bid Trend it now sits
 // beside. No period comparison here: these are live numbers, not a range
 // with a comparable prior period.
-export default function LiveMiniCard({ label, value, sub, onClick }) {
+//
+// `footer`: optional compact live-bidder-activity row(s) rendered below
+// `sub`, inside a top-bordered strip — e.g. Total Clicks/Bids Today / New
+// Bidders Today under Active Auctions (see App.jsx), kept small/within
+// this "Auction Events / Live Now" card rather than a separate standalone
+// section.
+export default function LiveMiniCard({ label, value, sub, onClick, footer }) {
   const Wrapper = onClick ? "button" : "div";
   return (
     <Wrapper
@@ -24,6 +30,7 @@ export default function LiveMiniCard({ label, value, sub, onClick }) {
       </div>
       <div className="font-display text-[28px] leading-none text-ink">{value}</div>
       {sub && <div className="text-[13px] text-muted mt-1.5 truncate">{sub}</div>}
+      {footer && <div className="mt-2 pt-2 border-t border-gridline">{footer}</div>}
     </Wrapper>
   );
 }

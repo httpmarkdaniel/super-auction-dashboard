@@ -3604,6 +3604,7 @@ export default async function handler(req, res) {
         cmpServiceIncomeResult,
         cmpRegistrationResult,
         cmpCategoryResult,
+        cmpBranchResult,
         cmpBidderEngagementResult,
       ] = await Promise.all([
         client.query({
@@ -3755,6 +3756,47 @@ export default async function handler(req, res) {
           query_params: compareParams,
           format: "JSONEachRow",
         }),
+        // Previous-period counterpart of settledBranchResult above — same
+        // Date/Store/Category scope shifted to [compareFrom, compareTo],
+        // for the Bid Value by Branch click-detail comparison (PART 22/23:
+        // when a Category filter is active, this must compare THAT
+        // category's previous-period branch value, never the unfiltered
+        // total — so, unlike cmpCategoryResult just above, this DOES apply
+        // the {category:String} HAVING filter, exactly mirroring
+        // settledBranchResultPromise's own filter behavior).
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(a.store_name) AS store_name,
+                any(v.bid_amount) AS lot_bid_amount,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            )
+            SELECT
+              store_name AS branch,
+              sum(ifNull(lot_bid_amount, 0)) AS bid_amount,
+              countDistinct(auction_number) AS auction_count,
+              count() AS lots_sold
+            FROM settled_lots
+            GROUP BY store_name
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+        }),
         // Previous-period scalar counterpart of bidderEngagementResult
         // above, for the Avg Bids / Unique Bidder delta only — no per-
         // bidder grain needed here (the drilldown is current-period only).
@@ -3810,6 +3852,7 @@ export default async function handler(req, res) {
       const cmpServiceIncome = (await cmpServiceIncomeResult.json())[0] ?? {};
       const cmpRegistration = (await cmpRegistrationResult.json())[0] ?? {};
       const cmpCategoryRows = await cmpCategoryResult.json();
+      const cmpBranchRows = await cmpBranchResult.json();
       const cmpBidderEngagement = (await cmpBidderEngagementResult.json())[0] ?? {};
 
       const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
@@ -3866,6 +3909,19 @@ export default async function handler(req, res) {
         // (safe division downstream, never a fabricated ₱0 average).
         categories: cmpCategoryRows.map((row) => ({
           category: row.category,
+          bid_amount: Number(row.bid_amount ?? 0),
+          auction_count: Number(row.auction_count ?? 0),
+          lots_sold: Number(row.lots_sold ?? 0),
+        })),
+
+        // Previous-period branch-level Bid Value aggregates — same shape/
+        // purpose as `categories` above, powering the Bid Value by Branch
+        // click-detail comparison (PART 22). Respects the active Category
+        // filter (see cmpBranchResult's own comment) so a Category-filtered
+        // view compares that category's branch value, never the unfiltered
+        // total.
+        branches: cmpBranchRows.map((row) => ({
+          branch: row.branch,
           bid_amount: Number(row.bid_amount ?? 0),
           auction_count: Number(row.auction_count ?? 0),
           lots_sold: Number(row.lots_sold ?? 0),

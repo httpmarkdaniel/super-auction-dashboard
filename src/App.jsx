@@ -11,6 +11,9 @@ import Leaderboard from "./components/Leaderboard";
 import BidTrendChart from "./components/BidTrendChart";
 import BidderPopulationCard from "./components/BidderPopulationCard";
 import BidderCompositionModal from "./components/primitives/BidderCompositionModal";
+import StatTile from "./components/primitives/StatTile";
+import BidderEngagementModal from "./components/primitives/BidderEngagementModal";
+import WinningMaxBidModal from "./components/primitives/WinningMaxBidModal";
 import CategoryView from "./components/CategoryView";
 import LiveAuctionView from "./components/LiveAuctionView";
 import UpcomingAuctionsView from "./components/UpcomingAuctionsView";
@@ -259,6 +262,28 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     };
   }
 
+  // Bid Value click-detail previous-period comparison (PART 12/15/22) —
+  // CURRENT PERIOD BID VALUE vs PREVIOUS COMPARABLE PERIOD BID VALUE only,
+  // never bidder/auction counts. previousRow absent (a genuinely new
+  // category/branch with zero prior activity) -> "New" if current > 0,
+  // else a safe 0.0% (no fabricated Infinity%). previousRow present with
+  // previousBidAmount === 0 and current === 0 also resolves to 0.0%.
+  function bidValueComparison(currentBidAmount, previousRow) {
+    const hasPreviousData = previousRow != null;
+    const previousBidAmount = hasPreviousData ? Number(previousRow.bid_amount) || 0 : 0;
+    const isNewEntity = previousBidAmount <= 0 && currentBidAmount > 0;
+    return {
+      previousBidAmount,
+      bidValueChangePct: previousBidAmount > 0 ? ((currentBidAmount - previousBidAmount) / previousBidAmount) * 100 : isNewEntity ? null : 0,
+      bidValueChangeAbsolute: currentBidAmount - previousBidAmount,
+      isNewEntity,
+      hasPreviousData,
+    };
+  }
+
+  const cmpCategoryBidValueMap = new Map((kpis.comparison?.categories || []).map((c) => [c.category, c]));
+  const cmpBranchBidValueMap = new Map((kpis.comparison?.branches || []).map((b) => [b.branch, b]));
+
   const categoryBreakdown = categoryRows
     .slice(0, 8)
     .map((c) => ({
@@ -268,6 +293,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         ((Number(c.bid_amount) / categoryTotal) * 100).toFixed(1),
       ),
       ...withHoverDetail(c),
+      ...bidValueComparison(Number(c.bid_amount), cmpCategoryBidValueMap.get(c.category)),
     }));
 
   // Avg Bid / Auction and Avg Bid / Sold Lot cards' own local category
@@ -382,10 +408,25 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       branch: b.branch,
       bidAmount: Number(b.bid_amount),
       ...withHoverDetail(b),
+      ...bidValueComparison(Number(b.bid_amount), cmpBranchBidValueMap.get(b.branch)),
     })),
 
     ...(otherBranchesTotal > 0
-      ? [{ branch: "Others", bidAmount: otherBranchesTotal, ...withHoverDetail(otherBranchesRollup) }]
+      ? [
+          {
+            branch: "Others",
+            bidAmount: otherBranchesTotal,
+            ...withHoverDetail(otherBranchesRollup),
+            // "Others" is a rolled-up bucket, not a real entity — a
+            // period-over-period comparison for it isn't meaningful (see
+            // EntityBreakdownRow's own "Others" guard).
+            previousBidAmount: 0,
+            bidValueChangePct: null,
+            bidValueChangeAbsolute: 0,
+            isNewEntity: false,
+            hasPreviousData: false,
+          },
+        ]
       : []),
   ].map((b) => ({
     ...b,
@@ -960,6 +1001,8 @@ function OverviewTab({
 }) {
   const story = buildStoryline();
   const [bidderCompositionOpen, setBidderCompositionOpen] = useState(false);
+  const [avgBidsOpen, setAvgBidsOpen] = useState(false);
+  const [winningMaxBidOpen, setWinningMaxBidOpen] = useState(false);
 
   return (
     <div>
@@ -1018,6 +1061,18 @@ function OverviewTab({
               value={overview.heroKPIs.activeAuctionsNow}
               sub="Auction events live now"
               onClick={onGoLive}
+              footer={
+                <div className="grid grid-cols-2 gap-2 text-[12px]">
+                  <div>
+                    <div className="text-muted">Total Clicks/Bids Today</div>
+                    <div className="tabular font-semibold text-ink">{overview.heroKPIs.totalBidsToday.toLocaleString()}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted">New Bidders Today</div>
+                    <div className="tabular font-semibold text-ink">{overview.heroKPIs.newBiddersToday.toLocaleString()}</div>
+                  </div>
+                </div>
+              }
             />
             <div className="text-[12px] text-muted text-right pr-1">Updated {updatedAt}</div>
           </div>
@@ -1039,9 +1094,9 @@ function OverviewTab({
 
       <StorySection
         title="Bidder Composition"
-        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it. Click either card for the branch/category breakdown."
+        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it. Click any card for the Branch/Category breakdown — the central place for historical bidder analytics."
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <BidderPopulationCard
             title="Participating Bidders"
             total={overview.participatingComposition.total}
@@ -1064,6 +1119,26 @@ function OverviewTab({
             onClick={() => setBidderCompositionOpen(true)}
           />
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <StatTile
+            eyebrow="Avg Bids / Unique Bidder"
+            value={overview.heroKPIs.avgBidsPerUniqueBidder != null ? overview.heroKPIs.avgBidsPerUniqueBidder.toFixed(2) : "—"}
+            sub={
+              overview.heroKPIs.uniqueParticipatingBidders > 0
+                ? `${overview.heroKPIs.totalBidEvents} bids · ${overview.heroKPIs.uniqueParticipatingBidders} bidders`
+                : "No bidder activity"
+            }
+            methodology="The AVERAGE OF EACH BIDDER'S OWN ratio (that bidder's real bid events ÷ that bidder's distinct auction+lot combinations bid on), every bidder weighted equally — NOT Total Bids ÷ Unique Bidders. Click to see the per-bidder breakdown."
+            onClick={() => setAvgBidsOpen(true)}
+          />
+          <StatTile
+            eyebrow="Winning Bids via Max Bid"
+            value={overview.winningMaxBid.maxBidWinPct != null ? `${overview.winningMaxBid.maxBidWinPct.toFixed(1)}%` : "—"}
+            sub={`${overview.winningMaxBid.maxBidWins.toLocaleString()} of ${(overview.winningMaxBid.maxBidWins + overview.winningMaxBid.normalBidWins).toLocaleString()} winning bids`}
+            methodology="Of the actual winning/final bid for each settled (Paid/Released) lot, the share placed via Max Bid rather than Normal Bid — matched to the bid-history event whose amount equals the settled winning amount. Click for the Branch/Category breakdown."
+            onClick={() => setWinningMaxBidOpen(true)}
+          />
+        </div>
       </StorySection>
 
       <BidderCompositionModal
@@ -1071,6 +1146,23 @@ function OverviewTab({
         onClose={() => setBidderCompositionOpen(false)}
         branchBreakdown={overview.branchBreakdown}
         categoryBreakdown={overview.categoryBreakdown}
+        rangeLabel={rangeLabel}
+      />
+      <BidderEngagementModal
+        open={avgBidsOpen}
+        onClose={() => setAvgBidsOpen(false)}
+        rows={overview.bidderEngagement}
+        rangeLabel={rangeLabel}
+        totalBidEvents={overview.heroKPIs.totalBidEvents}
+        uniqueParticipatingBidders={overview.heroKPIs.uniqueParticipatingBidders}
+        avgBidsPerUniqueBidder={overview.heroKPIs.avgBidsPerUniqueBidder}
+      />
+      <WinningMaxBidModal
+        open={winningMaxBidOpen}
+        onClose={() => setWinningMaxBidOpen(false)}
+        summary={overview.winningMaxBid}
+        branchBreakdown={overview.winningMaxBidByBranch}
+        categoryBreakdown={overview.winningMaxBidByCategory}
         rangeLabel={rangeLabel}
       />
 
@@ -1082,12 +1174,14 @@ function OverviewTab({
           <CategoryStrip
             data={overview.categoryBreakdown}
             rangeLabel={rangeLabel}
+            compareLabel={compareLabel}
             onSelectCategory={onSelectCategory}
           />
 
           <BranchStrip
             data={overview.branchBreakdown}
             rangeLabel={rangeLabel}
+            compareLabel={compareLabel}
             onSelectBranch={onSelectBranch}
           />
         </div>
