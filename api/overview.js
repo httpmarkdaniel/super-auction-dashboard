@@ -2,6 +2,7 @@ import { createClient } from "@clickhouse/client";
 import { getLiveLotsSafe } from "./_liveBids.js";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
+import { STATUS_PRIORITY_SQL, APPROVAL_PRIORITY_SQL } from "./_lotStatus.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -95,7 +96,13 @@ function winningMaxBidQuery(groupByEntity) {
       countIf(m.winning_indicator = 'Max Bid') AS max_bid_wins,
       countIf(m.winning_indicator = 'Normal Bid') AS normal_bid_wins,
       countIf(m.winning_indicator IS NULL) AS unresolved_wins,
-      sum(ifNull(sl.lot_bid_amount, 0)) AS winning_bid_amount
+      sum(ifNull(sl.lot_bid_amount, 0)) AS winning_bid_amount,
+      -- Per-type winning value (PART 9: "Won Via" bar shows winning value
+      -- per row, not just an overall total) — cheap columns on the SAME
+      -- already-classified rows, no new scan.
+      sumIf(ifNull(sl.lot_bid_amount, 0), m.winning_indicator = 'Max Bid') AS max_bid_winning_amount,
+      sumIf(ifNull(sl.lot_bid_amount, 0), m.winning_indicator = 'Normal Bid') AS normal_bid_winning_amount,
+      sumIf(ifNull(sl.lot_bid_amount, 0), m.winning_indicator IS NULL) AS unresolved_winning_amount
     FROM settled_lots sl
     LEFT JOIN lot_winning_bid_match m ON sl.auction_number = m.auction_number AND sl.lot_number = m.lot_number
     ${groupBy}
@@ -121,57 +128,9 @@ function enumerateCalendarDays(fromStr, toStr) {
   return days;
 }
 
-// vendor_analysis fans out one row per item_barcode within a lot, and
-// those rows can disagree on `status` when a lot's items were updated at
-// slightly different times mid-transition (e.g. some barcodes flipped to
-// 'Released' while a couple stayed at 'Paid'). any(status) is therefore
-// non-deterministic — ClickHouse doesn't guarantee which row it picks,
-// so the same query can return different Sold/Unsold counts across runs.
-//
-// Investigated against real data (see conversation record): released_date
-// is populated only on 'Released' rows and never on 'Paid' rows, and is
-// shared across all truly-Released rows in a lot — confirming Released is
-// a strictly later lifecycle stage than Paid, never the reverse. This
-// priority order lets argMax(status, priority) deterministically pick the
-// most-advanced status per lot instead of an arbitrary one:
-//   Released > Paid > Refunded > Returned > Outstanding > Unpaid > Unsold
-// Refunded/Returned (rare, real statuses not in the original 5-value set)
-// only ever co-occur with Released in the data checked, so their exact
-// rank relative to Paid doesn't move any real result — they're ranked
-// below Released on the same "actual transaction happened" logic used for
-// Unsold: if ANY row in a lot shows real transaction evidence, that
-// outranks a status claiming nothing happened.
-const STATUS_PRIORITY_SQL = `
-  CASE status
-    WHEN 'Released' THEN 7
-    WHEN 'Paid' THEN 6
-    WHEN 'Refunded' THEN 5
-    WHEN 'Returned' THEN 4
-    WHEN 'Outstanding' THEN 3
-    WHEN 'Unpaid' THEN 2
-    WHEN 'Unsold' THEN 1
-    ELSE 0
-  END
-`;
-
-// for_approval_status (xv3.mart_auction_vendor_analysis) is a real warehouse
-// field, not a frontend derivation — verified against real data: 1,409,706
-// rows 'Approved', 20,864 'For Approval', 70,572 genuinely NULL (no blank
-// values found). Deduped the same way as status: item_barcode fan-out rows
-// within a lot agree 99.7%+ of the time (150/55,918 multi-row lots
-// disagree); for that rare remainder, argMax picks the more-advanced state
-// of the approval workflow ('Approved' over 'For Approval') by the same
-// "most-advanced-state-wins" logic as STATUS_PRIORITY_SQL, rather than an
-// arbitrary any(). A genuinely NULL warehouse value is preserved as NULL
-// (displayed as "—"), never fabricated.
-const APPROVAL_PRIORITY_SQL = `
-  CASE for_approval_status
-    WHEN 'Approved' THEN 2
-    WHEN 'For Approval' THEN 1
-    ELSE 0
-  END
-`;
-
+// STATUS_PRIORITY_SQL / APPROVAL_PRIORITY_SQL now live in ./_lotStatus.js
+// (shared with api/leaderboards.js's Vendor Analytics all-lots aggregate)
+// — same definitions, imported above, not redefined here.
 
 // Overview is now ClickHouse/warehouse-only by design — it must never call
 // cms.hmr.ph. The LIVE BID CORRECTION block below is kept in place (not
@@ -2733,6 +2692,9 @@ export default async function handler(req, res) {
         // into the denominator.
         max_bid_win_pct: resolvedWins > 0 ? (maxBidWins / resolvedWins) * 100 : null,
         winning_bid_amount: Number(row.winning_bid_amount ?? 0),
+        max_bid_winning_amount: Number(row.max_bid_winning_amount ?? 0),
+        normal_bid_winning_amount: Number(row.normal_bid_winning_amount ?? 0),
+        unresolved_winning_amount: Number(row.unresolved_winning_amount ?? 0),
       };
     }
 
@@ -3607,6 +3569,7 @@ export default async function handler(req, res) {
         cmpBranchResult,
         cmpBidderEngagementResult,
         cmpParticipatingResult,
+        cmpWinningResult,
       ] = await Promise.all([
         client.query({
           query: `
@@ -3915,6 +3878,46 @@ export default async function handler(req, res) {
           // every other identity-bridge query in this file.
           clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
         }),
+        // Previous-period counterpart of the canonical WINNING Bidders
+        // population (settled Paid/Released lots resolved through
+        // BIDDER_IDENTITY_CTES, distinct by canonical identity, classified
+        // New/Returning by the same bidder_first_ever rule) — for the
+        // Bidder Composition Winning Bidders panel's own comparison.
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(v.or_number) AS or_number,
+                any(v.date_time_paid) AS date_time_paid,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            ),
+            ${BIDDER_IDENTITY_CTES}
+            SELECT
+              uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new,
+              uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_returning,
+              uniqExactIf(rli.resolved_email, fe.first_ever_at IS NULL) AS winning_unclassified
+            FROM settled_lots sl
+            LEFT JOIN resolved_lot_identity rli ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+            LEFT JOIN bidder_first_ever fe ON rli.resolved_email = fe.fe_key
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+          clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
+        }),
       ]);
 
       const cmpSettled = (await cmpSettledResult.json())[0] ?? {};
@@ -3925,6 +3928,7 @@ export default async function handler(req, res) {
       const cmpBranchRows = await cmpBranchResult.json();
       const cmpBidderEngagement = (await cmpBidderEngagementResult.json())[0] ?? {};
       const cmpParticipating = (await cmpParticipatingResult.json())[0] ?? {};
+      const cmpWinning = (await cmpWinningResult.json())[0] ?? {};
 
       const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
       const cmpAuctionsConcluded = Number(cmpSettled.auctions_concluded ?? 0);
@@ -3981,6 +3985,16 @@ export default async function handler(req, res) {
         // to derive the % change (see App.jsx's buildLiveOverview) —
         // same canonical union/identity definition on both sides.
         participating_bidders_previous: Number(cmpParticipating.participating_bidders ?? 0),
+
+        // Previous-period canonical Winning Bidders composition — same
+        // raw-count-only convention as participating_bidders_previous
+        // above (the CURRENT Winning total is computed in leaderboards.js,
+        // not visible to this endpoint) — frontend derives the % change
+        // and win-rate delta from these plus the already-fetched current
+        // Winning composition.
+        winning_bidders_new_previous: Number(cmpWinning.winning_new ?? 0),
+        winning_bidders_returning_previous: Number(cmpWinning.winning_returning ?? 0),
+        winning_bidders_unclassified_previous: Number(cmpWinning.winning_unclassified ?? 0),
 
         // Previous-period category-level Avg Bid aggregates — same shape as
         // the top-level `categories` field below, one row per canonical

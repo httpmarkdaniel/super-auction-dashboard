@@ -1,6 +1,7 @@
 import { createClient } from "@clickhouse/client";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
+import { STATUS_PRIORITY_SQL } from "./_lotStatus.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -389,6 +390,11 @@ export default async function handler(req, res) {
 
           countIf(fe.first_ever_at IS NULL) AS unclassified_lots,
           sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NULL) AS unclassified_bid_amount,
+          -- Distinct-BIDDER unclassified count (PART 8 Won-Bidders panel:
+          -- "Unmatched/Unclassified if genuinely unresolved") — a resolved
+          -- identity with no first-ever record on either bridge, never
+          -- guessed into New or Returning.
+          uniqExactIf(rli.resolved_email, fe.first_ever_at IS NULL) AS unclassified_bidders,
 
           countIf(
             fe.first_ever_at IS NOT NULL
@@ -802,6 +808,7 @@ export default async function handler(req, res) {
             v.auction_number AS auction_number,
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
+            any(a.store_name) AS store_name,
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
@@ -929,6 +936,7 @@ export default async function handler(req, res) {
           count() AS settled_lots,
           sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount,
           uniqExact(sl.auction_number) AS winning_auctions,
+          uniqExact(sl.store_name) AS branches,
           countIf(m.winning_indicator = 'Max Bid') AS winning_via_max_bid,
 
           if(
@@ -977,6 +985,81 @@ export default async function handler(req, res) {
       clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
     };
 
+    // =========================================================
+    // VENDOR ANALYTICS — all-lots-per-vendor aggregate (Top 10 Vendors,
+    // Stuck Inventory, Active/New Vendor counts, Top-5 Concentration). ONE
+    // bounded query serves ALL of these (PART 36: batch missing aggregates
+    // rather than one-tiny-query-per-metric). Deliberately the BROADER
+    // "listed"/"sold" population (same STATUS_PRIORITY_SQL definition as
+    // api/overview.js's Lots Sold/Listed KPI — Outstanding/Paid/Unpaid/
+    // Released all count as Sold), NOT the settled-only population
+    // settledVendorsQuery above already serves for the existing Top Vendor
+    // hover (left untouched — this is a separate, additive query, not a
+    // replacement). No identity bridge — light, safe in the concurrent
+    // batch below.
+    // =========================================================
+    const vendorAllLotsQuery = {
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            AND ({store:String} = '' OR store_name = {store:String})
+        ),
+        lots AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(a.store_name) AS store_name,
+            argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+            any(ifNull(v.bid_amount, 0)) AS bid_amount,
+            any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+          WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+          HAVING ({category:String} = '' OR lot_category = {category:String})
+        )
+        SELECT
+          vendor,
+          count() AS lots_listed,
+          countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
+          sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
+          uniqExact(auction_number) AS auction_events,
+          uniqExact(store_name) AS branches
+        FROM lots
+        GROUP BY vendor
+        ORDER BY settled_bid_amount DESC
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    };
+
+    // Vendor first-ever-activity timestamp, ALL-TIME/unscoped (needed to
+    // classify New Vendors within the selected period — PART 26: "best
+    // reliable existing vendor first-seen field"). date_created is the
+    // per-lot creation timestamp on vendor_analysis — the earliest
+    // available proxy for when a vendor's consignment first entered the
+    // system; no dedicated "vendor since" field exists on any mart
+    // currently queried by this dashboard. Documented limitation: a vendor
+    // whose very first-ever lot predates this warehouse's own retention/
+    // ingestion window would be misclassified as "new" if their true first
+    // activity isn't present at all — not something this query can detect.
+    const vendorFirstSeenQuery = {
+      query: `
+        SELECT
+          ifNull(vendor, 'Unknown Vendor') AS vendor,
+          min(date_created) AS first_seen
+        FROM xv3.mart_auction_vendor_analysis
+        WHERE vendor IS NOT NULL
+        GROUP BY vendor
+      `,
+      query_params: {},
+      format: "JSONEachRow",
+    };
+
     // ---------------------------------------------------------
     // PRODUCTION INCIDENT (2026-08-28): all 7 queries used to run via one
     // Promise.all. Investigated system.query_log around a real "(total)
@@ -1003,9 +1086,11 @@ export default async function handler(req, res) {
     // perAuctionParticipatingUnion instead) but is left in place rather
     // than removed, to keep this change scoped to correctness, not cleanup.
     // ---------------------------------------------------------
-    const [perAuctionResult, settledVendorsResult] = await Promise.all([
+    const [perAuctionResult, settledVendorsResult, vendorAllLotsResult, vendorFirstSeenResult] = await Promise.all([
       client.query(perAuctionQuery),
       client.query(settledVendorsQuery),
+      client.query(vendorAllLotsQuery),
+      client.query(vendorFirstSeenQuery),
     ]);
 
     const compositionResult = await client.query(compositionQuery);
@@ -1032,8 +1117,27 @@ export default async function handler(req, res) {
       settledBiddersResult.json(),
     ]);
 
+    const vendorAllLotsRows = await vendorAllLotsResult.json();
+    const vendorFirstSeenRows = await vendorFirstSeenResult.json();
+
     const composition = compositionRows[0] ?? {};
     const settledComposition = settledCompositionRows[0] ?? {};
+
+    // VENDOR ANALYTICS derived figures — all from the ONE vendorAllLotsRows
+    // aggregate above (already sorted settled_bid_amount DESC).
+    const vendorFirstSeenMap = new Map(vendorFirstSeenRows.map((r) => [r.vendor, r.first_seen]));
+    const activeVendorsCount = vendorAllLotsRows.length;
+    const totalVendorBidAmount = vendorAllLotsRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
+    const top5VendorRows = vendorAllLotsRows.slice(0, 5);
+    const top5BidAmount = top5VendorRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
+    // New Vendors: first-ever activity (all-time, unscoped) falls within
+    // the selected [from, to] window AND the vendor is actually active
+    // (has a listed lot) in this same period — never a vendor whose
+    // first-ever lot was outside this window but who happens to reappear.
+    const newVendorsCount = vendorAllLotsRows.filter((r) => {
+      const firstSeen = vendorFirstSeenMap.get(r.vendor);
+      return firstSeen && firstSeen >= `${from} 00:00:00` && firstSeen < `${to} 23:59:59.999`;
+    }).length;
 
     // Phase 2C: cached at Vercel's Edge Network for 60s, keyed implicitly
     // by the full request URL (from/to/store/category — same stable,
@@ -1063,9 +1167,10 @@ export default async function handler(req, res) {
         // deliberately NOT relabeled as bidder counts.
         new_bidder_lots: Number(settledComposition.new_bidder_lots ?? 0),
         returning_bidder_lots: Number(settledComposition.returning_bidder_lots ?? 0),
-        // No "unclassified_bidders" field: an unclassified lot has no
-        // resolved bidder identity to count, distinct or otherwise.
         unclassified_lots: Number(settledComposition.unclassified_lots ?? 0),
+        // Distinct unresolved-identity WINNING bidders (PART 8) — see the
+        // query's own comment above.
+        unclassified_bidders: Number(settledComposition.unclassified_bidders ?? 0),
 
         total_lots: Number(settledComposition.total_lots ?? 0),
         total_bid_amount: Number(settledComposition.total_bid_amount ?? 0),
@@ -1126,6 +1231,10 @@ export default async function handler(req, res) {
           avg_bids_per_lot: distinctLots > 0 ? totalBids / distinctLots : null,
           max_bid_usage_pct: totalBids > 0 ? (maxBidEvents / totalBids) * 100 : null,
           winning_via_max_bid: Number(row.winning_via_max_bid ?? 0),
+          // PART 23 (Bidder Analytics Top 10 Bidders table) — distinct
+          // branches this bidder actually won a lot in, same settled_lots
+          // population as settled_bid_amount above.
+          branches: Number(row.branches ?? 0),
         };
       }),
 
@@ -1279,6 +1388,28 @@ export default async function handler(req, res) {
           row.participating_returning_bid_amount ?? 0,
         ),
       })),
+
+      // VENDOR ANALYTICS — see vendorAllLotsQuery/vendorFirstSeenQuery
+      // comments above. all_lots is the one bounded aggregate every
+      // Vendor Analytics section (Top 10 Vendors, Stuck Inventory,
+      // Active/New Vendor counts, Top-5 Concentration) derives from —
+      // never a per-vendor request.
+      vendor_analytics: {
+        active_vendors: activeVendorsCount,
+        new_vendors: newVendorsCount,
+        total_vendor_bid_amount: totalVendorBidAmount,
+        top5_vendor_bid_amount: top5BidAmount,
+        top5_vendor_concentration_pct: totalVendorBidAmount > 0 ? (top5BidAmount / totalVendorBidAmount) * 100 : null,
+        all_lots: vendorAllLotsRows.map((row) => ({
+          vendor: row.vendor,
+          lots_listed: Number(row.lots_listed ?? 0),
+          lots_sold: Number(row.lots_sold ?? 0),
+          settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+          auction_events: Number(row.auction_events ?? 0),
+          branches: Number(row.branches ?? 0),
+          first_seen: vendorFirstSeenMap.get(row.vendor) ?? null,
+        })),
+      },
     });
   } catch (err) {
     console.error(

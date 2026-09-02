@@ -25,6 +25,10 @@ import PayablesView from "./components/PayablesView";
 import FullAuctionDetailView from "./components/FullAuctionDetailView";
 import BiddingPaceView from "./components/BiddingPaceView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
+import BidderAnalyticsView from "./components/BidderAnalyticsView";
+import VendorAnalyticsView from "./components/VendorAnalyticsView";
+import BranchPerformanceTable from "./components/BranchPerformanceTable";
+import AuctionMixPanel from "./components/AuctionMixPanel";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
 import { useLiveOverview } from "./useLiveOverview";
@@ -109,6 +113,8 @@ const EMPTY_OVERVIEW = {
   branchBreakdown: [],
   branchTally: [],
   categoryTally: [],
+  branchPerformance: [],
+  auctionMix: { category: [], site: [], channel: [] },
   auctionNumbersInRange: new Set(),
   channelBreakdown: [],
   hourlyTrend: [],
@@ -120,6 +126,10 @@ const EMPTY_OVERVIEW = {
     returningBiddersBidAmount: 0,
     newBidderTrend: [],
     byAuction: [],
+    unclassifiedBidders: 0,
+    pctChange: null,
+    winRate: null,
+    previousWinRate: null,
   },
 
   participatingComposition: {
@@ -516,6 +526,28 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       ? ((participatingTotal - participatingBiddersPreviousTotal) / participatingBiddersPreviousTotal) * 100
       : null;
 
+  // WINNING BIDDERS panel (PART 8) — Unclassified is a distinct-bidder
+  // count (composition.unclassified_bidders — a resolved identity with no
+  // first-ever record on either bridge), never guessed into New/
+  // Returning. Comparison + win rate reuse the SAME raw-previous-count
+  // convention as Participating above (api/overview.js's cmpWinningResult,
+  // added to the existing comparison block) — no new query beyond that.
+  const winningUnclassified = Number(composition.unclassified_bidders) || 0;
+  const winningTotal = newBidders + returningBidders;
+  const winningPreviousNew = Number(kpis.comparison?.winning_bidders_new_previous ?? 0);
+  const winningPreviousReturning = Number(kpis.comparison?.winning_bidders_returning_previous ?? 0);
+  const winningPreviousUnclassified = Number(kpis.comparison?.winning_bidders_unclassified_previous ?? 0);
+  const winningPreviousTotal = winningPreviousNew + winningPreviousReturning + winningPreviousUnclassified;
+  const winningBiddersPct =
+    kpis.comparison && winningPreviousTotal > 0 ? ((winningTotal - winningPreviousTotal) / winningPreviousTotal) * 100 : null;
+  const winRate = participatingTotal > 0 ? (winningTotal / participatingTotal) * 100 : null;
+  const previousWinRate = participatingBiddersPreviousTotal > 0 ? (winningPreviousTotal / participatingBiddersPreviousTotal) * 100 : null;
+
+  bidderComposition.unclassifiedBidders = winningUnclassified;
+  bidderComposition.pctChange = winningBiddersPct;
+  bidderComposition.winRate = winRate;
+  bidderComposition.previousWinRate = previousWinRate;
+
   const participatingComposition = {
     total: participatingTotal,
     newBidders: Number(participating.new_bidders) || 0,
@@ -708,6 +740,133 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     }),
   }));
 
+  // Auction-grain drilldown rows behind Total Bid Amount/Auctions
+  // Concluded/Avg Bid per Auction/Avg Bid per Sold Lot/Lots Sold/Listed —
+  // see api/overview.js's AUCTION-LEVEL SUMMARY query comment, merged
+  // with the SAME per-auction Participating/Winning breakdowns
+  // api/leaderboards.js already computes (perAuctionBiddingActivity /
+  // perAuctionComposition) — reused, not refetched. Named/hoisted above
+  // the return object (it used to be an inline IIFE there) so
+  // branchPerformance/auctionMix below can reuse these SAME already-
+  // fetched per-auction rows (type/subType/lotsListed/lotsSold/
+  // settledBidAmount/storeName) instead of new queries.
+  const auctionSummaryRows = (kpis.auction_summary || []).map((a) => {
+    const w = winningByAuction.get(a.auction_number) || {};
+    const p = participatingByAuction.get(a.auction_number) || {};
+    return {
+      auctionNumber: a.auction_number,
+      name: a.name,
+      storeName: a.store_name,
+      startingTime: a.starting_time,
+      endingTime: a.ending_time,
+      type: a.type ?? null,
+      subType: a.sub_type ?? null,
+      lotsListed: Number(a.lots_listed) || 0,
+      lotsSold: Number(a.lots_sold) || 0,
+      lotsUnsold: Number(a.lots_unsold) || 0,
+      settledBidAmount: Number(a.settled_bid_amount) || 0,
+      settledLotCount: Number(a.settled_lot_count) || 0,
+      participating: {
+        total: Number(p.total_bidders) || 0,
+        newBidders: Number(p.new_bidders) || 0,
+        returningBidders: Number(p.returning_bidders) || 0,
+        activity: Number(p.bid_amount) || 0,
+        newActivity: Number(p.new_bidders_bid_amount) || 0,
+        // Same fold-unclassified-into-returning convention already
+        // used for Winning just below — a resolved union member whose
+        // identity has no first-ever record (only possible for a
+        // winning-only bidder) is real activity, never dropped.
+        returningActivity: (Number(p.returning_bidders_bid_amount) || 0) + (Number(p.unclassified_bid_amount) || 0),
+      },
+      winning: {
+        total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),
+        newBidders: Number(w.new_bidders) || 0,
+        returningBidders: Number(w.returning_bidders) || 0,
+        amount:
+          (Number(w.new_bidders_bid_amount) || 0) +
+          (Number(w.returning_bidders_bid_amount) || 0) +
+          (Number(w.unclassified_bid_amount) || 0),
+        newAmount: Number(w.new_bidders_bid_amount) || 0,
+        returningAmount: (Number(w.returning_bidders_bid_amount) || 0) + (Number(w.unclassified_bid_amount) || 0),
+      },
+    };
+  });
+
+  // BRANCH PERFORMANCE table (PART 10) — merges branchBreakdown's settled
+  // (Paid/Released) financial/bidder figures (already correct, already
+  // has previous-period comparison) with a client-side aggregation of
+  // auctionSummaryRows by storeName for "Lots Listed"/"Auctions" — the
+  // SAME broader Sold/Listed definition as the Headline Performance Lots
+  // Sold/Listed KPI (Outstanding/Paid/Unpaid/Released all count as Sold),
+  // deliberately NOT branchBreakdown's own narrower settled-only
+  // lotsSold/auctionCount. No new query — auctionSummaryRows is already
+  // fully loaded.
+  const branchAuctionRows = new Map();
+  for (const a of auctionSummaryRows) {
+    const key = a.storeName || "—";
+    if (!branchAuctionRows.has(key)) branchAuctionRows.set(key, []);
+    branchAuctionRows.get(key).push(a);
+  }
+  const branchPerformance = branchBreakdown
+    .filter((b) => b.branch !== "Others")
+    .map((b) => {
+      const rows = branchAuctionRows.get(b.branch) || [];
+      const lotsListed = rows.reduce((s, a) => s + a.lotsListed, 0);
+      const lotsSold = rows.reduce((s, a) => s + a.lotsSold, 0);
+      // Channel breakdown for this branch's own expand detail (PART 11) —
+      // grouped by the auction's real `type` (Online/Onsite/Negotiated/
+      // Live/Simulcast/EOI — xv3.auctions.type, the SAME corrected source
+      // api/revenue-breakdown.js already uses; never an auction_number-
+      // suffix heuristic). Only channels actually present are returned.
+      const channelMap = new Map();
+      for (const a of rows) {
+        const key = a.type || "Unspecified";
+        if (!channelMap.has(key)) channelMap.set(key, { channel: key, lotsListed: 0, lotsSold: 0, bidAmount: 0, auctions: 0 });
+        const c = channelMap.get(key);
+        c.lotsListed += a.lotsListed;
+        c.lotsSold += a.lotsSold;
+        c.bidAmount += a.settledBidAmount;
+        c.auctions += 1;
+      }
+      const channels = [...channelMap.values()].sort((x, y) => y.bidAmount - x.bidAmount);
+      return {
+        ...b,
+        auctions: rows.length,
+        lotsListed,
+        lotsSold,
+        sellThroughPct: lotsListed > 0 ? (lotsSold / lotsListed) * 100 : null,
+        channels,
+      };
+    })
+    .sort((a, b2) => b2.bidAmount - a.bidAmount);
+
+  // AUCTION MIX (PART 14-17) — Category reuses categoryBreakdown as-is
+  // (already computed above, same settled population). Site (At Branch /
+  // Onsite — productivity_report's own sub_type field) and Channel
+  // (Online/Onsite/Negotiated/Live/Simulcast/EOI — xv3.auctions.type, the
+  // SAME corrected source as api/revenue-breakdown.js) are both derived
+  // client-side from the SAME auctionSummaryRows already loaded — no new
+  // query for either.
+  function groupByBidAmount(rows, keyFn, fallbackLabel) {
+    const map = new Map();
+    for (const a of rows) {
+      const key = keyFn(a) || fallbackLabel;
+      if (!map.has(key)) map.set(key, { label: key, bidAmount: 0, auctions: 0 });
+      const g = map.get(key);
+      g.bidAmount += a.settledBidAmount;
+      g.auctions += 1;
+    }
+    const total = [...map.values()].reduce((s, g) => s + g.bidAmount, 0) || 1;
+    return [...map.values()]
+      .map((g) => ({ ...g, share: (g.bidAmount / total) * 100 }))
+      .sort((a, b2) => b2.bidAmount - a.bidAmount);
+  }
+  const auctionMix = {
+    category: categoryBreakdown.map((c) => ({ label: c.category, bidAmount: c.bidAmount, share: c.share })),
+    site: groupByBidAmount(auctionSummaryRows, (a) => a.subType, "Unspecified"),
+    channel: groupByBidAmount(auctionSummaryRows, (a) => a.type, "Unspecified"),
+  };
+
   return {
     heroKPIs: {
       totalBidAmount: bidAmount,
@@ -862,57 +1021,10 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     bidderComposition,
     participatingComposition,
 
-    // Auction-grain drilldown rows behind Total Bid Amount/Auctions
-    // Concluded/Avg Bid per Auction/Avg Bid per Sold Lot/Lots Sold/Listed
-    // — see api/overview.js's AUCTION-LEVEL SUMMARY query comment, merged
-    // with the SAME per-auction Participating/Winning breakdowns
-    // api/leaderboards.js already computes (perAuctionBiddingActivity /
-    // perAuctionComposition) — reused, not refetched, so the Auctions
-    // Concluded drilldown's per-auction bidder composition costs zero
-    // extra requests.
-    auctionSummary: (() => {
-      return (kpis.auction_summary || []).map((a) => {
-        const w = winningByAuction.get(a.auction_number) || {};
-        const p = participatingByAuction.get(a.auction_number) || {};
-        return {
-          auctionNumber: a.auction_number,
-          name: a.name,
-          storeName: a.store_name,
-          startingTime: a.starting_time,
-          endingTime: a.ending_time,
-          type: a.type ?? null,
-          subType: a.sub_type ?? null,
-          lotsListed: Number(a.lots_listed) || 0,
-          lotsSold: Number(a.lots_sold) || 0,
-          lotsUnsold: Number(a.lots_unsold) || 0,
-          settledBidAmount: Number(a.settled_bid_amount) || 0,
-          settledLotCount: Number(a.settled_lot_count) || 0,
-          participating: {
-            total: Number(p.total_bidders) || 0,
-            newBidders: Number(p.new_bidders) || 0,
-            returningBidders: Number(p.returning_bidders) || 0,
-            activity: Number(p.bid_amount) || 0,
-            newActivity: Number(p.new_bidders_bid_amount) || 0,
-            // Same fold-unclassified-into-returning convention already
-            // used for Winning just below — a resolved union member whose
-            // identity has no first-ever record (only possible for a
-            // winning-only bidder) is real activity, never dropped.
-            returningActivity: (Number(p.returning_bidders_bid_amount) || 0) + (Number(p.unclassified_bid_amount) || 0),
-          },
-          winning: {
-            total: (Number(w.new_bidders) || 0) + (Number(w.returning_bidders) || 0),
-            newBidders: Number(w.new_bidders) || 0,
-            returningBidders: Number(w.returning_bidders) || 0,
-            amount:
-              (Number(w.new_bidders_bid_amount) || 0) +
-              (Number(w.returning_bidders_bid_amount) || 0) +
-              (Number(w.unclassified_bid_amount) || 0),
-            newAmount: Number(w.new_bidders_bid_amount) || 0,
-            returningAmount: (Number(w.returning_bidders_bid_amount) || 0) + (Number(w.unclassified_bid_amount) || 0),
-          },
-        };
-      });
-    })(),
+    auctionSummary: auctionSummaryRows,
+
+    branchPerformance,
+    auctionMix,
 
     avgBidCategoryBreakdown,
 
@@ -941,6 +1053,9 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       unresolvedWins: Number(kpis.winning_max_bid?.unresolved_wins) || 0,
       maxBidWinPct: kpis.winning_max_bid?.max_bid_win_pct != null ? Number(kpis.winning_max_bid.max_bid_win_pct) : null,
       winningBidAmount: Number(kpis.winning_max_bid?.winning_bid_amount) || 0,
+      maxBidWinningAmount: Number(kpis.winning_max_bid?.max_bid_winning_amount) || 0,
+      normalBidWinningAmount: Number(kpis.winning_max_bid?.normal_bid_winning_amount) || 0,
+      unresolvedWinningAmount: Number(kpis.winning_max_bid?.unresolved_winning_amount) || 0,
     },
     winningMaxBidByBranch: (kpis.winning_max_bid_by_branch || []).map((row) => ({
       branch: row.branch,
@@ -1173,6 +1288,88 @@ function OverviewTab({
             onClick={() => setWinningMaxBidOpen(true)}
           />
         </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          {/* LEFT: WINNING BIDDERS panel (PART 8) */}
+          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+            <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
+            <div className="flex items-baseline gap-2 mb-2.5">
+              <div className="font-display text-[28px] leading-none text-ink">
+                {overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
+              </div>
+              {overview.bidderComposition.pctChange != null && (
+                <span className={`text-[13px] font-medium ${overview.bidderComposition.pctChange >= 0 ? "text-toneGreenText" : "text-toneRedText"}`}>
+                  {overview.bidderComposition.pctChange >= 0 ? "▲" : "▼"} {Math.abs(overview.bidderComposition.pctChange).toFixed(1)}% vs previous
+                </span>
+              )}
+            </div>
+            {(() => {
+              const bc = overview.bidderComposition;
+              const total = bc.newBidders + bc.returningBidders + bc.unclassifiedBidders || 1;
+              return (
+                <>
+                  <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
+                    <div className="bg-series8 h-full" style={{ width: `${(bc.newBidders / total) * 100}%` }} />
+                    <div className="bg-navy h-full" style={{ width: `${(bc.returningBidders / total) * 100}%` }} />
+                    <div className="bg-muted h-full" style={{ width: `${(bc.unclassifiedBidders / total) * 100}%` }} />
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink mb-3">
+                    <span>New {bc.newBidders}</span>
+                    <span>Returning {bc.returningBidders}</span>
+                    {bc.unclassifiedBidders > 0 && <span className="text-muted">Unmatched {bc.unclassifiedBidders}</span>}
+                  </div>
+                </>
+              );
+            })()}
+            <div className="pt-2.5 border-t border-gridline grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-[12px] text-muted">Win Rate</div>
+                <div className="tabular font-medium text-ink">{overview.bidderComposition.winRate != null ? `${overview.bidderComposition.winRate.toFixed(1)}%` : "—"}</div>
+              </div>
+              <div>
+                <div className="text-[12px] text-muted">Previous Rate</div>
+                <div className="tabular font-medium text-ink">{overview.bidderComposition.previousWinRate != null ? `${overview.bidderComposition.previousWinRate.toFixed(1)}%` : "—"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: WON VIA — MAX BID VS. REGULAR BID (PART 9) */}
+          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+            <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-3">Won Via — Max Bid vs. Regular Bid</div>
+            {(() => {
+              const wmb = overview.winningMaxBid;
+              const rows = [
+                { label: "Regular Bid", lots: wmb.normalBidWins, amount: wmb.normalBidWinningAmount },
+                { label: "Max Bid", lots: wmb.maxBidWins, amount: wmb.maxBidWinningAmount },
+                { label: "No Electronic Match", lots: wmb.unresolvedWins, amount: wmb.unresolvedWinningAmount },
+              ];
+              const max = Math.max(...rows.map((r) => r.lots), 1);
+              return (
+                <div className="space-y-3">
+                  {rows.map((r) => (
+                    <div key={r.label}>
+                      <div className="flex items-baseline justify-between gap-3 mb-1">
+                        <span className="text-[14px] text-ink">{r.label}</span>
+                        <span className="text-[13.5px] tabular text-ink">{r.lots.toLocaleString()} lots · {formatPeso(r.amount)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-gridline overflow-hidden">
+                        <div className={`h-full rounded-full ${r.label === "Max Bid" ? "bg-series8" : r.label === "Regular Bid" ? "bg-series1" : "bg-muted"}`} style={{ width: `${(r.lots / max) * 100}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </StorySection>
+
+      <StorySection title="Branch Performance" insight={`${rangeLabel} · click a branch for its channel breakdown and period comparison.`}>
+        <BranchPerformanceTable rows={overview.branchPerformance} />
+      </StorySection>
+
+      <StorySection title="Auction Mix" insight="How this period's settled Bid Amount splits by category, site, and channel.">
+        <AuctionMixPanel auctionMix={overview.auctionMix} />
       </StorySection>
 
       <BidderCompositionModal
@@ -1264,6 +1461,8 @@ const TITLES = {
   "Full Auction Detail": "Full Auction Detail",
   "Bidding Pace": "Bidding Pace",
   "Revenue Breakdown": "Revenue Breakdown",
+  "Bidder Analytics": "Bidder Analytics",
+  "Vendor Analytics": "Vendor Analytics",
   Export: "Export Report",
 };
 
@@ -1561,6 +1760,26 @@ export default function App() {
             <RevenueBreakdownView
               store={store}
               dateRange={dateRange}
+              rangeLabel={rangeLabel}
+              refreshNonce={refreshNonce}
+            />
+          )}
+
+          {tab === "Bidder Analytics" && (
+            <BidderAnalyticsView
+              dateRange={dateRange}
+              store={store === ALL_STORES ? undefined : store}
+              category={overviewCategory}
+              rangeLabel={rangeLabel}
+              refreshNonce={refreshNonce}
+            />
+          )}
+
+          {tab === "Vendor Analytics" && (
+            <VendorAnalyticsView
+              dateRange={dateRange}
+              store={store === ALL_STORES ? undefined : store}
+              category={overviewCategory}
               rangeLabel={rangeLabel}
               refreshNonce={refreshNonce}
             />
