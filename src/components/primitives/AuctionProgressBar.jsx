@@ -7,25 +7,26 @@ function clampPct(v) {
   return Math.min(100, Math.max(0, v));
 }
 
-// Floating hover card for one milestone/track summary — same `.floating`
-// hover-card language used everywhere else in the dashboard (EntityBreakdownRow,
-// BidTrendChart), anchored at a clamped horizontal position so it never
-// overflows the card on either edge regardless of which milestone (0%-100%)
-// triggered it.
+// Floating hover card for one milestone/track summary — BLACK/near-black
+// treatment (`.timeline-tip`, index.css) by explicit request, distinct from
+// the light `.floating` cards used elsewhere in the dashboard. Anchored at
+// a clamped horizontal position so it never overflows the card on either
+// edge regardless of which milestone (0%-100%) triggered it.
 function TimelineTip({ anchorPct, eyebrow, lines }) {
   const left = Math.min(88, Math.max(12, anchorPct));
   return (
     <div
-      // mb-12 clears the tallest permanent-label tier (see PermanentLabel)
-      // so the two never visually collide when hovering a marker that
-      // already has a permanent label above it.
-      className="absolute bottom-full mb-12 -translate-x-1/2 z-50 pointer-events-none"
+      // mb-24 clears the tallest label tier — MilestoneLabel's ~72px chip
+      // + connector (the tallest of the two label tiers) — so the tooltip
+      // never visually collides with a permanent label sitting above the
+      // same marker being hovered.
+      className="absolute bottom-full mb-24 -translate-x-1/2 z-50 pointer-events-none"
       style={{ left: `${left}%` }}
     >
-      <div className="floating px-3 py-2 text-[12.5px] leading-tight whitespace-nowrap shadow-lg">
-        <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">{eyebrow}</div>
+      <div className="timeline-tip px-3.5 py-2.5 text-[12.5px] leading-tight whitespace-nowrap shadow-lg">
+        <div className="text-[10.5px] uppercase tracking-wide timeline-tip-muted font-semibold mb-1">{eyebrow}</div>
         {lines.map((line, i) => (
-          <div key={i} className={i === 0 ? "text-ink font-medium tabular" : "text-muted tabular"}>
+          <div key={i} className={i === 0 ? "font-semibold tabular" : "timeline-tip-muted tabular"}>
             {line}
           </div>
         ))}
@@ -41,7 +42,10 @@ function TimelineTip({ anchorPct, eyebrow, lines }) {
 // staggers the connector's height (0 = short/close to the bar, 1 =
 // taller) so two labels landing close together horizontally don't
 // overlap; the richer hover tooltip (TimelineTip) still supplies full
-// detail on top of this.
+// detail on top of this. A small pill background keeps the label legible
+// regardless of what's directly behind it, and is deliberately a size
+// step below MilestoneLabel (structural milestones stay the more
+// prominent tier — see that component).
 function PermanentLabel({ pct, tier, eyebrow, sub }) {
   const left = Math.min(92, Math.max(8, pct));
   return (
@@ -49,9 +53,38 @@ function PermanentLabel({ pct, tier, eyebrow, sub }) {
       className="absolute bottom-full -translate-x-1/2 flex flex-col items-center pointer-events-none z-25"
       style={{ left: `${left}%` }}
     >
-      <div className="text-[9.5px] uppercase tracking-wide font-semibold text-ink whitespace-nowrap leading-none">{eyebrow}</div>
-      {sub && <div className="text-[9px] tabular text-series1 whitespace-nowrap leading-none mt-0.5">{sub}</div>}
-      <div className="w-px border-l border-dashed border-navy/40 mt-0.5" style={{ height: tier === 0 ? "10px" : "30px" }} />
+      <div className="bg-surface1 border border-gridline rounded px-1.5 py-0.5 shadow-sm text-center">
+        <div className="text-[10px] uppercase tracking-wide font-bold text-ink whitespace-nowrap leading-none">{eyebrow}</div>
+        {sub && <div className="text-[9.5px] tabular text-series1 font-semibold whitespace-nowrap leading-none mt-0.5">{sub}</div>}
+      </div>
+      <div className="w-px border-l border-dashed border-navy/50 mt-0.5" style={{ height: tier === 0 ? "10px" : "30px" }} />
+    </div>
+  );
+}
+
+// ALWAYS-VISIBLE label for a STRUCTURAL milestone (Timeline Start /
+// Official Start / Current / Ending Time) — deliberately the MORE
+// prominent tier vs. PermanentLabel's bid-event labels (larger text,
+// solid navy chip, always tier-0/short connector since these four never
+// crowd each other the way dense bid activity can). Renders only the
+// category name (not the exact timestamp, to stay compact) — hovering
+// the corresponding marker still reveals the full timestamp/detail via
+// TimelineTip.
+function MilestoneLabel({ pct, eyebrow, emphasis = false }) {
+  const left = Math.min(96, Math.max(4, pct));
+  return (
+    <div
+      className="absolute bottom-full -translate-x-1/2 flex flex-col items-center pointer-events-none z-30"
+      style={{ left: `${left}%` }}
+    >
+      <div
+        className={`rounded px-1.5 py-0.5 shadow-sm whitespace-nowrap ${
+          emphasis ? "bg-navy text-white" : "bg-surface1 border border-gridline text-ink"
+        }`}
+      >
+        <div className="text-[10.5px] uppercase tracking-wide font-bold leading-none">{eyebrow}</div>
+      </div>
+      <div className={`w-px border-l border-dashed mt-0.5 ${emphasis ? "border-navy/70" : "border-navy/40"}`} style={{ height: "54px" }} />
     </div>
   );
 }
@@ -261,19 +294,26 @@ export default function AuctionProgressBar({
   }
 
   return (
-    // Reserve room above the track for the permanent labels (text + up to
-    // the taller connector tier) whenever any exist, so they never bleed
-    // into whatever content sits above this component.
-    <div className="relative pb-1" style={{ paddingTop: tieredLabels.length > 0 ? 46 : 0 }}>
+    // Reserve room above the track for BOTH label tiers — the structural
+    // MilestoneLabel row (Start/Official Start/Current/End — always
+    // rendered) sits highest, the bid-event PermanentLabel row (text + up
+    // to the taller connector tier, only when real bid activity exists)
+    // sits closer to the bar — so they never overlap or bleed into
+    // whatever content sits above this component.
+    <div className="relative pb-1" style={{ paddingTop: 88 }}>
       <div
-        className="relative h-3 rounded-full bg-plane border border-gridline overflow-visible cursor-default"
+        className="relative h-4 rounded-full bg-gridline border border-gridline overflow-visible cursor-default"
         onMouseEnter={() => setHoverKey("track")}
         onMouseLeave={() => setHoverKey(null)}
       >
-        {/* Elapsed section — filled but deliberately subtle; the Current dot
-            below, not this fill, is the most visually prominent element. */}
+        {/* Elapsed section — the MAIN visual signal of this component: a
+            clearly, obviously filled bar (full-strength color, not a
+            subtle tint) so elapsed auction time reads at a glance without
+            hovering or reading any label. The Current dot sits exactly at
+            this same width%, so fill edge and marker can never
+            misalign. */}
         <div
-          className="absolute top-0 left-0 h-full rounded-full bg-series1/60 transition-[width]"
+          className="absolute top-0 left-0 h-full rounded-full bg-series1 transition-[width]"
           style={{ width: `${nowPct}%` }}
         />
 
@@ -369,6 +409,17 @@ export default function AuctionProgressBar({
           />
         ))}
 
+        {/* ALWAYS-VISIBLE structural milestone labels — Timeline Start /
+            Official Start / Current / Ending Time — the more prominent
+            label tier (see MilestoneLabel), sitting above the bid-event
+            labels so the two tiers never collide. Current is the
+            emphasized (solid navy) one — the single most important
+            "where are we right now" marker. */}
+        <MilestoneLabel pct={0} eyebrow="Start" />
+        {officialStartPct != null && <MilestoneLabel pct={officialStartPct} eyebrow="Official Start" />}
+        {!ended && <MilestoneLabel pct={nowPct} eyebrow="Current" emphasis />}
+        <MilestoneLabel pct={100} eyebrow="End" />
+
         {/* Timeline Start (0%) */}
         <button
           type="button"
@@ -423,22 +474,23 @@ export default function AuctionProgressBar({
         {active && <TimelineTip anchorPct={activeAnchor} eyebrow={active.eyebrow} lines={active.lines} />}
       </div>
 
-      <div className="flex justify-between text-[12px] text-muted mt-1">
+      <div className="flex justify-between text-[12.5px] text-muted mt-1">
         <div>
-          <div className="text-ink">Start</div>
+          <div className="text-ink font-semibold">Start</div>
           <div className="tabular">{formatManila(timelineStart)}</div>
         </div>
         {hadPreBidding && (
-          <div className="text-navy/70 text-center">
-            ↑ Auction Start {formatManila(officialStartTime, { withDate: false })}
+          <div className="text-navy text-center">
+            <div className="font-semibold">↑ Official Start</div>
+            <div className="tabular">{formatManila(officialStartTime, { withDate: false })}</div>
           </div>
         )}
         <div className="text-right">
-          <div className="text-ink">Current position</div>
+          <div className="text-ink font-semibold">Current</div>
           <div className="tabular">{ended ? "Ended" : timeRemainingLabel(endingTime)}</div>
         </div>
         <div className="text-right">
-          <div className="text-ink">End</div>
+          <div className="text-ink font-semibold">End</div>
           <div className="tabular">{formatManila(endingTime)}</div>
         </div>
       </div>

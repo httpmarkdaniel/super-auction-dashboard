@@ -58,6 +58,19 @@
     color: #7e93c2;
     text-decoration: underline;
   }
+  /* Active Auction Timeline hover details ONLY (milestones + bid events) —
+     same "deliberately fixed dark, independent of theme toggle" rationale
+     as .methodology, kept as its own class since .methodology is reserved
+     for metric-definition tooltips, not data tooltips. */
+  .timeline-tip {
+    border-radius: 0.5rem;
+    background: #0b0d12;
+    border: 1px solid #2b303a;
+    color: #f5f6f8;
+  }
+  .timeline-tip .timeline-tip-muted {
+    color: #9aa3b2;
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
   }
