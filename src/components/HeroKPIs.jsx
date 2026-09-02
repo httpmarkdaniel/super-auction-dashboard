@@ -15,7 +15,7 @@ const METHODOLOGY = {
   serviceIncome:
     "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots.",
   registration:
-    "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
+    "Participating Bidders divided by Registered Bidders for the selected auction reporting cohort (auctions ending in this period). Participating Bidders uses the same canonical population shown in Bidder Composition — real bid-history participants union resolved winning bidders, deduplicated by canonical identity — not a registration-record flag.",
 };
 
 // Auction Performance — auction-level KPIs only. Every historical BIDDER

@@ -739,15 +739,26 @@ function buildLiveOverview(live, bidCorrectionDelta) {
           ? bidAmount / Number(kpis.settled_lot_count)
           : null,
 
-      // REGISTRATION -> BIDDER CONVERSION — see api/overview.js's
-      // REGISTRATION -> BIDDER CONVERSION query comment for cohort
-      // definition. null (rendered as "—") when nobody registered for an
-      // auction in this scope, never a fabricated 0%.
+      // REGISTRATION -> BIDDER (renamed conceptually to REGISTRATION ->
+      // PARTICIPATION) — numerator is now the SAME canonical Participating
+      // Bidders population shown on the Bidder Composition card
+      // (participatingComposition.total: real bid-history participants
+      // UNION resolved winning bidders, deduplicated by canonical identity
+      // — see leaderboards.js's compositionQuery), NOT
+      // cms.mart_cms_bidder_registrations' own is_participating_bidder
+      // flag. That flag-based count is a narrower, differently-identified
+      // population (customer_id-keyed registration rows, not canonical
+      // email-keyed bid/winner identity) that under-counted real
+      // participation — see the investigation report for the exact
+      // reconciliation. Denominator (registered_customers) is unchanged:
+      // unique customers registered for an auction in this ending_time
+      // cohort — the registration mart has no per-lot category dimension,
+      // so it stays Category-invariant by data limitation, same as before.
       registeredCustomers: Number(kpis.registered_customers) || 0,
-      participatingRegisteredBidders: Number(kpis.participating_registered_bidders) || 0,
+      participatingRegisteredBidders: participatingComposition.total,
       registrationConversionPct:
         Number(kpis.registered_customers) > 0
-          ? (Number(kpis.participating_registered_bidders) / Number(kpis.registered_customers)) * 100
+          ? (participatingComposition.total / Number(kpis.registered_customers)) * 100
           : null,
 
       // AVG BIDS / UNIQUE BIDDER — bidder engagement/intensity (Total Bid
