@@ -128,6 +128,8 @@ const EMPTY_OVERVIEW = {
     returningBidders: 0,
     totalBids: 0,
     avgBidsPerUniqueBidder: null,
+    previousTotal: 0,
+    pctChange: null,
   },
 
   auctionSummary: [],
@@ -498,8 +500,24 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   // bidding_activity_composition definition), a DIFFERENT population from
   // the settled Winning bidderComposition above — see api/leaderboards.js.
   const participating = leaderboards.participatingComposition || {};
+  const participatingTotal = (Number(participating.new_bidders) || 0) + (Number(participating.returning_bidders) || 0);
+
+  // Headline Performance's Participating Bidders comparison — the CURRENT
+  // total above comes from this (leaderboards) endpoint, but the previous-
+  // period counterpart of that SAME canonical population is computed in
+  // api/overview.js's comparison block (compareFrom/compareTo aren't known
+  // to leaderboards.js) and exposed as a raw count — so the % change is
+  // derived here, combining both already-fetched values, never a second
+  // request. null (never a fabricated %) when no comparison window was
+  // requested or the previous period had zero participants.
+  const participatingBiddersPreviousTotal = Number(kpis.comparison?.participating_bidders_previous ?? 0);
+  const participatingBiddersPct =
+    kpis.comparison && participatingBiddersPreviousTotal > 0
+      ? ((participatingTotal - participatingBiddersPreviousTotal) / participatingBiddersPreviousTotal) * 100
+      : null;
+
   const participatingComposition = {
-    total: (Number(participating.new_bidders) || 0) + (Number(participating.returning_bidders) || 0),
+    total: participatingTotal,
     newBidders: Number(participating.new_bidders) || 0,
     returningBidders: Number(participating.returning_bidders) || 0,
     // PART 14/15: Participating is an ENGAGEMENT population, not a
@@ -510,6 +528,10 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // two-stage-average formula) — no new query, no extra request.
     totalBids: Number(kpis.total_bid_events) || 0,
     avgBidsPerUniqueBidder: kpis.avg_bids_per_unique_bidder != null ? Number(kpis.avg_bids_per_unique_bidder) : null,
+    // Headline Performance card's own previous-period comparison — see
+    // comment above.
+    previousTotal: participatingBiddersPreviousTotal,
+    pctChange: participatingBiddersPct,
   };
 
   // PART 18/19/26: hover-preview fields, all already present on the SAME
@@ -1100,6 +1122,7 @@ function OverviewTab({
           compareLabel={compareLabel}
           globalCategory={selectedCategory}
           onSelectCategory={onSelectCategory}
+          onOpenBidderComposition={() => setBidderCompositionOpen(true)}
         />
       </div>
 

@@ -3606,6 +3606,7 @@ export default async function handler(req, res) {
         cmpCategoryResult,
         cmpBranchResult,
         cmpBidderEngagementResult,
+        cmpParticipatingResult,
       ] = await Promise.all([
         client.query({
           query: `
@@ -3845,6 +3846,75 @@ export default async function handler(req, res) {
           query_params: compareParams,
           format: "JSONEachRow",
         }),
+        // Previous-period counterpart of the CANONICAL Participating
+        // Bidders population (leaderboards.js's compositionQuery: real
+        // bid-history participants UNION resolved winning bidders,
+        // deduplicated by canonical identity via BIDDER_IDENTITY_CTES) —
+        // for the Headline Performance Participating Bidders card's own
+        // previous-period comparison. Deliberately the SAME union
+        // technique/identity bridge, never the narrower is_participating_
+        // bidder registration flag or a distinct-email-only substitute.
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT DISTINCT auction_number, store_name
+              FROM xv3.mart_auction_productivity_report
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+            ),
+            lot_category AS (
+              SELECT v.auction_number AS auction_number, v.lot_number AS lot_number,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+            ),
+            bid_history_bidders AS (
+              SELECT lowerUTF8(trim(b.email)) AS bidder_key
+              FROM cms.mart_cms_bid_history_report b
+              INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+              LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+              WHERE b.email IS NOT NULL AND trim(b.email) != ''
+                AND ({category:String} = '' OR lc.lot_category = {category:String})
+              GROUP BY bidder_key
+            ),
+            settled_lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                any(v.or_number) AS or_number,
+                any(v.date_time_paid) AS date_time_paid,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              FROM xv3.mart_auction_vendor_analysis v
+              INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+              WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+              GROUP BY v.auction_number, v.lot_number
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            ),
+            ${BIDDER_IDENTITY_CTES},
+            winning_bidder_keys AS (
+              SELECT DISTINCT rli.resolved_email AS bidder_key
+              FROM settled_lots sl
+              INNER JOIN resolved_lot_identity rli
+                ON sl.auction_number = rli.ri_auction_number AND sl.lot_number = rli.ri_lot_number
+              WHERE rli.resolved_email IS NOT NULL
+            ),
+            union_bidder_keys AS (
+              SELECT bidder_key FROM bid_history_bidders
+              UNION DISTINCT
+              SELECT bidder_key FROM winning_bidder_keys
+            )
+            SELECT count() AS participating_bidders
+            FROM union_bidder_keys
+          `,
+          query_params: compareParams,
+          format: "JSONEachRow",
+          // Touches BIDDER_IDENTITY_CTES (same bridge as the main request's
+          // branch/category participating queries) — safety net matching
+          // every other identity-bridge query in this file.
+          clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
+        }),
       ]);
 
       const cmpSettled = (await cmpSettledResult.json())[0] ?? {};
@@ -3854,6 +3924,7 @@ export default async function handler(req, res) {
       const cmpCategoryRows = await cmpCategoryResult.json();
       const cmpBranchRows = await cmpBranchResult.json();
       const cmpBidderEngagement = (await cmpBidderEngagementResult.json())[0] ?? {};
+      const cmpParticipating = (await cmpParticipatingResult.json())[0] ?? {};
 
       const cmpTotalBidAmount = Number(cmpSettled.total_bid_amount ?? 0);
       const cmpAuctionsConcluded = Number(cmpSettled.auctions_concluded ?? 0);
@@ -3901,6 +3972,15 @@ export default async function handler(req, res) {
           cmpRegistered > 0 ? (cmpParticipatingRegistered / cmpRegistered) * 100 : null,
         ),
         avg_bids_per_unique_bidder_pct: pctChange(avgBidsPerUniqueBidder, cmpAvgBidsPerUniqueBidder),
+
+        // Previous-period canonical Participating Bidders total — raw
+        // count only (never a pct here): the CURRENT total is computed in
+        // a separate endpoint (api/leaderboards.js's compositionQuery),
+        // not available inside this request, so the frontend combines
+        // this raw previous value with that already-fetched current total
+        // to derive the % change (see App.jsx's buildLiveOverview) —
+        // same canonical union/identity definition on both sides.
+        participating_bidders_previous: Number(cmpParticipating.participating_bidders ?? 0),
 
         // Previous-period category-level Avg Bid aggregates — same shape as
         // the top-level `categories` field below, one row per canonical
