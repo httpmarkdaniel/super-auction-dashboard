@@ -12,11 +12,93 @@ const client = createClient({
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "", category = "" } = req.query;
+    const { from, to, store = "", category = "", type = "" } = req.query;
 
     if (!from || !to) {
       return res.status(400).json({
         error: "Missing from/to date parameters",
+      });
+    }
+
+    // =========================================================
+    // VENDOR ANALYTICS TIME SERIES (type=vendor-time-series) — folded
+    // into this existing endpoint (rather than a new serverless
+    // function) to stay within the Vercel Hobby-plan function-count
+    // limit. "Active & New Vendors by Period" only — Active Vendors/New
+    // Vendors/Top-5 Concentration/Stuck Inventory/Top 10 Vendors totals
+    // all already come from this SAME endpoint's vendor_analytics field
+    // (below) — this branch exists purely for the bucketed trend that
+    // flat aggregate can't produce. No identity bridge (vendor is a real
+    // field, not a resolved bidder identity), so this is a single light
+    // query, dynamic bucket granularity (never hardcoded to "month").
+    // =========================================================
+    if (type === "vendor-time-series") {
+      function pickBucket(fromStr, toStr) {
+        const days = (Date.parse(`${toStr}T00:00:00Z`) - Date.parse(`${fromStr}T00:00:00Z`)) / 86400000;
+        if (days <= 9) return { fn: "toStartOfDay", label: "day" };
+        if (days <= 60) return { fn: "toMonday", label: "week" };
+        return { fn: "toStartOfMonth", label: "month" };
+      }
+
+      const vtsParams = { from, to, store, category };
+      const { fn: bucketFn, label: bucketLabel } = pickBucket(from, to);
+      const bucketExpr = (col) => `${bucketFn}(${col}, 'Asia/Manila')`;
+
+      const vtsResult = await client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT auction_number, store_name, ${bucketExpr("ending_time")} AS bucket
+            FROM xv3.mart_auction_productivity_report
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+          lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(s.bucket) AS bucket,
+              any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions s ON v.auction_number = s.auction_number
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
+          ),
+          vendor_bucket AS (
+            SELECT DISTINCT bucket, vendor FROM lots
+          ),
+          vendor_first_seen AS (
+            SELECT ifNull(vendor, 'Unknown Vendor') AS vendor, min(date_created) AS first_seen
+            FROM xv3.mart_auction_vendor_analysis
+            WHERE vendor IS NOT NULL
+            GROUP BY vendor
+          )
+          SELECT
+            vb.bucket AS bucket,
+            uniqExact(vb.vendor) AS total,
+            uniqExactIf(vb.vendor, ${bucketExpr("vfs.first_seen")} = vb.bucket) AS new_vendors,
+            uniqExactIf(vb.vendor, ${bucketExpr("vfs.first_seen")} != vb.bucket OR vfs.first_seen IS NULL) AS returning_vendors
+          FROM vendor_bucket vb
+          LEFT JOIN vendor_first_seen vfs ON vb.vendor = vfs.vendor
+          GROUP BY vb.bucket
+          ORDER BY bucket
+        `,
+        query_params: vtsParams,
+        format: "JSONEachRow",
+      });
+      const vtsRows = await vtsResult.json();
+
+      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
+      return res.status(200).json({
+        bucket_label: bucketLabel,
+        by_period: vtsRows.map((row) => ({
+          bucket: row.bucket,
+          total: Number(row.total ?? 0),
+          new_vendors: Number(row.new_vendors ?? 0),
+          returning_vendors: Number(row.returning_vendors ?? 0),
+        })),
       });
     }
 

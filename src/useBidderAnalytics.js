@@ -18,8 +18,10 @@ function fetchJson(path, params = {}) {
 // (bidding_activity_composition -> canonical Participating/New Bidders,
 // bidders -> Top 10 by Winning Bid Amount) payloads — only the bucketed
 // time series / Always Active / Went Quiet classification is genuinely
-// new data, from /api/bidder-analytics. One-shot fetch on filter change,
-// no polling interval (this tab has no "live" concept).
+// new data, served via /api/overview?type=bidder-time-series (folded into
+// the existing endpoint, not a new serverless function, to stay within
+// the Vercel Hobby-plan function-count limit). One-shot fetch on filter
+// change, no polling interval (this tab has no "live" concept).
 export function useBidderAnalytics(dateRangeKey, store, category, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
@@ -34,7 +36,7 @@ export function useBidderAnalytics(dateRangeKey, store, category, refreshNonce =
         const [overview, leaderboards, bidderAnalytics] = await Promise.all([
           fetchJson("/api/overview", params),
           fetchJson("/api/leaderboards", params),
-          fetchJson("/api/bidder-analytics", params),
+          fetchJson("/api/overview", { ...params, type: "bidder-time-series" }),
         ]);
         if (cancelled) return;
         setState({ data: { overview, leaderboards, bidderAnalytics }, loading: false, error: null });

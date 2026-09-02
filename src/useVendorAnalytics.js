@@ -15,8 +15,10 @@ function fetchJson(path, params = {}) {
 // filters (PART 25 of this task). Reuses /api/leaderboards' vendor_analytics
 // field (one bounded all-lots-per-vendor aggregate — Active/New Vendors,
 // Top-5 Concentration, Stuck Inventory, Top 10 Vendors all derive from it
-// client-side); only the bucketed time series is genuinely new data, from
-// /api/vendor-analytics. One-shot fetch on filter change, no polling.
+// client-side); only the bucketed time series is genuinely new data,
+// served via /api/leaderboards?type=vendor-time-series (folded into the
+// existing endpoint, not a new serverless function, to stay within the
+// Vercel Hobby-plan function-count limit). One-shot fetch, no polling.
 export function useVendorAnalytics(dateRangeKey, store, category, refreshNonce = 0) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
@@ -30,7 +32,7 @@ export function useVendorAnalytics(dateRangeKey, store, category, refreshNonce =
         const params = { from, to, store, category };
         const [leaderboards, vendorAnalytics] = await Promise.all([
           fetchJson("/api/leaderboards", params),
-          fetchJson("/api/vendor-analytics", params),
+          fetchJson("/api/leaderboards", { ...params, type: "vendor-time-series" }),
         ]);
         if (cancelled) return;
         setState({ data: { leaderboards, vendorAnalytics }, loading: false, error: null });
