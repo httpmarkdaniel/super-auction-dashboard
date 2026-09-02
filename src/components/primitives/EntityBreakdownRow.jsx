@@ -66,7 +66,7 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
                 <span className="text-muted">Total Bids</span> <span className="font-medium">{p.totalBids.toLocaleString()}</span>
               </div>
               <div className="tabular text-[12px] text-series1">
-                Avg Bids / Unique Bidder {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(1) : "—"}
+                Avg Bids / Unique Bidder {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(2) : "—"}
               </div>
             </div>
             <div>

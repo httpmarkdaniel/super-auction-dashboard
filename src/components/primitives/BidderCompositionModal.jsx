@@ -1,4 +1,6 @@
+import { useState } from "react";
 import Modal from "./Modal";
+import BranchCategoryToggle from "./BranchCategoryToggle";
 import { formatCompactPeso } from "../../utils/format";
 
 // One BY BRANCH / BY CATEGORY table — same shape, different entity label.
@@ -31,7 +33,7 @@ function EntityTable({ entityLabel, rows, getLabel }) {
                 <td className="py-2 pr-4 text-right tabular text-muted">{p.newBidders} / {p.returningBidders}</td>
                 <td className="py-2 pr-4 text-right tabular text-ink">{p.totalBids.toLocaleString()}</td>
                 <td className="py-2 pr-4 text-right tabular text-series1 font-semibold">
-                  {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(1) : "—"}
+                  {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(2) : "—"}
                 </td>
                 <td className="py-2 pr-4 text-right tabular text-ink">
                   {w.total}
@@ -60,18 +62,16 @@ function EntityTable({ entityLabel, rows, getLabel }) {
 // events ÷ this branch's own unique bidders), never the overall Overview
 // denominator — see App.jsx's withHoverDetail comment.
 export default function BidderCompositionModal({ open, onClose, branchBreakdown, categoryBreakdown, rangeLabel }) {
+  const [view, setView] = useState("branch");
+
   return (
-    <Modal open={open} onClose={onClose} title="Bidder Composition" subtitle={`${rangeLabel} · by branch and by category`}>
-      <div className="space-y-6">
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-2">By Branch</div>
-          <EntityTable entityLabel="Branch" rows={branchBreakdown} getLabel={(r) => r.branch} />
-        </div>
-        <div>
-          <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-2">By Category</div>
-          <EntityTable entityLabel="Category" rows={categoryBreakdown} getLabel={(r) => r.category} />
-        </div>
-      </div>
+    <Modal open={open} onClose={onClose} title="Bidder Composition" subtitle={rangeLabel}>
+      <BranchCategoryToggle value={view} onChange={setView} />
+      {view === "branch" ? (
+        <EntityTable entityLabel="Branch" rows={branchBreakdown} getLabel={(r) => r.branch} />
+      ) : (
+        <EntityTable entityLabel="Category" rows={categoryBreakdown} getLabel={(r) => r.category} />
+      )}
     </Modal>
   );
 }

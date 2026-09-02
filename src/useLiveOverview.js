@@ -185,6 +185,18 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               avg_bids_per_unique_bidder: liveOverview.avg_bids_per_unique_bidder ?? null,
               bidder_engagement: liveOverview.bidder_engagement ?? [],
 
+              // TOTAL BIDS TODAY / NEW & RETURNING BIDDERS TODAY — see
+              // api/overview.js's todayActivityResultPromise comment.
+              total_bids_today: liveOverview.total_bids_today ?? 0,
+              new_bidders_today: liveOverview.new_bidders_today ?? 0,
+              returning_bidders_today: liveOverview.returning_bidders_today ?? 0,
+
+              // WINNING BIDS VIA MAX BID — see api/overview.js's
+              // winningMaxBidQuery comment.
+              winning_max_bid: liveOverview.winning_max_bid ?? null,
+              winning_max_bid_by_branch: liveOverview.winning_max_bid_by_branch ?? [],
+              winning_max_bid_by_category: liveOverview.winning_max_bid_by_category ?? [],
+
               // Dynamic period-over-period comparison — null when not
               // computed (see api/overview.js's DYNAMIC COMPARISON PERIOD
               // query comment), never a fabricated delta.

@@ -725,7 +725,11 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             any(v.bid_amount) AS lot_bid_amount,
             any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
-            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category,
+            -- Cheap hover-preview fields (PART 19) — same settled_lots
+            -- scan already in place, no extra join/scan needed.
+            any(v.sold_price) AS lot_sold_price,
+            any(v.commission) AS lot_commission_pct
 
           FROM xv3.mart_auction_vendor_analysis v
 
@@ -750,7 +754,15 @@ export default async function handler(req, res) {
         SELECT
           vendor,
           count() AS settled_lots,
-          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount
+          sum(ifNull(lot_bid_amount, 0)) AS settled_bid_amount,
+          -- PART 19 hover fields — all cheap aggregates over the SAME
+          -- settled_lots population already scanned above, no new scan.
+          uniqExact(auction_number) AS auction_events,
+          -- Same formula as api/overview.js's SERVICE INCOME (SETTLED)
+          -- query: Buyer's Premium Income = sold_price - bid_amount,
+          -- Commission Income = bid_amount * commission / 100.
+          sum(ifNull(lot_sold_price, 0) - ifNull(lot_bid_amount, 0)) AS buyers_premium_income,
+          sum(ifNull(lot_bid_amount, 0) * ifNull(lot_commission_pct, 0) / 100) AS commission_income
 
         FROM settled_lots
 
@@ -870,6 +882,44 @@ export default async function handler(req, res) {
           FROM cms.mart_cms_bid_history_report
           WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
           GROUP BY fc_bidder_key
+        ),
+
+        -- PART 20 hover-preview fields: this bidder's own bidding activity
+        -- WITHIN this cohort's auctions (not all-time) — Total Bids,
+        -- Distinct Lots Bid On (auction_number + lot_number, never
+        -- lot_number alone), Auctions Participated, Max Bid Usage Rate
+        -- numerator. Bounded to selected_auctions (not an unscoped
+        -- bid_history scan) via the INNER JOIN, so this is cheap relative
+        -- to bidder_first_competitive above.
+        bidder_bid_stats AS (
+          SELECT
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            count() AS total_bids,
+            uniqExact(b.auction_number, b.lot_number) AS distinct_lots,
+            uniqExact(b.auction_number) AS auctions_participated,
+            countIf(b.max_bid_indicator = 'Max Bid') AS max_bid_events
+          FROM cms.mart_cms_bid_history_report b
+          INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+          WHERE b.email IS NOT NULL AND trim(b.email) != ''
+          GROUP BY bidder_key
+        ),
+
+        -- PART 22/20 "Winning via Max Bid" — same safest-available
+        -- reconciliation as api/overview.js's winningMaxBidQuery (see that
+        -- comment for the full rationale): match each settled lot's actual
+        -- winning bid_history event by (auction_number, lot_number,
+        -- bid_amount = the settled winning amount), argMax-tie-broken by
+        -- the chronologically last such event.
+        lot_winning_bid_match AS (
+          SELECT
+            b.auction_number AS auction_number,
+            b.lot_number AS lot_number,
+            argMax(b.max_bid_indicator, b.bid_created_at) AS winning_indicator
+          FROM cms.mart_cms_bid_history_report b
+          INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+          INNER JOIN settled_lots sl ON b.auction_number = sl.auction_number AND b.lot_number = sl.lot_number
+          WHERE b.bid_amount = sl.lot_bid_amount
+          GROUP BY b.auction_number, b.lot_number
         )
 
         SELECT
@@ -878,12 +928,22 @@ export default async function handler(req, res) {
           any(lastname) AS lastname,
           count() AS settled_lots,
           sum(ifNull(sl.lot_bid_amount, 0)) AS settled_bid_amount,
+          uniqExact(sl.auction_number) AS winning_auctions,
+          countIf(m.winning_indicator = 'Max Bid') AS winning_via_max_bid,
 
           if(
             min(fc.first_competitive_at) >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila'),
             'new',
             'returning'
-          ) AS new_or_returning
+          ) AS new_or_returning,
+
+          -- any() (not sum/max across the JOIN fan-out): bidder_bid_stats
+          -- is already one row per bidder_key, so any() here is a safe
+          -- dedup of a single-valued join, never an aggregation choice.
+          any(bbs.total_bids) AS total_bids,
+          any(bbs.distinct_lots) AS distinct_lots,
+          any(bbs.auctions_participated) AS auctions_participated,
+          any(bbs.max_bid_events) AS max_bid_events
 
         FROM settled_lots sl
 
@@ -898,6 +958,12 @@ export default async function handler(req, res) {
 
         LEFT JOIN bidder_first_competitive fc
           ON cb_email = fc.fc_bidder_key
+
+        LEFT JOIN bidder_bid_stats bbs
+          ON cb_email = bbs.bidder_key
+
+        LEFT JOIN lot_winning_bid_match m
+          ON sl.auction_number = m.auction_number AND sl.lot_number = m.lot_number
 
         GROUP BY cb_email
         ORDER BY settled_bid_amount DESC
@@ -1010,11 +1076,24 @@ export default async function handler(req, res) {
       vendors: settledVendorRows.map((row) => {
         const settled_lots = Number(row.settled_lots ?? 0);
         const settled_bid_amount = Number(row.settled_bid_amount ?? 0);
+        const auction_events = Number(row.auction_events ?? 0);
+        const buyers_premium_income = Number(row.buyers_premium_income ?? 0);
+        const commission_income = Number(row.commission_income ?? 0);
         return {
           vendor: row.vendor,
           settled_lots,
           settled_bid_amount,
           average_bid_amount_per_lot: settled_lots > 0 ? settled_bid_amount / settled_lots : 0,
+          // PART 19 hover-preview fields. Lots Listed/Sell-through Rate/
+          // Unsold Lots/Unsold Reserve Value/Participating-Winning bidder
+          // engagement are DEFERRED (see final report) — each would
+          // require a separate full all-lots-per-vendor scan (status
+          // dedup) or a per-vendor bidder-identity join, disproportionate
+          // for a decorative hover per this task's own guidance.
+          auction_events,
+          service_income: buyers_premium_income + commission_income,
+          avg_bid_per_auction: auction_events > 0 ? settled_bid_amount / auction_events : null,
+          avg_bid_per_sold_lot: settled_lots > 0 ? settled_bid_amount / settled_lots : null,
         };
       }),
 
@@ -1027,6 +1106,9 @@ export default async function handler(req, res) {
         const settled_lots = Number(row.settled_lots ?? 0);
         const settled_bid_amount = Number(row.settled_bid_amount ?? 0);
         const bidder_name = [row.lastname, row.firstname].filter(Boolean).join(", ") || "Unknown Bidder";
+        const totalBids = Number(row.total_bids ?? 0);
+        const distinctLots = Number(row.distinct_lots ?? 0);
+        const maxBidEvents = Number(row.max_bid_events ?? 0);
         return {
           bidder_name,
           settled_lots,
@@ -1034,6 +1116,16 @@ export default async function handler(req, res) {
           settled_bid_amount,
           average_bid_amount_per_win: settled_lots > 0 ? settled_bid_amount / settled_lots : 0,
           new_or_returning: row.new_or_returning ?? "returning",
+          // PART 20/21/22 hover-preview fields — this bidder's own bidding
+          // activity within THIS cohort's auctions (bidder_bid_stats),
+          // never a fabricated 0 when the bridge legitimately finds none.
+          winning_auctions: Number(row.winning_auctions ?? 0),
+          auctions_participated: Number(row.auctions_participated ?? 0),
+          distinct_lots_bid_on: distinctLots,
+          total_bids: totalBids,
+          avg_bids_per_lot: distinctLots > 0 ? totalBids / distinctLots : null,
+          max_bid_usage_pct: totalBids > 0 ? (maxBidEvents / totalBids) * 100 : null,
+          winning_via_max_bid: Number(row.winning_via_max_bid ?? 0),
         };
       }),
 

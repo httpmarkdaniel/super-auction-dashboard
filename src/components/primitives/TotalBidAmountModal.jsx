@@ -1,4 +1,6 @@
+import { useState } from "react";
 import Modal from "./Modal";
+import BranchCategoryToggle from "./BranchCategoryToggle";
 import { formatPeso } from "../../utils/format";
 
 function DeltaBadge({ pct }) {
@@ -81,6 +83,8 @@ export default function TotalBidAmountModal({
   branchBreakdown,
   globalCategory = "",
 }) {
+  const [view, setView] = useState("branch");
+
   return (
     <Modal
       open={open}
@@ -117,13 +121,12 @@ export default function TotalBidAmountModal({
         </div>
       </div>
 
-      <div className="mb-2 text-[13px] uppercase tracking-wide text-muted font-semibold">Bid Value by Branch</div>
-      <div className="mb-6">
+      <BranchCategoryToggle value={view} onChange={setView} />
+      {view === "branch" ? (
         <EntityTable rows={branchBreakdown} nameKey="branch" totalBidAmount={heroKPIs.totalBidAmount} />
-      </div>
-
-      <div className="mb-2 text-[13px] uppercase tracking-wide text-muted font-semibold">Bid Value by Category</div>
-      <EntityTable rows={categoryBreakdown} nameKey="category" totalBidAmount={heroKPIs.totalBidAmount} />
+      ) : (
+        <EntityTable rows={categoryBreakdown} nameKey="category" totalBidAmount={heroKPIs.totalBidAmount} />
+      )}
     </Modal>
   );
 }

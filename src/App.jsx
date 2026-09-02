@@ -72,7 +72,21 @@ const EMPTY_OVERVIEW = {
     totalBidEvents: 0,
     uniqueParticipatingBidders: 0,
     avgBidsPerUniqueBidder: null,
+    totalBidsToday: 0,
+    newBiddersToday: 0,
+    returningBiddersToday: 0,
   },
+
+  winningMaxBid: {
+    winning_bids: 0,
+    max_bid_wins: 0,
+    normal_bid_wins: 0,
+    unresolved_wins: 0,
+    max_bid_win_pct: null,
+    winning_bid_amount: 0,
+  },
+  winningMaxBidByBranch: [],
+  winningMaxBidByCategory: [],
 
   unsoldLots: {
     count: 0,
@@ -109,8 +123,8 @@ const EMPTY_OVERVIEW = {
     total: 0,
     newBidders: 0,
     returningBidders: 0,
-    newBidActivity: 0,
-    returningBidActivity: 0,
+    totalBids: 0,
+    avgBidsPerUniqueBidder: null,
   },
 
   auctionSummary: [],
@@ -206,7 +220,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // vs Winning invariant and can include winner-only members with zero
     // real bid events (see api/overview.js's engaged_bidders comment).
     const pBidEvents = Number(row.participating_bid_events) || 0;
-    const pEngagedBidders = Number(row.engaged_bidders) || 0;
+    // Avg Bids / Unique Bidder is now computed IN SQL as the average of
+    // each bidder's own (bid events / distinct auction+lot) ratio (see
+    // api/overview.js's branch_bidder_activity/category_bidder_activity
+    // avgIf) — NEVER re-derived here as pBidEvents / pEngagedBidders, which
+    // would silently revert to Total / Count, the formula this task
+    // explicitly rules out.
+    const pAvgBidsPerUniqueBidder = row.avg_bids_per_unique_bidder != null ? Number(row.avg_bids_per_unique_bidder) : null;
     const pTotal = pNew + pReturning;
     const wNew = Number(row.winning_new) || 0;
     const wReturning = Number(row.winning_returning) || 0;
@@ -226,7 +246,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         newBidders: pNew,
         returningBidders: pReturning,
         totalBids: pBidEvents,
-        avgBidsPerUniqueBidder: pEngagedBidders > 0 ? pBidEvents / pEngagedBidders : null,
+        avgBidsPerUniqueBidder: pAvgBidsPerUniqueBidder,
       },
       winning: {
         total: wNew + wReturning,
@@ -441,14 +461,30 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     total: (Number(participating.new_bidders) || 0) + (Number(participating.returning_bidders) || 0),
     newBidders: Number(participating.new_bidders) || 0,
     returningBidders: Number(participating.returning_bidders) || 0,
-    newBidActivity: Number(participating.new_bidders_bid_amount) || 0,
-    returningBidActivity: Number(participating.returning_bidders_bid_amount) || 0,
+    // PART 14/15: Participating is an ENGAGEMENT population, not a
+    // financial one — no peso "Bid Activity" figure here. Total Bids /
+    // Avg Bids per Unique Bidder reuse the SAME overall real-bid-only
+    // engagement figures that feed the Avg Bids / Unique Bidder scorecard
+    // (api/overview.js's bidderEngagementResultPromise, the correct
+    // two-stage-average formula) — no new query, no extra request.
+    totalBids: Number(kpis.total_bid_events) || 0,
+    avgBidsPerUniqueBidder: kpis.avg_bids_per_unique_bidder != null ? Number(kpis.avg_bids_per_unique_bidder) : null,
   };
 
+  // PART 18/19/26: hover-preview fields, all already present on the SAME
+  // already-fetched leaderboards.vendors/bidders rows (api/leaderboards.js's
+  // settledVendorsQuery/settledBiddersQuery) — hovering triggers zero
+  // network requests. Fields not cheaply available (Lots Listed/Sell-
+  // through/Unsold, per-vendor bidder engagement) are intentionally
+  // deferred — see api/leaderboards.js's own comment and the final report.
   const topVendors = (leaderboards.vendors || []).map((v) => ({
     vendor: v.vendor,
     bidAmount: Number(v.settled_bid_amount) || 0,
     lots: Number(v.settled_lots) || 0,
+    auctionEvents: Number(v.auction_events) || 0,
+    serviceIncome: Number(v.service_income) || 0,
+    avgBidPerAuction: v.avg_bid_per_auction != null ? Number(v.avg_bid_per_auction) : null,
+    avgBidPerSoldLot: v.avg_bid_per_sold_lot != null ? Number(v.avg_bid_per_sold_lot) : null,
   }));
 
   const topBidders = (leaderboards.bidders || []).map((b) => ({
@@ -461,6 +497,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // RankedBar's badgeKey), not appended into the name string, so it's
     // never lost to name truncation.
     new_or_returning: b.new_or_returning || "returning",
+    winningAuctions: Number(b.winning_auctions) || 0,
+    auctionsParticipated: Number(b.auctions_participated) || 0,
+    distinctLotsBidOn: Number(b.distinct_lots_bid_on) || 0,
+    totalBids: Number(b.total_bids) || 0,
+    avgBidsPerLot: b.avg_bids_per_lot != null ? Number(b.avg_bids_per_lot) : null,
+    maxBidUsagePct: b.max_bid_usage_pct != null ? Number(b.max_bid_usage_pct) : null,
+    winningViaMaxBid: Number(b.winning_via_max_bid) || 0,
   }));
 
   const rp = reservePerformance;
@@ -674,6 +717,15 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       uniqueParticipatingBidders: Number(kpis.unique_participating_bidders) || 0,
       avgBidsPerUniqueBidder:
         kpis.avg_bids_per_unique_bidder != null ? Number(kpis.avg_bids_per_unique_bidder) : null,
+
+      // TOTAL BIDS TODAY / NEW & RETURNING BIDDERS TODAY — activity-time
+      // (bid_created_at, today's Asia/Manila calendar day), NEVER
+      // ending_time — see api/overview.js's todayActivityResultPromise.
+      // Always "today" regardless of the range picker, same convention as
+      // todaysBidAmount.
+      totalBidsToday: Number(kpis.total_bids_today) || 0,
+      newBiddersToday: Number(kpis.new_bidders_today) || 0,
+      returningBiddersToday: Number(kpis.returning_bidders_today) || 0,
     },
 
     unsoldLots: {
@@ -804,6 +856,36 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     topVendors,
 
     topBidders,
+
+    // WINNING BIDS VIA MAX BID — see api/overview.js's winningMaxBidQuery
+    // comment for the exact winning-bid reconciliation and why unresolved
+    // lots are reported separately, never guessed into Normal Bid.
+    winningMaxBid: {
+      winningBids: Number(kpis.winning_max_bid?.winning_bids) || 0,
+      maxBidWins: Number(kpis.winning_max_bid?.max_bid_wins) || 0,
+      normalBidWins: Number(kpis.winning_max_bid?.normal_bid_wins) || 0,
+      unresolvedWins: Number(kpis.winning_max_bid?.unresolved_wins) || 0,
+      maxBidWinPct: kpis.winning_max_bid?.max_bid_win_pct != null ? Number(kpis.winning_max_bid.max_bid_win_pct) : null,
+      winningBidAmount: Number(kpis.winning_max_bid?.winning_bid_amount) || 0,
+    },
+    winningMaxBidByBranch: (kpis.winning_max_bid_by_branch || []).map((row) => ({
+      branch: row.branch,
+      winningBids: Number(row.winning_bids) || 0,
+      maxBidWins: Number(row.max_bid_wins) || 0,
+      normalBidWins: Number(row.normal_bid_wins) || 0,
+      unresolvedWins: Number(row.unresolved_wins) || 0,
+      maxBidWinPct: row.max_bid_win_pct != null ? Number(row.max_bid_win_pct) : null,
+      winningBidAmount: Number(row.winning_bid_amount) || 0,
+    })),
+    winningMaxBidByCategory: (kpis.winning_max_bid_by_category || []).map((row) => ({
+      category: row.category,
+      winningBids: Number(row.winning_bids) || 0,
+      maxBidWins: Number(row.max_bid_wins) || 0,
+      normalBidWins: Number(row.normal_bid_wins) || 0,
+      unresolvedWins: Number(row.unresolved_wins) || 0,
+      maxBidWinPct: row.max_bid_win_pct != null ? Number(row.max_bid_win_pct) : null,
+      winningBidAmount: Number(row.winning_bid_amount) || 0,
+    })),
 
     reservePerformance: {
       belowReserve: {
@@ -965,9 +1047,10 @@ function OverviewTab({
             total={overview.participatingComposition.total}
             newCount={overview.participatingComposition.newBidders}
             returningCount={overview.participatingComposition.returningBidders}
-            amountLabel="Bid Activity"
-            newAmount={overview.participatingComposition.newBidActivity}
-            returningAmount={overview.participatingComposition.returningBidActivity}
+            engagement={{
+              totalBids: overview.participatingComposition.totalBids,
+              avgBidsPerUniqueBidder: overview.participatingComposition.avgBidsPerUniqueBidder,
+            }}
             onClick={() => setBidderCompositionOpen(true)}
           />
           <BidderPopulationCard
@@ -1023,6 +1106,7 @@ function OverviewTab({
             metaKey="lots"
             metaLabel="lots"
             emptyMessage="No settled auction results yet for this period."
+            hoverKind="vendor"
           />
 
           <Leaderboard
@@ -1033,6 +1117,7 @@ function OverviewTab({
             metaLabel="wins"
             emptyMessage="No settled auction results yet for this period."
             badgeKey="new_or_returning"
+            hoverKind="bidder"
           />
         </div>
       </StorySection>

@@ -19,6 +19,89 @@ function toFiniteNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// WINNING BIDS VIA MAX BID — answers "of the actual winning/final bids,
+// how many were placed via Max Bid?", NOT "how many Max Bid rows belong
+// to eventual winners" (a different, wrong question — a winner may have
+// placed several Max Bid AND Normal Bid events before the one that
+// actually stood as their winning bid).
+//
+// Reconciliation (safest available, given no bid_history row is flagged
+// "is_winning_bid" directly): a settled lot's actual winning/final bid
+// amount is xv3.mart_auction_vendor_analysis's own bid_amount (the
+// canonical settled amount used everywhere else in this file). The
+// matching bid_history event for that lot is the row whose bid_amount
+// equals that exact settled amount — by definition the bid that stood
+// when bidding closed. Ties (>1 bid_history row at the exact winning
+// amount for the same lot — rare) are broken deterministically by taking
+// the chronologically LAST one via argMax(indicator, bid_created_at),
+// since that is the one that was still standing when the lot settled.
+//
+// A settled lot with NO bid_history row at all (e.g. a Negotiated sale —
+// never generates bid_history events) or none matching that exact amount
+// resolves to winning_indicator = NULL — genuinely unresolved, counted
+// separately, NEVER guessed into Normal Bid.
+//
+// groupByEntity: null for the overall scalar total, 'branch' to group by
+// store_name, 'category' to group by the per-lot canonical category —
+// three independent scans (own settled_lots/match CTEs each), same
+// pattern as this file's existing settledTotalResult/settledBranchResult/
+// settledCategoryResult trio, rather than deriving the overall figure by
+// summing one breakdown (see that trio's own comment for why: any()
+// picking a different per-lot value under a different GROUP BY has a
+// real, if rare, precedent in this codebase).
+function winningMaxBidQuery(groupByEntity) {
+  const selectEntity =
+    groupByEntity === "branch" ? "sl.store_name AS entity," : groupByEntity === "category" ? "sl.lot_category AS entity," : "";
+  const groupBy = groupByEntity === "branch" ? "GROUP BY sl.store_name" : groupByEntity === "category" ? "GROUP BY sl.lot_category" : "";
+
+  return `
+    WITH selected_auctions AS (
+      SELECT DISTINCT auction_number, store_name
+      FROM xv3.mart_auction_productivity_report
+      WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+        AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+        AND ({store:String} = '' OR store_name = {store:String})
+    ),
+
+    settled_lots AS (
+      SELECT
+        v.auction_number AS auction_number,
+        v.lot_number AS lot_number,
+        any(a.store_name) AS store_name,
+        any(v.bid_amount) AS lot_bid_amount,
+        any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+      FROM xv3.mart_auction_vendor_analysis v
+      INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+      WHERE v.status IN ('Paid', 'Released') AND v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+      GROUP BY v.auction_number, v.lot_number
+      HAVING ({category:String} = '' OR lot_category = {category:String})
+    ),
+
+    lot_winning_bid_match AS (
+      SELECT
+        b.auction_number AS auction_number,
+        b.lot_number AS lot_number,
+        argMax(b.max_bid_indicator, b.bid_created_at) AS winning_indicator
+      FROM cms.mart_cms_bid_history_report b
+      INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+      INNER JOIN settled_lots sl ON b.auction_number = sl.auction_number AND b.lot_number = sl.lot_number
+      WHERE b.bid_amount = sl.lot_bid_amount
+      GROUP BY b.auction_number, b.lot_number
+    )
+
+    SELECT
+      ${selectEntity}
+      count() AS winning_bids,
+      countIf(m.winning_indicator = 'Max Bid') AS max_bid_wins,
+      countIf(m.winning_indicator = 'Normal Bid') AS normal_bid_wins,
+      countIf(m.winning_indicator IS NULL) AS unresolved_wins,
+      sum(ifNull(sl.lot_bid_amount, 0)) AS winning_bid_amount
+    FROM settled_lots sl
+    LEFT JOIN lot_winning_bid_match m ON sl.auction_number = m.auction_number AND sl.lot_number = m.lot_number
+    ${groupBy}
+  `;
+}
+
 // Every "YYYY-MM-DD" calendar day from fromStr through toStr inclusive.
 // Pure UTC calendar-part arithmetic (not local Date math), so this is
 // correct regardless of the server process's own timezone and never
@@ -1018,6 +1101,92 @@ export default async function handler(req, res) {
     });
 
     // ---------------------------------------------------------
+    // TOTAL BIDS TODAY / NEW & RETURNING BIDDERS TODAY — ACTIVITY-TIME
+    // metrics, deliberately scoped by bid_created_at (today's Asia/Manila
+    // calendar day), never ending_time. This answers "how many bidding
+    // actions happened today" / "who bid for the first time ever today",
+    // NOT "which auctions concluded today" — see the ENDING_TIME COHORT
+    // rule used everywhere else in this file for the historical-reporting
+    // case, deliberately NOT applied here.
+    //
+    // total_bids_today = count() of every real bid_history row today — one
+    // row per bidding action/click, never deduplicated by bidder/lot/
+    // auction (a bidder clicking 15 times contributes 15).
+    //
+    // New/Returning classification uses bidder_first_ever_bid_alltime —
+    // MIN(bid_created_at) across the COMPLETE bid-history dataset per
+    // canonical bidder (lowerUTF8(trim(email))), unscoped by date/store/
+    // category — never a customer_created_at/bidder_registered_at
+    // substitute, and never scoped to "first bid in this store/category/
+    // month". A bidder is New iff that all-time minimum falls today.
+    // Every bidder active today necessarily has a defined first-ever value
+    // (their own row today contributes to the MIN), so the INNER JOIN
+    // below never drops anyone — no unresolved bucket needed here.
+    //
+    // store/category ARE applied (same optional/additive convention as
+    // every other query in this file) so this stays consistent with the
+    // existing Today's Bid Amount card immediately above, which already
+    // scopes by them.
+    // ---------------------------------------------------------
+    const todayActivityResultPromise = client.query({
+      query: `
+        WITH auction_store AS (
+          SELECT DISTINCT auction_number, store_name
+          FROM xv3.mart_auction_productivity_report
+          WHERE auction_number IS NOT NULL
+        ),
+
+        lot_category AS (
+          SELECT
+            v.auction_number AS auction_number,
+            v.lot_number AS lot_number,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+          FROM xv3.mart_auction_vendor_analysis v
+          WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+          GROUP BY v.auction_number, v.lot_number
+        ),
+
+        todays_bidder_activity AS (
+          SELECT
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            count() AS bid_events
+          FROM cms.mart_cms_bid_history_report b
+          INNER JOIN auction_store s ON b.auction_number = s.auction_number
+          LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+          WHERE b.bid_created_at >= toStartOfDay(now('Asia/Manila'))
+            AND b.bid_created_at < addDays(toStartOfDay(now('Asia/Manila')), 1)
+            AND b.email IS NOT NULL AND trim(b.email) != ''
+            AND ({store:String} = '' OR s.store_name = {store:String})
+            AND ({category:String} = '' OR lc.lot_category = {category:String})
+          GROUP BY bidder_key
+        ),
+
+        bidder_first_ever_bid_alltime AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bid_created_at) AS first_ever_bid_at
+          FROM cms.mart_cms_bid_history_report
+          WHERE bid_created_at IS NOT NULL AND email IS NOT NULL AND trim(email) != ''
+          GROUP BY bidder_key
+        )
+
+        SELECT
+          sum(t.bid_events) AS total_bids_today,
+          countIf(f.first_ever_bid_at >= toStartOfDay(now('Asia/Manila'))) AS new_bidders_today,
+          countIf(f.first_ever_bid_at < toStartOfDay(now('Asia/Manila'))) AS returning_bidders_today
+
+        FROM todays_bidder_activity t
+        INNER JOIN bidder_first_ever_bid_alltime f ON t.bidder_key = f.bidder_key
+      `,
+      query_params: { store, category },
+      format: "JSONEachRow",
+      // bidder_first_ever_bid_alltime scans the full unscoped bid_history
+      // table (same cost class as bidderEngagementResultPromise's
+      // bidder_first_bid CTE below) — safety net, not the primary fix.
+      clickhouse_settings: { max_bytes_before_external_group_by: "500000000" },
+    });
+
+    // ---------------------------------------------------------
     // AUCTION-LEVEL SUMMARY (Overview KPI drilldowns) — moved up so that
     // TOTAL BID AMOUNT below can be derived from it in JS instead of running
     // its own duplicate scan (Phase 2B: verified byte-identical against the
@@ -1338,12 +1507,13 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    // Bounded 4-query batch: none of these read a JS value another one of
+    // Bounded 5-query batch: none of these read a JS value another one of
     // them produces — only static queryParams/from/to/store/category — so
     // running them concurrently changes wall-clock time only, never results.
-    const [todayBidResult, auctionSummaryResult, settledServiceIncomeResult, settledTotalResult] =
+    const [todayBidResult, todayActivityResult, auctionSummaryResult, settledServiceIncomeResult, settledTotalResult] =
       await Promise.all([
         todayBidResultPromise,
+        todayActivityResultPromise,
         auctionSummaryResultPromise,
         settledServiceIncomeResultPromise,
         settledTotalResultPromise,
@@ -1351,6 +1521,12 @@ export default async function handler(req, res) {
 
     const todayBidRows = await todayBidResult.json();
     const todayBid = todayBidRows[0] ?? {};
+
+    const todayActivityRows = await todayActivityResult.json();
+    const todayActivity = todayActivityRows[0] ?? {};
+    const totalBidsToday = Number(todayActivity.total_bids_today ?? 0);
+    const newBiddersToday = Number(todayActivity.new_bidders_today ?? 0);
+    const returningBiddersToday = Number(todayActivity.returning_bidders_today ?? 0);
 
     const todayManila = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Manila",
@@ -2060,6 +2236,12 @@ export default async function handler(req, res) {
             any(b.customer_name) AS display_name,
             count() AS bid_events,
             uniqExact(b.auction_number) AS auctions_participated,
+            -- Lot identity for the Avg Bids / Unique Bidder ratio is
+            -- auction_number + lot_number, NEVER lot_number alone — a
+            -- lot_number can repeat across different auctions, which would
+            -- otherwise silently under-count a bidder's real distinct-lot
+            -- denominator. uniqExact(a, b) counts distinct (a, b) pairs.
+            uniqExact(b.auction_number, b.lot_number) AS distinct_lots,
             sum(b.bid_amount) AS bid_activity_amount
 
           FROM cms.mart_cms_bid_history_report b
@@ -2071,6 +2253,13 @@ export default async function handler(req, res) {
             ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
 
           WHERE b.email IS NOT NULL AND trim(b.email) != ''
+            -- ZERO/NULL SAFETY: only real bid events with a resolvable
+            -- auction+lot identity contribute to the distinct-lot
+            -- denominator — a row with a NULL lot_number would otherwise
+            -- either poison uniqExact's tuple or silently manufacture a
+            -- fake "lot". Excluded rows still count everywhere else
+            -- (Total Bids Today, etc.) that doesn't need a lot key.
+            AND b.auction_number IS NOT NULL AND b.lot_number IS NOT NULL
             AND ({category:String} = '' OR lc.lot_category = {category:String})
 
           GROUP BY bidder_key
@@ -2081,6 +2270,7 @@ export default async function handler(req, res) {
           ba.display_name AS display_name,
           ba.bid_events AS bid_events,
           ba.auctions_participated AS auctions_participated,
+          ba.distinct_lots AS distinct_lots,
           ba.bid_activity_amount AS bid_activity_amount,
           -- Same New/Returning boundary as every other Participating query
           -- in this file (first-ever bid at/after this period's start) —
@@ -2130,11 +2320,32 @@ export default async function handler(req, res) {
     // double-counting that ruled out merging elsewhere in this file.
     const totalBidEvents = bidderEngagementRows.reduce((sum, row) => sum + Number(row.bid_events ?? 0), 0);
     const uniqueParticipatingBidders = bidderEngagementRows.length;
-    const avgBidsPerUniqueBidder = uniqueParticipatingBidders > 0 ? totalBidEvents / uniqueParticipatingBidders : null;
+
+    // AVG BIDS / UNIQUE BIDDER — CRITICAL: this is the AVERAGE OF EACH
+    // BIDDER'S OWN RATIO (bid events ÷ that bidder's distinct lots), each
+    // bidder weighted equally — NOT Total Bids ÷ Unique Bidders, and NOT
+    // Total Bids ÷ Total Lots. Two-stage: (1) per-bidder ratio, (2) plain
+    // average of those ratios. Worked example this must reproduce: bidder
+    // A = 6 bids / 3 lots = 2.00, B = 10/3 = 3.3333, C = 8/4 = 2.00 ->
+    // (2 + 3.3333 + 2) / 3 = 2.4444, never (6+10+8)/(3 bidders) = 8.
+    // distinct_lots is always >= 1 for any row here (a bidder can't have a
+    // bid_events > 0 row without at least one resolvable lot, per the
+    // NULL-safety filter on bidder_activity above), so the null-guard below
+    // is defensive, not expected to trigger.
+    const bidderRatios = bidderEngagementRows
+      .map((row) => {
+        const bidEvents = Number(row.bid_events ?? 0);
+        const distinctLots = Number(row.distinct_lots ?? 0);
+        return distinctLots > 0 ? bidEvents / distinctLots : null;
+      })
+      .filter((ratio) => ratio != null);
+    const avgBidsPerUniqueBidder =
+      bidderRatios.length > 0 ? bidderRatios.reduce((sum, r) => sum + r, 0) / bidderRatios.length : null;
 
     const bidderEngagement = bidderEngagementRows.map((row) => {
       const bidEvents = Number(row.bid_events ?? 0);
       const auctionsParticipated = Number(row.auctions_participated ?? 0);
+      const distinctLots = Number(row.distinct_lots ?? 0);
       const displayName = row.display_name != null ? String(row.display_name).trim() : "";
       return {
         // Real customer name only — never the bidder's email, not even as
@@ -2144,6 +2355,11 @@ export default async function handler(req, res) {
         bidder: displayName || "Unknown Bidder",
         is_new: Boolean(Number(row.is_new)),
         bid_events: bidEvents,
+        distinct_lots: distinctLots,
+        // Row-level "Avg Bids / Lot" — see PART 7/20: at one-bidder grain
+        // this is never labeled "Avg Bids / Unique Bidder" (that label is
+        // reserved for the cross-bidder average above).
+        avg_bids_per_lot: distinctLots > 0 ? bidEvents / distinctLots : null,
         auctions_participated: auctionsParticipated,
         avg_bids_per_auction_participated: auctionsParticipated > 0 ? bidEvents / auctionsParticipated : null,
         bid_activity_amount: Number(row.bid_activity_amount ?? 0),
@@ -2278,11 +2494,16 @@ export default async function handler(req, res) {
               s.store_name AS store_name,
               lowerUTF8(trim(b.email)) AS bidder_key,
               sum(b.bid_amount) AS bidder_amount,
-              count() AS bidder_bid_events
+              count() AS bidder_bid_events,
+              -- Entity-scoped bidder-level ratio denominator — see PART 13:
+              -- auction_number + lot_number within THIS branch only, never
+              -- lot_number alone (repeats across auctions).
+              uniqExact(b.auction_number, b.lot_number) AS bidder_distinct_lots
             FROM cms.mart_cms_bid_history_report b
             INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
             LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
             WHERE b.email IS NOT NULL AND trim(b.email) != ''
+              AND b.auction_number IS NOT NULL AND b.lot_number IS NOT NULL
               AND ({category:String} = '' OR lc.lot_category = {category:String})
             GROUP BY store_name, bidder_key
           ),
@@ -2336,7 +2557,16 @@ export default async function handler(req, res) {
             -- zero real bid events (see the ENGAGED BIDDER DEFINITION
             -- comment on bidderEngagementResultPromise above).
             uniqExactIf(ba.bidder_key, ba.bidder_key IS NOT NULL) AS engaged_bidders,
-            sum(ifNull(ba.bidder_bid_events, 0)) AS participating_bid_events
+            sum(ifNull(ba.bidder_bid_events, 0)) AS participating_bid_events,
+            -- AVG BIDS / UNIQUE BIDDER (entity-scoped) — average of EACH
+            -- bidder's own ratio (bid events / distinct lots) WITHIN this
+            -- branch, each bidder weighted equally. NOT participating_bid_
+            -- events / engaged_bidders (that would be Total / Count, the
+            -- explicitly wrong formula) — see PART 13.
+            avgIf(
+              ba.bidder_bid_events / ba.bidder_distinct_lots,
+              ba.bidder_key IS NOT NULL AND ba.bidder_distinct_lots > 0
+            ) AS avg_bids_per_unique_bidder
           FROM branch_union_bidder_keys u
           LEFT JOIN branch_bidder_activity ba ON u.store_name = ba.store_name AND u.bidder_key = ba.bidder_key
           LEFT JOIN bidder_first_ever fe ON u.bidder_key = fe.fe_key
@@ -2368,11 +2598,14 @@ export default async function handler(req, res) {
               lc.lot_category AS lot_category,
               lowerUTF8(trim(b.email)) AS bidder_key,
               sum(b.bid_amount) AS bidder_amount,
-              count() AS bidder_bid_events
+              count() AS bidder_bid_events,
+              -- See branch_bidder_activity's identical comment above (PART 13).
+              uniqExact(b.auction_number, b.lot_number) AS bidder_distinct_lots
             FROM cms.mart_cms_bid_history_report b
             INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
             INNER JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
             WHERE b.email IS NOT NULL AND trim(b.email) != ''
+              AND b.auction_number IS NOT NULL AND b.lot_number IS NOT NULL
             GROUP BY lot_category, bidder_key
           ),
           settled_lots AS (
@@ -2407,7 +2640,12 @@ export default async function handler(req, res) {
             sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
             sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
             uniqExactIf(ca.bidder_key, ca.bidder_key IS NOT NULL) AS engaged_bidders,
-            sum(ifNull(ca.bidder_bid_events, 0)) AS participating_bid_events
+            sum(ifNull(ca.bidder_bid_events, 0)) AS participating_bid_events,
+            -- See branch's identical comment above (PART 13).
+            avgIf(
+              ca.bidder_bid_events / ca.bidder_distinct_lots,
+              ca.bidder_key IS NOT NULL AND ca.bidder_distinct_lots > 0
+            ) AS avg_bids_per_unique_bidder
           FROM category_union_bidder_keys u
           LEFT JOIN category_bidder_activity ca ON u.category = ca.lot_category AND u.bidder_key = ca.bidder_key
           LEFT JOIN bidder_first_ever fe ON u.bidder_key = fe.fe_key
@@ -2449,12 +2687,68 @@ export default async function handler(req, res) {
         // zero real bid events — using it here would silently understate
         // engagement by padding the denominator).
         engaged_bidders: Number(p.engaged_bidders ?? 0),
+        // Entity-scoped Avg Bids / Unique Bidder — computed IN SQL as the
+        // average of each bidder's own ratio (see avgIf in branch_bidder_
+        // activity/category_bidder_activity's outer SELECT above), never
+        // recomputed downstream as participating_bid_events /
+        // engaged_bidders (that would silently revert to the wrong Total /
+        // Count formula this task explicitly rules out — PART 13).
+        avg_bids_per_unique_bidder: p.avg_bids_per_unique_bidder != null ? Number(p.avg_bids_per_unique_bidder) : null,
         winning_new: Number(w.winning_new ?? 0),
         winning_returning: Number(w.winning_returning ?? 0),
         winning_new_amount: Number(w.winning_new_amount ?? 0),
         winning_returning_amount: Number(w.winning_returning_amount ?? 0),
       };
     }
+
+    // ---------------------------------------------------------
+    // WINNING BIDS VIA MAX BID — see winningMaxBidQuery's own comment
+    // above for the exact reconciliation logic and why unresolved lots are
+    // reported separately rather than guessed. Three independent bounded
+    // scans (overall/branch/category), none touching BIDDER_IDENTITY_CTES,
+    // run together — lighter than the identity-bridge batch above, so
+    // concurrency here doesn't reproduce the memory-pressure pattern that
+    // required serializing the heavy queries (see leaderboards.js's
+    // incident writeup).
+    // ---------------------------------------------------------
+    const [winningMaxBidOverallResult, winningMaxBidByBranchResult, winningMaxBidByCategoryResult] = await Promise.all([
+      client.query({ query: winningMaxBidQuery(null), query_params: queryParams, format: "JSONEachRow" }),
+      client.query({ query: winningMaxBidQuery("branch"), query_params: queryParams, format: "JSONEachRow" }),
+      client.query({ query: winningMaxBidQuery("category"), query_params: queryParams, format: "JSONEachRow" }),
+    ]);
+
+    function mapWinningMaxBidRow(row) {
+      const maxBidWins = Number(row.max_bid_wins ?? 0);
+      const normalBidWins = Number(row.normal_bid_wins ?? 0);
+      const unresolvedWins = Number(row.unresolved_wins ?? 0);
+      const resolvedWins = maxBidWins + normalBidWins;
+      return {
+        winning_bids: Number(row.winning_bids ?? 0),
+        max_bid_wins: maxBidWins,
+        normal_bid_wins: normalBidWins,
+        unresolved_wins: unresolvedWins,
+        // % is of RESOLVED winning bids only — an unresolved lot (no
+        // bid_history row at all, e.g. Negotiated) is neither Max nor
+        // Normal Bid, so it would silently understate the rate if folded
+        // into the denominator.
+        max_bid_win_pct: resolvedWins > 0 ? (maxBidWins / resolvedWins) * 100 : null,
+        winning_bid_amount: Number(row.winning_bid_amount ?? 0),
+      };
+    }
+
+    const winningMaxBidOverallRows = await winningMaxBidOverallResult.json();
+    const winningMaxBidOverall = mapWinningMaxBidRow(winningMaxBidOverallRows[0] ?? {});
+
+    const winningMaxBidByBranchRows = await winningMaxBidByBranchResult.json();
+    const winningMaxBidByCategoryRows = await winningMaxBidByCategoryResult.json();
+    const winningMaxBidByBranch = winningMaxBidByBranchRows.map((row) => ({
+      branch: row.entity,
+      ...mapWinningMaxBidRow(row),
+    }));
+    const winningMaxBidByCategory = winningMaxBidByCategoryRows.map((row) => ({
+      category: row.entity,
+      ...mapWinningMaxBidRow(row),
+    }));
 
     // ---------------------------------------------------------
     // BIDDING ACTIVITY BY HOUR (Asia/Manila local hour)
@@ -3466,7 +3760,11 @@ export default async function handler(req, res) {
         // bidder grain needed here (the drilldown is current-period only).
         // Same auction-ending-cohort-first population as the current-period
         // query (see AVG BIDS / UNIQUE BIDDER comment above), shifted to
-        // [compareFrom, compareTo].
+        // [compareFrom, compareTo]. avg_bids_per_unique_bidder here uses the
+        // SAME two-stage (per-bidder ratio, then average of ratios) formula
+        // as the current period — computed bidder-grain in bidder_activity,
+        // then avgIf'd — never Total / Count, so the delta below always
+        // compares like-for-like.
         client.query({
           query: `
             WITH selected_auctions AS (
@@ -3482,15 +3780,25 @@ export default async function handler(req, res) {
               FROM xv3.mart_auction_vendor_analysis v
               WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
               GROUP BY v.auction_number, v.lot_number
+            ),
+            bidder_activity AS (
+              SELECT
+                lowerUTF8(trim(b.email)) AS bidder_key,
+                count() AS bid_events,
+                uniqExact(b.auction_number, b.lot_number) AS distinct_lots
+              FROM cms.mart_cms_bid_history_report b
+              INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+              LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
+              WHERE b.email IS NOT NULL AND trim(b.email) != ''
+                AND b.auction_number IS NOT NULL AND b.lot_number IS NOT NULL
+                AND ({category:String} = '' OR lc.lot_category = {category:String})
+              GROUP BY bidder_key
             )
             SELECT
-              count() AS total_bid_events,
-              uniqExact(lowerUTF8(trim(b.email))) AS unique_participating_bidders
-            FROM cms.mart_cms_bid_history_report b
-            INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
-            LEFT JOIN lot_category lc ON b.auction_number = lc.auction_number AND b.lot_number = lc.lot_number
-            WHERE b.email IS NOT NULL AND trim(b.email) != ''
-              AND ({category:String} = '' OR lc.lot_category = {category:String})
+              sum(bid_events) AS total_bid_events,
+              count() AS unique_participating_bidders,
+              avgIf(bid_events / distinct_lots, distinct_lots > 0) AS avg_bids_per_unique_bidder
+            FROM bidder_activity
           `,
           query_params: compareParams,
           format: "JSONEachRow",
@@ -3515,8 +3823,10 @@ export default async function handler(req, res) {
         Number(cmpServiceIncome.service_income_buyers_premium ?? 0) + Number(cmpServiceIncome.service_income_commission ?? 0);
       const cmpRegistered = Number(cmpRegistration.registered ?? 0);
       const cmpParticipatingRegistered = Number(cmpRegistration.participating ?? 0);
-      const cmpTotalBidEvents = Number(cmpBidderEngagement.total_bid_events ?? 0);
-      const cmpUniqueParticipatingBidders = Number(cmpBidderEngagement.unique_participating_bidders ?? 0);
+      // avgIf over an empty set returns NaN in ClickHouse, not NULL —
+      // Number.isFinite guards against ever fabricating a comparison value.
+      const cmpAvgBidsPerUniqueBidderRaw = Number(cmpBidderEngagement.avg_bids_per_unique_bidder);
+      const cmpAvgBidsPerUniqueBidder = Number.isFinite(cmpAvgBidsPerUniqueBidderRaw) ? cmpAvgBidsPerUniqueBidderRaw : null;
 
       // Safe % change: null (never a fabricated number) whenever the prior
       // period had nothing to compare against.
@@ -3547,10 +3857,7 @@ export default async function handler(req, res) {
           registeredCustomers > 0 ? (participatingRegisteredBidders / registeredCustomers) * 100 : null,
           cmpRegistered > 0 ? (cmpParticipatingRegistered / cmpRegistered) * 100 : null,
         ),
-        avg_bids_per_unique_bidder_pct: pctChange(
-          avgBidsPerUniqueBidder,
-          cmpUniqueParticipatingBidders > 0 ? cmpTotalBidEvents / cmpUniqueParticipatingBidders : null,
-        ),
+        avg_bids_per_unique_bidder_pct: pctChange(avgBidsPerUniqueBidder, cmpAvgBidsPerUniqueBidder),
 
         // Previous-period category-level Avg Bid aggregates — same shape as
         // the top-level `categories` field below, one row per canonical
@@ -3624,6 +3931,15 @@ export default async function handler(req, res) {
       // intentionally different business metrics and are not expected to
       // reconcile with each other.
       todays_bid_amount: Number(todayBid.todays_bid_amount ?? 0),
+
+      // TOTAL BIDS TODAY / NEW & RETURNING BIDDERS TODAY — activity-time,
+      // bid_created_at-scoped (today's Asia/Manila calendar day), NEVER
+      // ending_time — see todayActivityResultPromise's own comment above.
+      // total_bids_today counts every real bid-history ROW today (one
+      // bidder clicking 15 times contributes 15) — never deduplicated.
+      total_bids_today: totalBidsToday,
+      new_bidders_today: newBiddersToday,
+      returning_bidders_today: returningBiddersToday,
 
       // Service Income: real warehouse revenue from the SAME settled
       // Paid/Released population as Total Bid Amount — Buyer's Premium
@@ -3718,11 +4034,12 @@ export default async function handler(req, res) {
       participating_registered_bidders: participatingRegisteredBidders,
 
       // Avg Bids / Unique Bidder — bidder engagement/intensity, NOT a peso
-      // metric. total_bid_events / unique_participating_bidders, both from
-      // the SAME bidder-grain query (see AVG BIDS / UNIQUE BIDDER comment
-      // above) so they always reconcile against each other and against
-      // bidder_engagement below by construction. null (rendered as "—")
-      // when nobody participated in this scope, never a fabricated 0.
+      // metric. NOT total_bid_events / unique_participating_bidders — it is
+      // the AVERAGE OF EACH BIDDER'S OWN bid-events/distinct-lots ratio,
+      // every bidder weighted equally (see the AVG BIDS / UNIQUE BIDDER
+      // comment above for the worked example this must reproduce). null
+      // (rendered as "—") when nobody participated in this scope, never a
+      // fabricated 0.
       total_bid_events: totalBidEvents,
       unique_participating_bidders: uniqueParticipatingBidders,
       avg_bids_per_unique_bidder: avgBidsPerUniqueBidder,
@@ -3731,6 +4048,13 @@ export default async function handler(req, res) {
       // one row per canonical Participating bidder identity in this scope,
       // already sorted by bid_events descending (see the query above).
       bidder_engagement: bidderEngagement,
+
+      // WINNING BIDS VIA MAX BID — see winningMaxBidQuery's comment above
+      // for the exact winning-bid-to-bid-history reconciliation and why
+      // unresolved lots are reported separately, never guessed.
+      winning_max_bid: winningMaxBidOverall,
+      winning_max_bid_by_branch: winningMaxBidByBranch,
+      winning_max_bid_by_category: winningMaxBidByCategory,
 
       // For Approval: lots whose resolved for_approval_status is exactly
       // 'For Approval', independent of lifecycle status (Unsold/Outstanding/

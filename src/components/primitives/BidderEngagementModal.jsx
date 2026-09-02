@@ -58,7 +58,7 @@ export default function BidderEngagementModal({
         <div>
           <div className="text-[12px] uppercase tracking-wide text-muted font-semibold mb-1">Avg Bids / Unique Bidder</div>
           <div className="font-display text-[26px] leading-none text-series1">
-            {avgBidsPerUniqueBidder != null ? avgBidsPerUniqueBidder.toFixed(1) : "—"}
+            {avgBidsPerUniqueBidder != null ? avgBidsPerUniqueBidder.toFixed(2) : "—"}
           </div>
         </div>
       </div>
@@ -69,9 +69,9 @@ export default function BidderEngagementModal({
             <tr className="text-ink text-[13px] uppercase tracking-wide">
               <th className="text-left font-medium pb-2 pr-4">Bidder Name</th>
               <th className="text-left font-medium pb-2 pr-4">Status</th>
-              <th className="text-right font-medium pb-2 pr-4">Bid Events</th>
-              <th className="text-right font-medium pb-2 pr-4">Auctions Participated</th>
-              <th className="text-right font-medium pb-2">Bids / Auction Participated</th>
+              <th className="text-right font-medium pb-2 pr-4">Total Bids</th>
+              <th className="text-right font-medium pb-2 pr-4">Distinct Lots Bid On</th>
+              <th className="text-right font-medium pb-2">Avg Bids / Lot</th>
             </tr>
           </thead>
           <tbody>
@@ -88,9 +88,12 @@ export default function BidderEngagementModal({
                   </span>
                 </td>
                 <td className="py-2 pr-4 text-right tabular text-ink font-semibold">{r.bid_events}</td>
-                <td className="py-2 pr-4 text-right tabular text-ink">{r.auctions_participated}</td>
+                <td className="py-2 pr-4 text-right tabular text-ink">{r.distinct_lots}</td>
                 <td className="py-2 text-right tabular text-ink">
-                  {r.avg_bids_per_auction_participated != null ? r.avg_bids_per_auction_participated.toFixed(1) : "—"}
+                  {/* PART 7: row-level formula is bidder Total Bids ÷ bidder
+                      Distinct Lots Bid On — never labeled "Avg Bids /
+                      Unique Bidder" at this one-bidder grain. */}
+                  {r.avg_bids_per_lot != null ? r.avg_bids_per_lot.toFixed(2) : "—"}
                 </td>
               </tr>
             ))}

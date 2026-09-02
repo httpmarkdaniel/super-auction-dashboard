@@ -4,6 +4,8 @@ import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import BidderEngagementModal from "./primitives/BidderEngagementModal";
+import WinningMaxBidModal from "./primitives/WinningMaxBidModal";
+import BiddersTodayPie from "./primitives/BiddersTodayPie";
 import { formatPeso } from "../utils/format";
 
 const METHODOLOGY = {
@@ -18,7 +20,13 @@ const METHODOLOGY = {
   registration:
     "Of customers registered for an auction starting in the selected period, the share who actually placed at least one bid (cms.mart_cms_bidder_registrations' own is_participating_bidder flag) — a period cohort, not lifetime registrations vs. current activity.",
   avgBidsPerUniqueBidder:
-    "Total real bid events ÷ unique participating bidders in the selected scope — a measure of bidder engagement/intensity, not a peso figure. Higher means the average bidder places more bids; lower means bidders participate more shallowly. Click to see the per-bidder breakdown.",
+    "The AVERAGE OF EACH BIDDER'S OWN ratio (that bidder's real bid events ÷ that bidder's distinct auction+lot combinations bid on), every bidder weighted equally — NOT Total Bids ÷ Unique Bidders. A measure of bidder engagement/intensity, not a peso figure. Click to see the per-bidder breakdown.",
+  totalBidsToday:
+    "Count of every real bid-history event today (Asia/Manila calendar day) — one bidding action/click per row, never deduplicated by bidder, lot, or auction. Always \"today\", regardless of the date range picker.",
+  newBiddersToday:
+    "Canonical bidders whose first-ever real bid, across the complete bid-history dataset, occurred today — never a registration or first-bid-in-a-filter substitute. Always \"today\", regardless of the date range picker.",
+  winningMaxBid:
+    "Of the actual winning/final bid for each settled (Paid/Released) lot in the selected scope, the share placed via Max Bid rather than Normal Bid — matched to the bid-history event whose amount equals the settled winning amount, never merely \"Max Bid activity from eventual winners\". Click for the Branch/Category breakdown.",
 };
 
 export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "" }) {
@@ -32,6 +40,9 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
     branchBreakdown,
     bidderEngagement,
     comparison,
+    winningMaxBid,
+    winningMaxBidByBranch,
+    winningMaxBidByCategory,
   } = overview;
   const [drilldown, setDrilldown] = useState(null);
 
@@ -125,7 +136,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         </div>
         <StatTile
           eyebrow="Avg Bids / Unique Bidder"
-          value={heroKPIs.avgBidsPerUniqueBidder != null ? heroKPIs.avgBidsPerUniqueBidder.toFixed(1) : "—"}
+          value={heroKPIs.avgBidsPerUniqueBidder != null ? heroKPIs.avgBidsPerUniqueBidder.toFixed(2) : "—"}
           sub={
             heroKPIs.uniqueParticipatingBidders > 0
               ? `${heroKPIs.totalBidEvents} bids · ${heroKPIs.uniqueParticipatingBidders} bidders`
@@ -147,6 +158,35 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
           onClick={() => setDrilldown("serviceIncome")}
           extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.service_income_pct }] : []}
         />
+        </div>
+      </div>
+
+      {/* BIDDER ACTIVITY / ENGAGEMENT — activity-time (Today) metrics kept
+          separate from the historical-reporting cards above, per this
+          task's own PART 28/31 grouping rule. */}
+      <div>
+        <div className="panel-title mb-2">Bidder Activity / Engagement · Today</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatTile
+            eyebrow="Total Bids Today"
+            value={heroKPIs.totalBidsToday.toLocaleString()}
+            sub="Bidding actions today"
+            methodology={METHODOLOGY.totalBidsToday}
+          />
+          <StatTile
+            eyebrow="New Bidders Today"
+            value={heroKPIs.newBiddersToday.toLocaleString()}
+            sub="First-ever real bid today"
+            methodology={METHODOLOGY.newBiddersToday}
+          />
+          <BiddersTodayPie newBidders={heroKPIs.newBiddersToday} returningBidders={heroKPIs.returningBiddersToday} />
+          <StatTile
+            eyebrow="Winning Bids via Max Bid"
+            value={winningMaxBid.maxBidWinPct != null ? `${winningMaxBid.maxBidWinPct.toFixed(1)}%` : "—"}
+            sub={`${winningMaxBid.maxBidWins.toLocaleString()} of ${(winningMaxBid.maxBidWins + winningMaxBid.normalBidWins).toLocaleString()} winning bids`}
+            methodology={METHODOLOGY.winningMaxBid}
+            onClick={() => setDrilldown("winningMaxBid")}
+          />
         </div>
       </div>
 
@@ -192,6 +232,14 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
         totalBidEvents={heroKPIs.totalBidEvents}
         uniqueParticipatingBidders={heroKPIs.uniqueParticipatingBidders}
         avgBidsPerUniqueBidder={heroKPIs.avgBidsPerUniqueBidder}
+      />
+      <WinningMaxBidModal
+        open={drilldown === "winningMaxBid"}
+        onClose={() => setDrilldown(null)}
+        summary={winningMaxBid}
+        branchBreakdown={winningMaxBidByBranch}
+        categoryBreakdown={winningMaxBidByCategory}
+        rangeLabel={rangeLabel}
       />
     </div>
   );
