@@ -1,8 +1,39 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import usePalette from "../usePalette";
 import { formatPeso } from "../utils/format";
 
-const COLOR_KEYS = ["series1", "series8", "series2", "series3", "series5", "series7", "series6"];
+// Restrained professional BI palette for the Auction Mix donuts, assigned
+// purely by slice INDEX (never by label/percentage) so coloring stays
+// fully dynamic across whatever categories/sites/channels the query
+// returns. The prior version indexed into usePalette()'s theme tokens,
+// but that palette only defines series1-3 — every other key resolved to
+// the same navy fallback, which is why adjacent slices kept rendering as
+// near-identical dark blue. MIX_PALETTE is self-contained (not theme- or
+// dark-mode-dependent) specifically to avoid that collision, and stays
+// scoped to this file so it can't affect any other chart.
+const MIX_PALETTE = [
+  "#22345B", // Navy
+  "#F2A900", // Orange
+  "#19A974", // Teal
+  "#4F7CAC", // Blue
+  "#7A6FA8", // Purple
+  "#E8795E", // Coral
+  "#D6A84B", // Gold
+  "#718096", // Slate
+  // Overflow set — only reached past 8 segments in one donut; still
+  // restrained/non-neon, never repeats the Navy fallback.
+  "#5E8C61", // Sage
+  "#B5654B", // Rust
+  "#5B7C99", // Steel blue
+  "#9A8246", // Olive gold
+  "#8E5572", // Plum
+  "#3F6B5A", // Deep teal
+  "#A65A7E", // Dusty rose
+  "#4A5A72", // Denim slate
+];
+
+function colorForIndex(i) {
+  return MIX_PALETTE[i % MIX_PALETTE.length];
+}
 
 function MixTooltip({ active, payload }) {
   if (!active || !payload || payload.length === 0) return null;
@@ -16,8 +47,6 @@ function MixTooltip({ active, payload }) {
 }
 
 function MixDonut({ title, rows }) {
-  const palette = usePalette();
-  const colors = COLOR_KEYS.map((k) => palette[k] || palette.series1);
   const data = rows.slice(0, 7);
 
   return (
@@ -32,7 +61,7 @@ function MixDonut({ title, rows }) {
               <PieChart>
                 <Pie data={data} dataKey="bidAmount" nameKey="label" innerRadius={30} outerRadius={50} paddingAngle={2} isAnimationActive={false}>
                   {data.map((d, i) => (
-                    <Cell key={d.label} fill={colors[i % colors.length]} stroke="none" />
+                    <Cell key={d.label} fill={colorForIndex(i)} stroke="none" />
                   ))}
                 </Pie>
                 <Tooltip content={<MixTooltip />} />
@@ -42,7 +71,7 @@ function MixDonut({ title, rows }) {
           <div className="space-y-1 min-w-0 flex-1">
             {data.map((d, i) => (
               <div key={d.label} className="flex items-center gap-1.5 text-[12.5px]">
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i % colors.length] }} />
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colorForIndex(i) }} />
                 <span className="text-ink truncate flex-1">{d.label}</span>
                 <span className="text-muted tabular shrink-0">{d.share.toFixed(1)}%</span>
               </div>
