@@ -49,7 +49,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
               onClose();
             }}
             title="Return to Overview"
-            className="bg-white border border-gridline rounded-xl px-3 py-3.5 w-full flex items-center justify-center hover:opacity-90 transition-opacity"
+            className="bg-white border border-gridline rounded-lg px-3 py-3.5 w-full flex items-center justify-center hover:opacity-90 transition-opacity"
           >
             <img src={logo} alt="HMR Auctions" className="w-full h-auto max-w-[160px] object-contain" />
           </button>

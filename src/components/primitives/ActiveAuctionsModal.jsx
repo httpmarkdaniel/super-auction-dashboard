@@ -56,7 +56,7 @@ export default function ActiveAuctionsModal({ open, onClose, rows }) {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.auctionNumber} className="border-t border-gridline">
+              <tr key={r.auctionNumber} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                 <td className="py-2.5 pr-4 tabular text-ink">{r.auctionNumber}</td>
                 <td className="py-2.5 pr-4 text-ink max-w-[220px] truncate" title={r.name}>
                   {r.name || "—"}

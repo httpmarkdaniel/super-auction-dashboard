@@ -37,16 +37,18 @@ function DeltaRow({ pct, label }) {
 }
 
 // Restrained executive-BI card shell shared by all four Headline
-// Performance cards — white surface, thin border, very subtle radius, a
-// single-pixel warm accent reserved for the hero card, uppercase muted
-// label, no heavy shadow/gradient/pill treatment.
+// Performance cards — same shell (radius/shadow/padding) as StatTile,
+// the KPI-card primitive used everywhere else in the dashboard, so this
+// row reads as part of one system rather than a one-off variant. A
+// single-pixel warm accent is reserved for the hero card; no gradient/
+// pill treatment.
 function HeadlineCard({ eyebrow, hero, onClick, methodology, children }) {
   const Wrapper = onClick ? "button" : "div";
   return (
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`relative text-left w-full bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4 group/tip ${
+      className={`relative text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip ${
         hero ? "border-t-[3px] border-t-series8" : ""
       } ${onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""}`}
     >
@@ -148,20 +150,20 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
           </HeadlineCard>
 
           <HeadlineCard eyebrow="Auctions Concluded" methodology={METHODOLOGY.auctionsConcluded} onClick={() => setDrilldown("auctionsConcluded")}>
-            <div className="font-display text-[30px] leading-none text-ink mb-2">{heroKPIs.auctionsConcluded}</div>
+            <div className="font-display text-[36.5px] leading-none text-ink mb-2">{heroKPIs.auctionsConcluded}</div>
             <DeltaRow pct={comparison?.auctions_concluded_pct} label={compareLabel} />
           </HeadlineCard>
 
           <HeadlineCard eyebrow="Lots Sold / Listed" methodology={METHODOLOGY.lotsSoldListed} onClick={() => setDrilldown("lotsSoldListed")}>
-            <div className="font-display text-[30px] leading-none text-ink mb-1.5 tabular">
-              {heroKPIs.lotsSold.toLocaleString()} <span className="text-muted text-[19px]">/ {heroKPIs.lotsListed.toLocaleString()}</span>
+            <div className="font-display text-[36.5px] leading-none text-ink mb-1.5 tabular">
+              {heroKPIs.lotsSold.toLocaleString()} <span className="text-muted text-[22px]">/ {heroKPIs.lotsListed.toLocaleString()}</span>
             </div>
             <div className="text-[12.5px] text-muted mb-1.5">{sellThroughPct}% sell-through</div>
             <DeltaRow pct={comparison?.lots_sold_pct} label={compareLabel} />
           </HeadlineCard>
 
           <HeadlineCard eyebrow="Participating Bidders" methodology={METHODOLOGY.participatingBidders} onClick={onOpenBidderComposition}>
-            <div className="font-display text-[30px] leading-none text-ink mb-2 tabular">{participatingTotal}</div>
+            <div className="font-display text-[36.5px] leading-none text-ink mb-2 tabular">{participatingTotal}</div>
             <DeltaRow pct={participatingComposition.pctChange} label={compareLabel} />
             <div className="mt-2.5">
               <div className="h-1.5 rounded-full overflow-hidden flex bg-gridline">

@@ -87,7 +87,7 @@ function BidHistoryTable({ events }) {
         </thead>
         <tbody>
           {events.map((e, i) => (
-            <tr key={i} className="border-t border-gridline">
+            <tr key={i} className="border-t border-gridline hover:bg-plane/60 transition-colors">
               <td className="py-1.5 pr-3 tabular text-ink">{formatManila(e.timestamp)}</td>
               <td className="py-1.5 pr-3 text-ink">{e.bidder ?? "Unknown bidder"}</td>
               <td className="py-1.5 pr-3 text-ink capitalize">{e.new_or_returning}</td>

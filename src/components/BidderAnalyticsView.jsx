@@ -136,7 +136,7 @@ export default function BidderAnalyticsView({ dateRange, store, category, rangeL
             </thead>
             <tbody>
               {topBidders.map((b, i) => (
-                <tr key={b.bidder_name + i} className="border-t border-gridline">
+                <tr key={b.bidder_name + i} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                   <td className="py-2 px-3 text-ink">{b.bidder_name}</td>
                   <td className="py-2 px-3 text-right tabular text-ink">{b.settled_wins}</td>
                   <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatPeso(b.settled_bid_amount)}</td>

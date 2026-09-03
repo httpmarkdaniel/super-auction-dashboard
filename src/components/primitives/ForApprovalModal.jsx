@@ -29,7 +29,7 @@ function ForApprovalTable({ rows }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={`${r.auctionNumber}-${r.lotNumber}`} className="border-t border-gridline">
+            <tr key={`${r.auctionNumber}-${r.lotNumber}`} className="border-t border-gridline hover:bg-plane/60 transition-colors">
               <td className="py-2.5 pr-4 tabular text-ink">{r.auctionNumber}</td>
               <td className="py-2.5 pr-4 tabular text-ink">{r.lotNumber}</td>
               <td className="py-2.5 pr-4 text-ink max-w-[200px] truncate" title={r.item}>

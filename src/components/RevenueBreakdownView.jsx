@@ -52,7 +52,7 @@ function BreakdownTable({ rows, labelKey, labelHeader }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r[labelKey]} className="border-t border-gridline">
+            <tr key={r[labelKey]} className="border-t border-gridline hover:bg-plane/60 transition-colors">
               <td className="py-2.5 pr-4 text-ink">{r[labelKey]}</td>
               <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.bidAmount)}</td>
               <td className="py-2.5 pr-4 text-right tabular text-ink">{formatPeso(r.buyersPremium)}</td>
@@ -278,7 +278,7 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
               </thead>
               <tbody>
                 {summary.byAuction.map((a) => (
-                  <tr key={a.auctionNumber} className="border-t border-gridline">
+                  <tr key={a.auctionNumber} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                     <td className="py-2.5 pr-4 tabular text-ink">{a.auctionNumber}</td>
                     <td className="py-2.5 pr-4 text-ink max-w-[200px] truncate" title={a.auctionName}>
                       {a.auctionName || "—"}
@@ -342,7 +342,7 @@ export default function RevenueBreakdownView({ store, dateRange, rangeLabel, ref
                     </thead>
                     <tbody>
                       {detailRows.map((r) => (
-                        <tr key={`${r.auction_number}-${r.lot_number}`} className="border-t border-gridline">
+                        <tr key={`${r.auction_number}-${r.lot_number}`} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                           <td className="py-2.5 pr-4 tabular text-ink">{r.auction_number}</td>
                           <td className="py-2.5 pr-4 tabular text-ink">{r.lot_number}</td>
                           <td className="py-2.5 pr-4 text-ink max-w-[200px] truncate" title={r.name}>

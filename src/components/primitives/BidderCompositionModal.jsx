@@ -27,7 +27,7 @@ function EntityTable({ entityLabel, rows, getLabel }) {
             const p = r.participating;
             const w = r.winning;
             return (
-              <tr key={getLabel(r)} className="border-t border-gridline">
+              <tr key={getLabel(r)} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                 <td className="py-2 pr-4 text-ink">{getLabel(r)}</td>
                 <td className="py-2 pr-4 text-right tabular text-ink font-semibold">{p.total}</td>
                 <td className="py-2 pr-4 text-right tabular text-muted">{p.newBidders} / {p.returningBidders}</td>

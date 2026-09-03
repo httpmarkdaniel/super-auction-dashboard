@@ -218,7 +218,7 @@ export default function VendorPayablesBreakdown({
                   </thead>
                   <tbody>
                     {rows.map((r) => (
-                      <tr key={r.payableId} className="border-t border-gridline">
+                      <tr key={r.payableId} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                         <td className="py-2.5 pr-4 tabular text-ink">{r.payableId}</td>
                         <td className="py-2.5 pr-4 text-ink" title={r.auctionName || undefined}>
                           {r.auctionLabel}

@@ -117,7 +117,7 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
             </thead>
             <tbody>
               {top10ByBidAmount.map((v) => (
-                <tr key={v.vendor} className="border-t border-gridline">
+                <tr key={v.vendor} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                   <td className="py-2 px-3 text-ink">{v.vendor}</td>
                   <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
                   <td className="py-2 px-3 text-right tabular text-ink">{v.lots_sold}</td>

@@ -36,7 +36,7 @@ function EntityTable({ rows, nameKey, totalBidAmount }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r[nameKey]} className="border-t border-gridline">
+            <tr key={r[nameKey]} className="border-t border-gridline hover:bg-plane/60 transition-colors">
               <td className="py-2 pr-4 text-ink">{r[nameKey]}</td>
               <td className="py-2 pr-4 text-right tabular text-ink">{formatPeso(r.bidAmount)}</td>
               <td className="py-2 pr-4 text-right tabular text-ink">{r.share}%</td>

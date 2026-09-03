@@ -455,7 +455,7 @@ export default function AuctionSummaryTable({
               </thead>
               <tbody>
                 {pageRows.map((r) => (
-                  <tr key={r.auctionNumber} className="border-t border-gridline">
+                  <tr key={r.auctionNumber} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                     <td className="py-2.5 pr-4 tabular">
                       <button
                         type="button"

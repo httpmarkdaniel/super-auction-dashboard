@@ -24,7 +24,7 @@ function EntityTable({ entityLabel, rows, getLabel }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={getLabel(r)} className="border-t border-gridline">
+            <tr key={getLabel(r)} className="border-t border-gridline hover:bg-plane/60 transition-colors">
               <td className="py-2 pr-4 text-ink">{getLabel(r)}</td>
               <td className="py-2 pr-4 text-right tabular text-ink font-semibold">{r.winningBids}</td>
               <td className="py-2 pr-4 text-right tabular text-series1">{r.maxBidWins}</td>

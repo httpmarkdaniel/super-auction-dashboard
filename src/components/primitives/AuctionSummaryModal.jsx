@@ -116,7 +116,7 @@ export default function AuctionSummaryModal({ open, onClose, title, subtitle, ro
                     </td>
                   </tr>
                   {isOpen && (
-                    <tr key={`${r.auctionNumber}-detail`} className="border-t border-gridline">
+                    <tr key={`${r.auctionNumber}-detail`} className="border-t border-gridline hover:bg-plane/60 transition-colors">
                       <td colSpan={9} className="py-3 pl-4 bg-plane">
                         <div className="text-[13px] text-muted mb-2">
                           {r.auctionNumber} · Ending {formatManila(r.endingTime)}
