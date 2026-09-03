@@ -1518,6 +1518,16 @@ export default function App() {
   const [refreshNonce, setRefreshNonce] =
     useState(0);
 
+  // Bidder/Vendor Analytics are historical, filter-driven reports, not
+  // live data — they must NOT refetch on the automatic 30s tick below
+  // (that's what was causing them to visibly reload periodically with no
+  // filter change). This nonce only bumps on an explicit user refresh
+  // click (see handleManualRefresh), never on the auto-refresh timer or
+  // tab-visibility catch-up, so those two views only refetch on tab
+  // activation, a real filter change, or this explicit action.
+  const [manualRefreshNonce, setManualRefreshNonce] =
+    useState(0);
+
   const [lastUpdated, setLastUpdated] =
     useState(() => new Date());
 
@@ -1525,6 +1535,16 @@ export default function App() {
     setRefreshNonce((n) => n + 1);
     setLastUpdated(new Date());
   }, []);
+
+  // Topbar's manual refresh button — bumps both the automatic-refresh
+  // nonce (unchanged behavior for every existing live/refreshNonce-driven
+  // view) and the analytics-only nonce above, so an explicit refresh
+  // still legitimately refreshes Bidder/Vendor Analytics on demand even
+  // though the automatic timer no longer does.
+  const handleManualRefresh = useCallback(() => {
+    triggerRefresh();
+    setManualRefreshNonce((n) => n + 1);
+  }, [triggerRefresh]);
 
   // Vercel P0 usage fix: a backgrounded/minimized browser tab must not
   // keep generating server load every 30s forever. The interval itself
@@ -1649,7 +1669,7 @@ export default function App() {
           updatedAt={formatUpdatedAt(
             lastUpdated,
           )}
-          onRefresh={triggerRefresh}
+          onRefresh={handleManualRefresh}
         />
 
         <div className="flex items-center gap-3 px-4 md:px-10 pt-5">
@@ -1765,7 +1785,8 @@ export default function App() {
               biddingPaceStore={store}
               category={overviewCategory}
               rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
+              biddingPaceRefreshNonce={refreshNonce}
             />
           )}
 
@@ -1775,7 +1796,7 @@ export default function App() {
               store={store === ALL_STORES ? undefined : store}
               category={overviewCategory}
               rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 

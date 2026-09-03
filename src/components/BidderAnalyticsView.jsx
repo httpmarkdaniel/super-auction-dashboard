@@ -14,21 +14,29 @@ import { formatPeso } from "../utils/format";
 //
 // Bidding Pace lives at the top of this tab (relocated from its own
 // former standalone sidebar destination — see Sidebar.jsx) as the FIRST
-// section, using the SAME dateRange/rangeLabel/refreshNonce this view
-// already receives — no separate filter controls, no second fetch path.
+// section, using the SAME dateRange/rangeLabel this view already
+// receives — no separate filter controls, no second fetch path. It keeps
+// its own pre-existing live auto-refresh via `biddingPaceRefreshNonce`
+// (App.jsx's automatic-refresh nonce, unchanged), deliberately NOT the
+// `refreshNonce` this view's own historical analytics use below (App.jsx's
+// analytics-only nonce, which bumps on an explicit user refresh click,
+// never on a timer — see App.jsx's handleManualRefresh comment for why:
+// this tab must only refetch on activation, a real filter change, or an
+// explicit refresh, not the automatic 30s tick that legitimately still
+// drives Bidding Pace's own "Live" behavior).
 // `biddingPaceStore` is the raw (pre-ALL_STORES-normalized) store value:
 // useBiddingPace/BiddingPaceView already do their own ALL_STORES
 // normalization internally and use the raw value for display text, so
 // this is passed through as-is rather than this view's own normalized
 // `store` prop (which would render "undefined" in that display text when
 // All Stores is selected).
-export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore, category, rangeLabel, refreshNonce }) {
+export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore, category, rangeLabel, refreshNonce, biddingPaceRefreshNonce }) {
   const { data, loading, error } = useBidderAnalytics(dateRange, store, category, refreshNonce);
 
-  if (error) {
+  if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Bidder Analytics: {error}</div>;
   }
-  if (loading || !data) {
+  if (!data) {
     return <div className="text-center text-ink text-[15.5px] py-12">Loading Bidder Analytics…</div>;
   }
 
@@ -57,8 +65,12 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
 
   return (
     <div>
+      {loading && (
+        <div className="mb-4 text-[13px] text-muted">Updating Bidder Analytics…</div>
+      )}
+
       <StorySection title="Bidding Pace">
-        <BiddingPaceView store={biddingPaceStore} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
+        <BiddingPaceView store={biddingPaceStore} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={biddingPaceRefreshNonce} />
       </StorySection>
 
       <StorySection

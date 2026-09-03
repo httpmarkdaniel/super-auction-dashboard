@@ -13,10 +13,10 @@ const STUCK_INVENTORY_MIN_LOTS = 20;
 export default function VendorAnalyticsView({ dateRange, store, category, rangeLabel, refreshNonce }) {
   const { data, loading, error } = useVendorAnalytics(dateRange, store, category, refreshNonce);
 
-  if (error) {
+  if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Vendor Analytics: {error}</div>;
   }
-  if (loading || !data) {
+  if (!data) {
     return <div className="text-center text-ink text-[15.5px] py-12">Loading Vendor Analytics…</div>;
   }
 
@@ -38,6 +38,10 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
 
   return (
     <div>
+      {loading && (
+        <div className="mb-4 text-[13px] text-muted">Updating Vendor Analytics…</div>
+      )}
+
       <StorySection
         title="Vendor Analytics"
         insight={`Vendor consignment activity for auctions ending in the selected period (${rangeLabel}).`}
