@@ -3,6 +3,7 @@ import { getLiveLotsSafe } from "./_liveBids.js";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 import { STATUS_PRIORITY_SQL, APPROVAL_PRIORITY_SQL } from "./_lotStatus.js";
+import { pickBucketGrain, enumerateBuckets, zeroFillBuckets, normalizeBucketKey } from "./_bucketing.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -210,15 +211,9 @@ export default async function handler(req, res) {
     // everywhere else in this dashboard.
     // =========================================================
     if (type === "bidder-time-series") {
-      function pickBucket(fromStr, toStr) {
-        const days = (Date.parse(`${toStr}T00:00:00Z`) - Date.parse(`${fromStr}T00:00:00Z`)) / 86400000;
-        if (days <= 9) return { fn: "toStartOfDay", label: "day" };
-        if (days <= 60) return { fn: "toMonday", label: "week" };
-        return { fn: "toStartOfMonth", label: "month" };
-      }
-
+      const { preset = "" } = req.query;
       const btsParams = { from, to, store, category };
-      const { fn: bucketFn, label: bucketLabel } = pickBucket(from, to);
+      const { fn: bucketFn, label: bucketLabel } = pickBucketGrain(preset, from, to);
       const bucketExpr = (col) => `${bucketFn}(${col}, 'Asia/Manila')`;
 
       // Shared bucketed union population — every real bid-history bidder
@@ -332,8 +327,13 @@ export default async function handler(req, res) {
       });
       const bidderBucketSummaryRows = await bidderBucketSummaryResult.json();
 
-      const totalBuckets = timeSeriesRows.length;
-      const latestBucket = totalBuckets > 0 ? timeSeriesRows[timeSeriesRows.length - 1].bucket : null;
+      // Complete expected bucket sequence for the selected range/grain —
+      // NOT the sparse set of buckets the query actually returned rows
+      // for — so Always Active/Went Quiet and bucket_count reflect every
+      // day/week/month in range, including ones with zero activity.
+      const expectedBuckets = enumerateBuckets(bucketLabel, from, to);
+      const totalBuckets = expectedBuckets.length;
+      const latestBucket = expectedBuckets.length > 0 ? expectedBuckets[expectedBuckets.length - 1] : null;
 
       // "Be careful with WTD/short Custom periods" — Always Active/Went
       // Quiet are only meaningful when there's more than one bucket to be
@@ -345,19 +345,14 @@ export default async function handler(req, res) {
         ? bidderBucketSummaryRows.filter((r) => Number(r.buckets_present) === totalBuckets).length
         : null;
       const wentQuietCount = bucketedClassificationApplicable
-        ? bidderBucketSummaryRows.filter((r) => r.last_present_bucket !== latestBucket).length
+        ? bidderBucketSummaryRows.filter((r) => normalizeBucketKey(r.last_present_bucket) !== latestBucket).length
         : null;
 
       res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
       return res.status(200).json({
         bucket_label: bucketLabel,
         bucket_count: totalBuckets,
-        by_period: timeSeriesRows.map((row) => ({
-          bucket: row.bucket,
-          total: Number(row.total ?? 0),
-          new_bidders: Number(row.new_bidders ?? 0),
-          returning_bidders: Number(row.returning_bidders ?? 0),
-        })),
+        by_period: zeroFillBuckets(expectedBuckets, timeSeriesRows, ["total", "new_bidders", "returning_bidders"]),
         always_active: alwaysActiveCount,
         went_quiet: wentQuietCount,
         classification_applicable: bucketedClassificationApplicable,

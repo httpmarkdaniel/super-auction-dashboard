@@ -30,9 +30,10 @@ export function useVendorAnalytics(dateRangeKey, store, category, refreshNonce =
       try {
         const { from, to } = resolveDateRange(dateRangeKey);
         const params = { from, to, store, category };
+        const preset = typeof dateRangeKey === "string" ? dateRangeKey : "custom";
         const [leaderboards, vendorAnalytics] = await Promise.all([
           fetchJson("/api/leaderboards", params),
-          fetchJson("/api/leaderboards", { ...params, type: "vendor-time-series" }),
+          fetchJson("/api/leaderboards", { ...params, type: "vendor-time-series", preset }),
         ]);
         if (cancelled) return;
         setState({ data: { leaderboards, vendorAnalytics }, loading: false, error: null });

@@ -2,6 +2,7 @@ import { createClient } from "@clickhouse/client";
 import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 import { STATUS_PRIORITY_SQL } from "./_lotStatus.js";
+import { pickBucketGrain, enumerateBuckets, zeroFillBuckets } from "./_bucketing.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -33,15 +34,9 @@ export default async function handler(req, res) {
     // query, dynamic bucket granularity (never hardcoded to "month").
     // =========================================================
     if (type === "vendor-time-series") {
-      function pickBucket(fromStr, toStr) {
-        const days = (Date.parse(`${toStr}T00:00:00Z`) - Date.parse(`${fromStr}T00:00:00Z`)) / 86400000;
-        if (days <= 9) return { fn: "toStartOfDay", label: "day" };
-        if (days <= 60) return { fn: "toMonday", label: "week" };
-        return { fn: "toStartOfMonth", label: "month" };
-      }
-
+      const { preset = "" } = req.query;
       const vtsParams = { from, to, store, category };
-      const { fn: bucketFn, label: bucketLabel } = pickBucket(from, to);
+      const { fn: bucketFn, label: bucketLabel } = pickBucketGrain(preset, from, to);
       const bucketExpr = (col) => `${bucketFn}(${col}, 'Asia/Manila')`;
 
       const vtsResult = await client.query({
@@ -90,15 +85,13 @@ export default async function handler(req, res) {
       });
       const vtsRows = await vtsResult.json();
 
+      const expectedBuckets = enumerateBuckets(bucketLabel, from, to);
+
       res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
       return res.status(200).json({
         bucket_label: bucketLabel,
-        by_period: vtsRows.map((row) => ({
-          bucket: row.bucket,
-          total: Number(row.total ?? 0),
-          new_vendors: Number(row.new_vendors ?? 0),
-          returning_vendors: Number(row.returning_vendors ?? 0),
-        })),
+        bucket_count: expectedBuckets.length,
+        by_period: zeroFillBuckets(expectedBuckets, vtsRows, ["total", "new_vendors", "returning_vendors"]),
       });
     }
 

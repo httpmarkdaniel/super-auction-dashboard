@@ -33,10 +33,11 @@ export function useBidderAnalytics(dateRangeKey, store, category, refreshNonce =
       try {
         const { from, to } = resolveDateRange(dateRangeKey);
         const params = { from, to, store, category };
+        const preset = typeof dateRangeKey === "string" ? dateRangeKey : "custom";
         const [overview, leaderboards, bidderAnalytics] = await Promise.all([
           fetchJson("/api/overview", params),
           fetchJson("/api/leaderboards", params),
-          fetchJson("/api/overview", { ...params, type: "bidder-time-series" }),
+          fetchJson("/api/overview", { ...params, type: "bidder-time-series", preset }),
         ]);
         if (cancelled) return;
         setState({ data: { overview, leaderboards, bidderAnalytics }, loading: false, error: null });

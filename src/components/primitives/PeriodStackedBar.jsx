@@ -1,20 +1,32 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList } from "recharts";
 import usePalette from "../../usePalette";
 
-function formatBucketLabel(bucket, bucketLabel) {
+function bucketYear(bucket) {
+  return String(bucket).slice(0, 4);
+}
+
+// Monthly labels are bare month names ("Jan") when every bucket in the
+// selected range falls in the same calendar year, and "MMM YYYY" ("Dec
+// 2025") when a Custom range crosses a year boundary and a bare month
+// name would be ambiguous.
+function formatBucketLabel(bucket, bucketLabel, monthCrossesYears) {
   if (!bucket) return "";
   const d = new Date(bucket.replace(" ", "T") + (bucket.includes("Z") ? "" : "Z"));
   if (Number.isNaN(d.getTime())) return bucket;
-  if (bucketLabel === "month") return d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short", year: "2-digit" });
+  if (bucketLabel === "month") {
+    return monthCrossesYears
+      ? d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short", year: "numeric" })
+      : d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short" });
+  }
   return d.toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric" });
 }
 
-function BarTooltip({ active, payload, bucketLabel }) {
+function BarTooltip({ active, payload, bucketLabel, monthCrossesYears }) {
   if (!active || !payload || payload.length === 0) return null;
   const row = payload[0].payload;
   return (
     <div className="floating px-3 py-2 text-[12.5px] leading-tight shadow-lg">
-      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">{formatBucketLabel(row.bucket, bucketLabel)}</div>
+      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">{formatBucketLabel(row.bucket, bucketLabel, monthCrossesYears)}</div>
       <div className="text-ink font-medium tabular">Total {row.total}</div>
       <div className="text-series8 tabular">New {row.new}</div>
       <div className="text-muted tabular">Returning {row.returning}</div>
@@ -29,9 +41,10 @@ function BarTooltip({ active, payload, bucketLabel }) {
 // range — never hardcoded here.
 export default function PeriodStackedBar({ rows, bucketLabel }) {
   const palette = usePalette();
+  const monthCrossesYears = bucketLabel === "month" && new Set(rows.map((r) => bucketYear(r.bucket))).size > 1;
   const data = rows.map((r) => ({
     bucket: r.bucket,
-    label: formatBucketLabel(r.bucket, bucketLabel),
+    label: formatBucketLabel(r.bucket, bucketLabel, monthCrossesYears),
     new: r.new_bidders ?? r.new_vendors ?? 0,
     returning: r.returning_bidders ?? r.returning_vendors ?? 0,
     total: r.total,
@@ -47,7 +60,7 @@ export default function PeriodStackedBar({ rows, bucketLabel }) {
         <BarChart data={data} margin={{ top: 24, right: 8, left: 0, bottom: 0 }}>
           <XAxis dataKey="label" tick={{ fontSize: 12, fill: palette.textSecondary }} axisLine={{ stroke: palette.gridline }} tickLine={false} />
           <YAxis tick={{ fontSize: 12, fill: palette.textSecondary }} axisLine={false} tickLine={false} width={32} />
-          <Tooltip content={<BarTooltip bucketLabel={bucketLabel} />} cursor={{ fill: palette.gridline, opacity: 0.4 }} />
+          <Tooltip content={<BarTooltip bucketLabel={bucketLabel} monthCrossesYears={monthCrossesYears} />} cursor={{ fill: palette.gridline, opacity: 0.4 }} />
           <Bar dataKey="returning" stackId="a" fill={palette.series1} radius={[0, 0, 0, 0]} />
           <Bar dataKey="new" stackId="a" fill={palette.series8 || "#eb6834"} radius={[3, 3, 0, 0]}>
             <LabelList
