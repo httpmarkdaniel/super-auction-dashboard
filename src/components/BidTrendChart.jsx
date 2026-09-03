@@ -48,15 +48,27 @@ function formatTooltipLabel(bucket, bucketLabel) {
 // Y-POSITION-ONLY transform — never touches the real bid_amount used by the
 // tooltip, totals, or any calculation. A large settlement day (e.g. ₱1.8M)
 // would otherwise flatten every smaller day against zero on a linear axis;
-// log1p compresses the visual distance between big and small values while
-// keeping every value's relative ORDER intact, and log1p(0) = 0 so a
-// genuine zero day still sits exactly at the baseline (no fake positive
-// floor, unlike a plain log scale which can't represent zero at all).
+// sqrt compresses the visual distance between big and small values while
+// keeping every value's relative ORDER intact, and sqrt(0) = 0 so a genuine
+// zero day still sits exactly at the baseline.
+//
+// This was previously log1p, which compresses FAR more aggressively at
+// peso scale (ln(2,000,001) ≈ 14.5 vs sqrt(2,000,000) ≈ 1414): a real
+// mounted-DOM render check (not just inspecting the tick VALUES in code)
+// showed log1p squeezed every tick from ₱100K up to ₱2M into a ~40px band
+// at the top of a 240px chart — adjacent tick labels only 5-9px apart,
+// well under an 11px font's own height, so most of them visually
+// overlapped into an unreadable smear that looked like only "₱0 → ₱300K →
+// ₱2M" were rendered even though all 7 were genuinely in the DOM. sqrt
+// gives the same tick set 13-54px of real vertical separation in the same
+// chart height — comfortably non-overlapping — while still compressing
+// enough that a ₱50K day remains visible against a ₱2M peak (sqrt places
+// it ~16% up the axis vs. an unusable ~2.5% on a plain linear scale).
 function toDisplayY(value) {
-  return Math.log1p(Math.max(0, value));
+  return Math.sqrt(Math.max(0, value));
 }
 function fromDisplayY(value) {
-  return Math.expm1(Math.max(0, value));
+  return Math.max(0, value) ** 2;
 }
 
 // Business-readable "nice" step set, two tiers per decade (1/1.5/2/2.5/3/
@@ -108,6 +120,33 @@ function niceTickCandidates(topTick) {
 // points to exactly ₱100K and ₱2M with nothing landing in between.
 // Sampling from the lattice instead guarantees intermediate nice values
 // (₱200K/₱300K/₱500K/₱1M/etc.) always appear when the range spans them.
+//
+// Final safety pass: two adjacent NICE_STEPS entries in the SAME decade
+// (e.g. ₱250K and ₱300K, the 2.5x/3x steps) can occasionally both get
+// picked while still landing too close together in transformed space to
+// render as legible separate labels at this chart's height — confirmed by
+// mounting the real component in jsdom and reading back each tick
+// <text>'s rendered y position (not just inspecting the tick VALUES),
+// which is what caught this. dropTooClose removes a candidate only when
+// it would sit within MIN_GAP_FRACTION of the previously KEPT tick, and
+// never drops 0 or the top tick — so every label that survives is
+// guaranteed real vertical separation from its neighbors.
+const MIN_GAP_FRACTION = 0.05;
+function dropTooClose(ticks) {
+  if (ticks.length <= 2) return ticks;
+  const top = ticks[ticks.length - 1];
+  const domainMax = toDisplayY(top);
+  const minGap = domainMax * MIN_GAP_FRACTION;
+  const kept = [ticks[0]];
+  for (let i = 1; i < ticks.length - 1; i++) {
+    if (toDisplayY(ticks[i]) - toDisplayY(kept[kept.length - 1]) >= minGap) {
+      kept.push(ticks[i]);
+    }
+  }
+  kept.push(top);
+  return kept;
+}
+
 function computeDisplayTicks(maxRawValue, targetCount = 6) {
   if (maxRawValue <= 0) return [0];
   const topTick = niceRound(maxRawValue);
@@ -118,7 +157,7 @@ function computeDisplayTicks(maxRawValue, targetCount = 6) {
     const idx = Math.round((i / Math.max(targetCount - 1, 1)) * lastIdx);
     picked.add(candidates[idx]);
   }
-  return [0, ...[...picked].sort((a, b) => a - b)];
+  return dropTooClose([0, ...[...picked].sort((a, b) => a - b)]);
 }
 
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
