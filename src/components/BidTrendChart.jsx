@@ -3,8 +3,46 @@ import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 
-function formatDayLabel(iso) {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+function parseBucketDate(bucket) {
+  return new Date(`${bucket}T00:00:00`);
+}
+
+function bucketYear(bucket) {
+  return String(bucket).slice(0, 4);
+}
+
+// Concise X-axis tick label — day: "Sep 1"; week: week-start "Aug 3";
+// month: bare "Jan" unless the selected range crosses a year boundary (a
+// Custom range spanning Dec-Jan), in which case "Jan 2026" to stay
+// unambiguous — same cross-year rule as PeriodStackedBar's monthly labels.
+function formatAxisLabel(bucket, bucketLabel, monthCrossesYears) {
+  const d = parseBucketDate(bucket);
+  if (Number.isNaN(d.getTime())) return bucket;
+  if (bucketLabel === "month") {
+    return monthCrossesYears
+      ? d.toLocaleDateString("en-PH", { month: "short", year: "numeric" })
+      : d.toLocaleDateString("en-PH", { month: "short" });
+  }
+  return d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+}
+
+// Full bucket date/range for the tooltip header — day: "Sep 1, 2026";
+// week: the full 7-day span "Aug 3 – Aug 9, 2026"; month: full month name
+// "September 2026". Always unambiguous regardless of the axis tick's more
+// compact form.
+function formatTooltipLabel(bucket, bucketLabel) {
+  const d = parseBucketDate(bucket);
+  if (Number.isNaN(d.getTime())) return bucket;
+  if (bucketLabel === "month") {
+    return d.toLocaleDateString("en-PH", { month: "long", year: "numeric" });
+  }
+  if (bucketLabel === "week") {
+    const end = new Date(d.getTime() + 6 * 86400000);
+    const startLabel = d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+    const endLabel = end.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+    return `${startLabel} – ${endLabel}`;
+  }
+  return d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 }
 
 // Y-POSITION-ONLY transform — never touches the real bid_amount used by the
@@ -21,36 +59,72 @@ function fromDisplayY(value) {
   return Math.expm1(Math.max(0, value));
 }
 
-// Round a raw peso value to a "nice" 1/2/5 x 10^n figure for tick labels —
-// same convention chart libraries use for linear axes, applied here to the
-// INVERSE-transformed tick positions so the labels stay human-readable
-// pesos even though they're evenly spaced in log1p space, not peso space.
+// Business-readable "nice" step set, two tiers per decade (1/1.5/2/2.5/3/
+// 5/7.5/10 × 10^n) — closely matches the preferred BI levels (₱100K/₱200K/
+// ₱300K/₱500K/₱750K/₱1M/₱1.5M/₱2M/₱2.5M/₱3M/₱5M) without hardcoding a
+// fixed tick list for every dataset.
+const NICE_STEPS = [1, 1.5, 2, 2.5, 3, 5, 7.5, 10];
+
+// Rounds a raw peso value to the nearest NICE_STEPS figure — used both for
+// the single "top" tick near the data max and, below, to build the full
+// tick lattice.
 function niceRound(value) {
   if (value <= 0) return 0;
   const magnitude = 10 ** Math.floor(Math.log10(value));
   const normalized = value / magnitude;
-  const niceNormalized = normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10;
-  return niceNormalized * magnitude;
+  for (let i = 0; i < NICE_STEPS.length; i++) {
+    const step = NICE_STEPS[i];
+    const nextMidpoint = i < NICE_STEPS.length - 1 ? (step + NICE_STEPS[i + 1]) / 2 : Infinity;
+    if (normalized <= nextMidpoint) return step * magnitude;
+  }
+  return NICE_STEPS[NICE_STEPS.length - 1] * magnitude;
 }
 
-// Evenly-spaced steps in TRANSFORMED (log1p) space, each inverse-transformed
-// and rounded to a nice peso figure — gives ticks like ₱0 / ₱10K / ₱50K /
-// ₱250K / ₱1M / ₱2M that visually correspond to equal vertical spacing.
-function computeDisplayTicks(maxRawValue, targetCount = 5) {
-  if (maxRawValue <= 0) return [0];
-  const maxDisplay = toDisplayY(maxRawValue);
-  const raw = new Set([0]);
-  for (let i = 1; i <= targetCount; i++) {
-    const nice = niceRound(fromDisplayY((maxDisplay / targetCount) * i));
-    if (nice > 0) raw.add(nice);
+// Every NICE_STEPS × 10^n candidate across the top two magnitude decades
+// at/below topTick — e.g. for a ~₱2M top tick this covers ₱100K..₱2M,
+// exactly the range where readability matters; values far below that
+// (₱1K, ₱10K …) would just clutter a chart whose real range starts
+// around ₱100K. topTick itself is always included, even if it rounds up
+// to the next magnitude (e.g. 10 × 10^n = 1 × 10^(n+1)).
+function niceTickCandidates(topTick) {
+  const topMagnitude = 10 ** Math.floor(Math.log10(topTick));
+  const candidates = new Set([topTick]);
+  for (const magnitude of [topMagnitude / 10, topMagnitude]) {
+    for (const step of NICE_STEPS) {
+      const value = step * magnitude;
+      if (value <= topTick * 1.0001) candidates.add(value);
+    }
   }
-  return [...raw].sort((a, b) => a - b);
+  return [...candidates].sort((a, b) => a - b);
+}
+
+// Picks up to `targetCount` nice values evenly spaced ACROSS THE NICE-
+// NUMBER LATTICE below a top tick rounded to the actual data max (always
+// keeping that top tick, so the axis never stops meaningfully short of —
+// or floats far above — the real peak) — this is what fixes the
+// ₱100K-straight-to-₱2M jump. The old version sampled evenly-spaced
+// points in log1p space and rounded each independently to a coarse 1/2/5
+// step, which for a ~₱2M max happened to round its two highest sample
+// points to exactly ₱100K and ₱2M with nothing landing in between.
+// Sampling from the lattice instead guarantees intermediate nice values
+// (₱200K/₱300K/₱500K/₱1M/etc.) always appear when the range spans them.
+function computeDisplayTicks(maxRawValue, targetCount = 6) {
+  if (maxRawValue <= 0) return [0];
+  const topTick = niceRound(maxRawValue);
+  const candidates = niceTickCandidates(topTick);
+  const lastIdx = candidates.length - 1;
+  const picked = new Set([topTick]);
+  for (let i = 0; i < targetCount; i++) {
+    const idx = Math.round((i / Math.max(targetCount - 1, 1)) * lastIdx);
+    picked.add(candidates[idx]);
+  }
+  return [0, ...[...picked].sort((a, b) => a - b)];
 }
 
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
 // period total (see api/overview.js's BID TREND query comments: each row
 // is genuinely that one calendar day, distinct bidder counts within it).
-function DailyTooltip({ active, payload }) {
+function DailyTooltip({ active, payload, bucketLabel }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   const p = d.participating;
@@ -64,7 +138,7 @@ function DailyTooltip({ active, payload }) {
 
   return (
     <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[260px]">
-      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatDayLabel(d.bucket)}</div>
+      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatTooltipLabel(d.bucket, bucketLabel)}</div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2.5 pb-2.5 border-b border-gridline">
         <div>
@@ -109,34 +183,34 @@ function DailyTooltip({ active, payload }) {
 // calendar day's SETTLED value (never cumulative), so real day-to-day
 // fluctuation is visible. Hovering shows that day's complete snapshot —
 // see DailyTooltip above.
-export default function BidTrendChart({ data, rangeLabel, action }) {
+export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, action }) {
   const palette = usePalette();
 
-  // Thin out rendered X-axis TICKS only (not the underlying hoverable
-  // data) once a range gets visually dense — e.g. a Year to Date range
-  // with ~250+ trading-style days shouldn't print an unreadable label for
-  // every single point, but every point stays hoverable and every day is
-  // still plotted (the date filter controls the RANGE, chart width only
-  // controls LABEL density — see api/overview.js's zero-fill comment for
-  // why the underlying daily grain never changes with range length).
-  // Recharts' numeric `interval` skips that many ticks between renders
-  // (0 = every tick), so these targets are picked to land near the
-  // day-count bands below, then minTickGap does final collision cleanup.
-  const days = data.length;
-  const tickInterval =
-    days <= 7 ? 0 : // label every day
-    days <= 31 ? 3 : // ~every 4 days
-    days <= 90 ? 6 : // ~weekly
-    days <= 180 ? 13 : // ~every 2 weeks
-    29; // sparse, ~month boundaries
+  // Bucket grain (day/week/month) follows the selected dashboard date
+  // preset — see api/overview.js's BID TREND comment and
+  // api/_bucketing.js's pickBucketGrain. Every bucket in range is a real
+  // row (zero-filled server-side), so the X-axis always shows EVERY
+  // day/week/month — no tick-skipping — matching the requirement that a
+  // Month to Date view never gets thinned down to weekly-looking ticks.
+  const monthCrossesYears = bucketLabel === "month" && new Set(data.map((d) => bucketYear(d.bucket))).size > 1;
+
+  // Once a daily-grain range gets visually dense (Custom ranges up to 31
+  // days, or a near-end-of-month MTD), shrink the tick font and rotate
+  // labels rather than hiding any date — every bucket must stay labeled.
+  const isDenseDaily = bucketLabel === "day" && data.length > 20;
+  const xAxisFontSize = isDenseDaily ? 9.5 : 11;
+  const xAxisAngle = isDenseDaily ? -40 : 0;
+  const xAxisTextAnchor = isDenseDaily ? "end" : "middle";
+  const xAxisHeight = isDenseDaily ? 40 : 24;
 
   const maxBidAmount = data.reduce((max, d) => Math.max(max, d.bid_amount || 0), 0);
   const displayTicks = computeDisplayTicks(maxBidAmount).map(toDisplayY);
   const displayDomainMax = maxBidAmount > 0 ? toDisplayY(maxBidAmount) * 1.08 : 1;
 
+  const grainWord = bucketLabel === "month" ? "Monthly" : bucketLabel === "week" ? "Weekly" : "Daily";
   const subtitle = (
     <span className="inline-flex items-center gap-1.5 flex-wrap">
-      <span>Daily settled (Paid & Released) hammer value</span>
+      <span>{grainWord} settled (Paid & Released) hammer value</span>
       <span className="relative inline-flex items-center group/tip">
         <span className="text-[12px] font-semibold text-muted border border-gridline rounded px-1.5 py-0.5 cursor-default">
           Adjusted scale
@@ -174,12 +248,15 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
                 dataKey="bucket"
                 type="category"
                 padding={{ left: 0, right: 0 }}
-                tickFormatter={formatDayLabel}
-                interval={tickInterval}
-                tick={{ fill: palette.muted, fontSize: 11 }}
+                tickFormatter={(bucket) => formatAxisLabel(bucket, bucketLabel, monthCrossesYears)}
+                interval={0}
+                angle={xAxisAngle}
+                textAnchor={xAxisTextAnchor}
+                height={xAxisHeight}
+                tick={{ fill: palette.muted, fontSize: xAxisFontSize }}
                 axisLine={{ stroke: palette.gridline }}
                 tickLine={false}
-                minTickGap={20}
+                minTickGap={0}
               />
               <YAxis
                 type="number"
@@ -196,7 +273,7 @@ export default function BidTrendChart({ data, rangeLabel, action }) {
                 width={56}
                 allowDataOverflow={false}
               />
-              <Tooltip content={<DailyTooltip />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }} />
+              <Tooltip content={<DailyTooltip bucketLabel={bucketLabel} />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }} />
               <Area
                 type="linear"
                 // Y-POSITION ONLY — Recharts' Tooltip `payload` always

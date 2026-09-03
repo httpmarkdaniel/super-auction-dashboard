@@ -110,25 +110,6 @@ function winningMaxBidQuery(groupByEntity) {
   `;
 }
 
-// Every "YYYY-MM-DD" calendar day from fromStr through toStr inclusive.
-// Pure UTC calendar-part arithmetic (not local Date math), so this is
-// correct regardless of the server process's own timezone and never
-// double-counts/skips a day across a DST-less UTC day boundary.
-function enumerateCalendarDays(fromStr, toStr) {
-  const [fy, fm, fd] = fromStr.split("-").map(Number);
-  const [ty, tm, td] = toStr.split("-").map(Number);
-  const end = Date.UTC(ty, tm - 1, td);
-  const days = [];
-  for (let t = Date.UTC(fy, fm - 1, fd); t <= end; t += 86400000) {
-    const d = new Date(t);
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(d.getUTCDate()).padStart(2, "0");
-    days.push(`${y}-${m}-${day}`);
-  }
-  return days;
-}
-
 // STATUS_PRIORITY_SQL / APPROVAL_PRIORITY_SQL now live in ./_lotStatus.js
 // (shared with api/leaderboards.js's Vendor Analytics all-lots aggregate)
 // — same definitions, imported above, not redefined here.
@@ -143,7 +124,7 @@ const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "", category = "", type = "summary", compareFrom = "", compareTo = "" } = req.query;
+    const { from, to, store = "", category = "", type = "summary", compareFrom = "", compareTo = "", preset = "" } = req.query;
 
     if (type === "active-auctions") {
       const result = await client.query({
@@ -1706,11 +1687,24 @@ export default async function handler(req, res) {
     const avgPremiumOverReservePct = aboveReserveBase > 0 ? (aboveReserveExcess / aboveReserveBase) * 100 : 0;
 
     // ---------------------------------------------------------
-    // BID TREND — always daily, one point per calendar day in range.
+    // BID TREND — bucket grain follows the selected dashboard date preset
+    // (WTD/MTD always daily, YTD always monthly, Custom span-based) — see
+    // api/_bucketing.js's pickBucketGrain. Frontend and backend agree via
+    // the same `preset` query param already used by bidder/vendor-time-
+    // series. bucketExpr wraps whichever ClickHouse bucket function this
+    // resolves to (toStartOfDay/toMonday/toStartOfMonth), applied to the
+    // auction's own ending_time — the grain changed, not the "bucket by
+    // ending_time, never starting_time" cohort rule below.
+    // ---------------------------------------------------------
+    const { fn: bidTrendBucketFn, label: bidTrendBucketLabel } = pickBucketGrain(preset, from, to);
+    const bidTrendBucketExpr = (col) => `${bidTrendBucketFn}(${col}, 'Asia/Manila')`;
+
+    // ---------------------------------------------------------
+    // BID TREND
     //
     // WINNING side: same settled_lots population as Total Bid Amount,
-    // bucketed by the auction's own ending_time day — an auction belongs
-    // to the day (and therefore period) it ENDS in, never split across
+    // bucketed by the auction's own ending_time day/week/month — an
+    // auction belongs to the period it ENDS in, never split across
     // days/months by when it started (see the ENDING_TIME COHORT task;
     // same scoping convention as every other settled query in this file).
     // Identity resolved through the SAME canonical bridge as Bidder
@@ -1768,7 +1762,7 @@ export default async function handler(req, res) {
           -- by the server's default timezone instead, causing a real
           -- 1-day mismatch against Participating for an auction ending
           -- near local midnight (confirmed during this task's validation).
-          toDate(sl.auction_ending_time, 'Asia/Manila') AS bucket,
+          ${bidTrendBucketExpr("sl.auction_ending_time")} AS bucket,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
           countDistinct(sl.auction_number) AS auctions_concluded,
           count() AS lots_sold,
@@ -1869,7 +1863,7 @@ export default async function handler(req, res) {
         -- would double-count their bid_amount).
         auction_bidder_activity AS (
           SELECT
-            toDate(s.auction_ending_time, 'Asia/Manila') AS bucket,
+            ${bidTrendBucketExpr("s.auction_ending_time")} AS bucket,
             lowerUTF8(trim(b.email)) AS bidder_key,
             sum(b.bid_amount) AS bidder_amount
 
@@ -1906,7 +1900,7 @@ export default async function handler(req, res) {
         winning_bidder_activity AS (
           SELECT DISTINCT
             sl.auction_number AS auction_number,
-            toDate(s.auction_ending_time, 'Asia/Manila') AS bucket,
+            ${bidTrendBucketExpr("s.auction_ending_time")} AS bucket,
             rli.resolved_email AS bidder_key
           FROM settled_lots sl
           INNER JOIN selected_auctions s ON sl.auction_number = s.auction_number
@@ -1977,7 +1971,7 @@ export default async function handler(req, res) {
       return bidTrendByBucket.get(key);
     }
     for (const row of bidTrendWinningRows) {
-      const b = bidTrendBucket(row.bucket);
+      const b = bidTrendBucket(normalizeBucketKey(row.bucket));
       b.bid_amount = Number(row.bid_amount ?? 0);
       b.auctions_concluded = Number(row.auctions_concluded ?? 0);
       b.lots_sold = Number(row.lots_sold ?? 0);
@@ -1987,25 +1981,24 @@ export default async function handler(req, res) {
       b.winning_returning_amount = Number(row.winning_returning_amount ?? 0);
     }
     for (const row of bidTrendParticipatingRows) {
-      const b = bidTrendBucket(row.bucket);
+      const b = bidTrendBucket(normalizeBucketKey(row.bucket));
       b.participating_new = Number(row.participating_new ?? 0);
       b.participating_returning = Number(row.participating_returning ?? 0);
       b.participating_new_amount = Number(row.participating_new_amount ?? 0);
       b.participating_returning_amount = Number(row.participating_returning_amount ?? 0);
     }
 
-    // Zero-fill: the chart must contain every calendar day in the selected
-    // range, not just the days ClickHouse happened to return a row for —
-    // otherwise a real zero-activity day (e.g. Aug 21-22) gets silently
-    // skipped and the line falsely connects Aug 20 straight to Aug 23,
-    // hiding the drop to zero. bidTrendBucket() is idempotent (only
-    // creates a zero-value entry if the key isn't already present), so
-    // calling it for every day in [from, to] after the two result sets are
-    // merged just fills the gaps without touching real data. Pure UTC
-    // calendar-part arithmetic (not local Date math) so this is correct
-    // regardless of the server process's own timezone.
-    for (const day of enumerateCalendarDays(from, to)) {
-      bidTrendBucket(day);
+    // Zero-fill: the chart must contain every day/week/month bucket in the
+    // selected range at the grain resolved above, not just the buckets
+    // ClickHouse happened to return a row for — otherwise a real
+    // zero-activity bucket (e.g. Aug 21-22) gets silently skipped and the
+    // line falsely connects Aug 20 straight to Aug 23, hiding the drop to
+    // zero. bidTrendBucket() is idempotent (only creates a zero-value
+    // entry if the key isn't already present), so calling it for every
+    // enumerated bucket after the two result sets are merged just fills
+    // the gaps without touching real data.
+    for (const bucket of enumerateBuckets(bidTrendBucketLabel, from, to)) {
+      bidTrendBucket(bucket);
     }
 
     const bidTrendRows = [...bidTrendByBucket.values()].sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
@@ -4320,8 +4313,10 @@ export default async function handler(req, res) {
         settled_lot_count: Number(row.settled_lot_count ?? 0),
       })),
 
-      // Bid Trend — always daily, each row is that single day only (never
-      // a cumulative/period total) — see BID TREND query comments above.
+      // Bid Trend — bucket grain follows the selected preset (see BID
+      // TREND query comments above); each row is that single bucket only
+      // (never a cumulative/period total).
+      bid_trend_bucket_label: bidTrendBucketLabel,
       bid_trend: bidTrendRows.map((row) => ({
         bucket: row.bucket,
         bid_amount: row.bid_amount,

@@ -1029,6 +1029,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     avgBidCategoryBreakdown,
 
     bidTrend: kpis.bid_trend || [],
+    bidTrendBucketLabel: kpis.bid_trend_bucket_label || "day",
 
     // Per-bidder drilldown behind the Avg Bids / Unique Bidder scorecard —
     // see api/overview.js's AVG BIDS / UNIQUE BIDDER query comment.
@@ -1197,7 +1198,7 @@ function OverviewTab({
         insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
       >
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px] gap-4 items-stretch">
-          <BidTrendChart data={overview.bidTrend} rangeLabel={rangeLabel} />
+          <BidTrendChart data={overview.bidTrend} bucketLabel={overview.bidTrendBucketLabel} rangeLabel={rangeLabel} />
           <div className="flex flex-col gap-3">
             <LiveMiniCard
               label="Today's Bid"

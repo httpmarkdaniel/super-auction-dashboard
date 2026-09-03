@@ -70,6 +70,11 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
         // this can never change any other Overview figure.
         const { from: compareFrom, to: compareTo } = resolveComparisonRange(dateRangeKey);
 
+        // Drives Bid Trend's bucket grain (WTD/MTD daily, YTD monthly,
+        // Custom span-based) — see api/overview.js's BID TREND comment and
+        // api/_bucketing.js's pickBucketGrain.
+        const preset = typeof dateRangeKey === "string" ? dateRangeKey : "custom";
+
         // Four of the six overview `type=` variants that used to fire here
         // every 30s (settled-lots, unsold-lots, active-auctions,
         // for-approval) fed row-level arrays that no live component reads —
@@ -85,7 +90,7 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
         // Topbar search bar) and `type=service-income` (Service Income
         // drilldown) are actually consumed, so those two remain.
         const [liveOverview, liveLeaderboards, lotsResult, serviceIncomeResult] = await Promise.all([
-          fetchJson("/api/overview", { from, to, store, category, compareFrom, compareTo }),
+          fetchJson("/api/overview", { from, to, store, category, compareFrom, compareTo, preset }),
           fetchJson("/api/leaderboards", { from, to, store, category }),
 
           // LOTS SOLD / LISTED DRILLDOWN + operationsDetail/search
@@ -171,6 +176,7 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               // comments.
               auction_summary: liveOverview.auction_summary ?? [],
               bid_trend: liveOverview.bid_trend ?? [],
+              bid_trend_bucket_label: liveOverview.bid_trend_bucket_label ?? "day",
 
               // Registration -> Bidder Conversion — see api/overview.js's
               // REGISTRATION -> BIDDER CONVERSION query comment.
