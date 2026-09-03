@@ -1336,7 +1336,7 @@ function OverviewTab({
           </div>
 
           {/* RIGHT: WON VIA — MAX BID VS. REGULAR BID (PART 9) */}
-          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4">
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-3">Won Via — Max Bid vs. Regular Bid</div>
             {(() => {
               const wmb = overview.winningMaxBid;
