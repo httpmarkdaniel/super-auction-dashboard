@@ -173,9 +173,13 @@ function unpaidOutstandingAgingFlags(opsFlags) {
   const flags = [];
   for (const a of opsFlags?.auctions ?? []) {
     if (a.days_since_ended < 3) continue;
-    const meetsBase = a.unpaid_outstanding_value >= 50000 || a.unpaid_outstanding_count >= 5;
-    if (!meetsBase) continue;
-    const severity = a.days_since_ended >= 7 && a.unpaid_outstanding_value >= 100000 ? "HIGH" : "MEDIUM";
+    // Value-gated only — a lot COUNT on its own says nothing about
+    // materiality (validated against real data: 5 lots totaling ₱147 is
+    // not a collections problem worth flagging, even though it would
+    // have passed a naive "count >= 5" OR-branch tried during
+    // calibration).
+    if (a.unpaid_outstanding_value < 50000) continue;
+    const severity = a.unpaid_outstanding_value >= 200000 ? "HIGH" : "MEDIUM";
     flags.push({
       id: `unpaid_outstanding_aging:${a.auction_number}`,
       type: "unpaid_outstanding_aging",
@@ -189,12 +193,12 @@ function unpaidOutstandingAgingFlags(opsFlags) {
       branch: a.store_name,
       metricLabel: "Unpaid/Outstanding value",
       metricValue: formatPeso(a.unpaid_outstanding_value),
-      thresholdLabel: ">= ₱50,000 or >= 5 lots, ended >= 3 days ago",
+      thresholdLabel: ">= ₱50,000, ended >= 3 days ago",
       scope: "period",
       rule: "Unpaid/Outstanding Settlement Aging",
       ruleDetail: {
         current: `${formatPeso(a.unpaid_outstanding_value)} across ${a.unpaid_outstanding_count} lot(s), ${a.days_since_ended} days since auction end`,
-        threshold: "HIGH: ended >= 7d ago AND value >= ₱100,000. MEDIUM: ended >= 3d ago AND (value >= ₱50,000 or count >= 5)",
+        threshold: "HIGH >= ₱200,000, MEDIUM >= ₱50,000, both require the auction to have ended >= 3 days ago",
       },
       relevantDate: a.ending_time,
     });
