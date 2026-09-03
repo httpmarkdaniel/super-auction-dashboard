@@ -43,7 +43,7 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
         insight={`Vendor consignment activity for auctions ending in the selected period (${rangeLabel}).`}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.7fr_1fr_1fr] gap-4">
-          <div className="relative text-left bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4 border-t-[3px] border-t-series8">
+          <div className="relative text-left bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5">
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Top-5 Vendor Concentration</div>
             <div className="font-display text-[40px] leading-none text-ink mb-2">
               {va.top5_vendor_concentration_pct != null ? `${va.top5_vendor_concentration_pct.toFixed(1)}%` : "—"}
@@ -55,14 +55,14 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
               Top 5 of {va.active_vendors ?? 0} active vendors
             </div>
           </div>
-          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5">
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Active Vendors</div>
-            <div className="font-display text-[30px] leading-none text-ink">{va.active_vendors ?? 0}</div>
+            <div className="font-display text-[36.5px] leading-none text-ink">{va.active_vendors ?? 0}</div>
             <div className="text-[12.5px] text-muted mt-2">Distinct vendors with lot activity, {rangeLabel}</div>
           </div>
-          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5">
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">New Vendors</div>
-            <div className="font-display text-[30px] leading-none text-ink">{va.new_vendors ?? 0}</div>
+            <div className="font-display text-[36.5px] leading-none text-ink">{va.new_vendors ?? 0}</div>
             <div className="text-[12.5px] text-muted mt-2">First recorded consignment in this period</div>
           </div>
         </div>

@@ -37,20 +37,22 @@ function DeltaRow({ pct, label }) {
 }
 
 // Restrained executive-BI card shell shared by all four Headline
-// Performance cards — same shell (radius/shadow/padding) as StatTile,
-// the KPI-card primitive used everywhere else in the dashboard, so this
-// row reads as part of one system rather than a one-off variant. A
-// single-pixel warm accent is reserved for the hero card; no gradient/
-// pill treatment.
-function HeadlineCard({ eyebrow, hero, onClick, methodology, children }) {
+// Performance cards — same shell (radius/shadow/padding/orange top
+// accent) as StatTile, the KPI-card primitive used everywhere else in
+// the dashboard, so every scorecard in this row (and the rest of the
+// app) reads as one consistent family. Total Bid Amount stays the
+// visual hero via its larger grid column and value font size (set by
+// the caller), not via an accent color exclusive to it — no gradient/
+// pill treatment either way.
+function HeadlineCard({ eyebrow, onClick, methodology, children }) {
   const Wrapper = onClick ? "button" : "div";
   return (
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`relative text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip ${
-        hero ? "border-t-[3px] border-t-series8" : ""
-      } ${onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""}`}
+      className={`relative text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip ${
+        onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""
+      }`}
     >
       <div className="flex items-center gap-1.5 mb-2">
         <span className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold">{eyebrow}</span>
@@ -189,7 +191,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
           4-card row (PART 2). */}
       <div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip">
+          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip">
             <div className="flex items-center gap-1.5 mb-2.5">
               <span className="kpi-label">Registration → Bidder</span>
               <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
@@ -216,6 +218,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             </div>
           </div>
           <StatTile
+            accent
             eyebrow="Service Income"
             value={formatPeso(heroKPIs.serviceIncome)}
             sub="HMR revenue · Paid & Released"

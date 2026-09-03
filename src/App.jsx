@@ -1271,6 +1271,7 @@ function OverviewTab({
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <StatTile
+            accent
             eyebrow="Avg Bids / Unique Bidder"
             value={overview.heroKPIs.avgBidsPerUniqueBidder != null ? overview.heroKPIs.avgBidsPerUniqueBidder.toFixed(2) : "—"}
             sub={
@@ -1282,6 +1283,7 @@ function OverviewTab({
             onClick={() => setAvgBidsOpen(true)}
           />
           <StatTile
+            accent
             eyebrow="Winning Bids via Max Bid"
             value={overview.winningMaxBid.maxBidWinPct != null ? `${overview.winningMaxBid.maxBidWinPct.toFixed(1)}%` : "—"}
             sub={`${overview.winningMaxBid.maxBidWins.toLocaleString()} of ${(overview.winningMaxBid.maxBidWins + overview.winningMaxBid.normalBidWins).toLocaleString()} winning bids`}
@@ -1292,7 +1294,7 @@ function OverviewTab({
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
           {/* LEFT: WINNING BIDDERS panel (PART 8) */}
-          <div className="bg-surface1 border border-gridline rounded-md px-4 pt-3.5 pb-4">
+          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4">
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
             <div className="flex items-baseline gap-2 mb-2.5">
               <div className="font-display text-[28px] leading-none text-ink">

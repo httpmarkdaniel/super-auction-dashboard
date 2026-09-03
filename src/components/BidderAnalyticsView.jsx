@@ -51,18 +51,21 @@ export default function BidderAnalyticsView({ dateRange, store, category, rangeL
       >
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatTile
+            accent
             eyebrow={`Participating Bidders · ${rangeLabel}`}
             value={participatingTotal}
             methodology="Real bid-history participants union resolved winning bidders, deduplicated by canonical identity — the same population as Bidder Composition."
             extraDeltas={overview.comparison && participatingPct != null ? [{ label: "vs previous period", pct: participatingPct }] : []}
           />
           <StatTile
+            accent
             eyebrow={`New Bidders · ${rangeLabel}`}
             value={newBidders}
             sub={participatingTotal > 0 ? `${((newBidders / participatingTotal) * 100).toFixed(1)}% of participating` : undefined}
             methodology="Canonical bidders whose first-ever real bid or resolved win falls on/after this period's start."
           />
           <StatTile
+            accent
             eyebrow="Always Active"
             value={alwaysActive != null ? alwaysActive : "—"}
             sub={
@@ -73,6 +76,7 @@ export default function BidderAnalyticsView({ dateRange, store, category, rangeL
             methodology="Bidders present in EVERY time bucket across the selected range. Not meaningful for a range with only one bucket."
           />
           <StatTile
+            accent
             eyebrow="Went Quiet"
             value={wentQuiet != null ? wentQuiet : "—"}
             sub={bidderAnalytics.classification_applicable ? `Not active in the latest ${bidderAnalytics.bucket_label}` : "Range too short for period classification"}

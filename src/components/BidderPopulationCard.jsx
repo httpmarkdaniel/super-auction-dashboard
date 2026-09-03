@@ -19,7 +19,7 @@ export default function BidderPopulationCard({ title, total, newCount, returning
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`border border-gridline rounded-lg p-4 bg-plane w-full text-left ${
+      className={`bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 w-full text-left ${
         onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""
       }`}
     >

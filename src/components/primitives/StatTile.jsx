@@ -22,7 +22,13 @@ const PILL_TONE = {
   critical: "bg-toneRedBg text-toneRedText",
 };
 
-export default function StatTile({ eyebrow, value, delta, invert, sub, live, icon, pill, sparkline, methodology, onClick, extraDeltas }) {
+// `accent` — the thin orange top border established by Total Bid Amount
+// (see HeroKPIs' HeadlineCard, same series8 token), opt-in per call site
+// so it's reserved for genuine KPI/scorecard usages of this shared
+// primitive (Overview/Bidder Composition/Bidder/Vendor Analytics) and
+// never blanket-applied to StatTile's many other, non-scorecard uses
+// elsewhere in the app (per-category/per-type/per-store stat chips etc).
+export default function StatTile({ eyebrow, value, delta, invert, sub, live, icon, pill, sparkline, methodology, onClick, extraDeltas, accent }) {
   const Wrapper = onClick ? "button" : "div";
   const hasTip = Boolean(methodology);
   return (
@@ -30,8 +36,8 @@ export default function StatTile({ eyebrow, value, delta, invert, sub, live, ico
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={`relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 flex-1 min-w-[180px] text-left w-full ${
-        hasTip ? "group/tip" : ""
-      } ${onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""}`}
+        accent ? "border-t-[3px] border-t-series8" : ""
+      } ${hasTip ? "group/tip" : ""} ${onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""}`}
     >
       <div className="flex items-start justify-between gap-2 mb-2.5">
         <div className="flex items-center gap-1.5 min-w-0">

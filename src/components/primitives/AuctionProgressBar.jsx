@@ -311,9 +311,12 @@ export default function AuctionProgressBar({
             subtle tint) so elapsed auction time reads at a glance without
             hovering or reading any label. The Current dot sits exactly at
             this same width%, so fill edge and marker can never
-            misalign. */}
+            misalign. Orange (series8) — the dashboard's established accent
+            color, same token as HeroKPIs' hero top-accent — not navy, so
+            the fill is visually distinct from the navy Current dot/
+            milestone markers sitting on top of it. */}
         <div
-          className="absolute top-0 left-0 h-full rounded-full bg-series1 transition-[width]"
+          className="absolute top-0 left-0 h-full rounded-full bg-series8 transition-[width]"
           style={{ width: `${nowPct}%` }}
         />
 
