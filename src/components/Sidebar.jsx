@@ -66,8 +66,14 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
           <NavItem label="Full Auction Detail" active={active === "Full Auction Detail"} onClick={() => go("Full Auction Detail")} />
           <NavItem label="Bidder Analytics" active={active === "Bidder Analytics"} onClick={() => go("Bidder Analytics")} />
           <NavItem label="Vendor Analytics" active={active === "Vendor Analytics"} onClick={() => go("Vendor Analytics")} />
-          <NavItem label="Bidding Pace" active={active === "Bidding Pace"} onClick={() => go("Bidding Pace")} />
-          <NavItem label="Revenue Breakdown" active={active === "Revenue Breakdown"} onClick={() => go("Revenue Breakdown")} />
+          {/* Bidding Pace — removed as a standalone destination; its content
+              now lives at the top of Bidder Analytics (see
+              BidderAnalyticsView.jsx). The route/component itself is
+              untouched, just no longer reachable via this nav item. */}
+          {/* Revenue Breakdown — hidden from navigation only (not deleted);
+              its route, component, and data logic below are fully intact
+              for an easy restore, they're just unreachable without this
+              nav item. */}
           <NavItem label="Vendor Payables" active={active === "Vendor Payables"} onClick={() => go("Vendor Payables")} />
         </NavGroup>
 

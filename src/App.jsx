@@ -23,7 +23,6 @@ import AuctionTypeView from "./components/AuctionTypeView";
 import StoreView from "./components/StoreView";
 import PayablesView from "./components/PayablesView";
 import FullAuctionDetailView from "./components/FullAuctionDetailView";
-import BiddingPaceView from "./components/BiddingPaceView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import BidderAnalyticsView from "./components/BidderAnalyticsView";
 import VendorAnalyticsView from "./components/VendorAnalyticsView";
@@ -1750,15 +1749,6 @@ export default function App() {
             />
           )}
 
-          {tab === "Bidding Pace" && (
-            <BiddingPaceView
-              store={store}
-              dateRange={dateRange}
-              rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
-            />
-          )}
-
           {tab === "Revenue Breakdown" && (
             <RevenueBreakdownView
               store={store}
@@ -1772,6 +1762,7 @@ export default function App() {
             <BidderAnalyticsView
               dateRange={dateRange}
               store={store === ALL_STORES ? undefined : store}
+              biddingPaceStore={store}
               category={overviewCategory}
               rangeLabel={rangeLabel}
               refreshNonce={refreshNonce}

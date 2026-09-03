@@ -3,6 +3,7 @@ import StorySection from "./primitives/StorySection";
 import StatTile from "./primitives/StatTile";
 import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
+import BiddingPaceView from "./BiddingPaceView";
 import { formatPeso } from "../utils/format";
 
 // BIDDER ANALYTICS — fully dynamic to the selected Date/Store/Category
@@ -10,7 +11,18 @@ import { formatPeso } from "../utils/format";
 // analytics only; Today/live bidder activity stays under Auction Events /
 // Live Now on Overview (see App.jsx's LiveMiniCard footer) — never mixed
 // in here.
-export default function BidderAnalyticsView({ dateRange, store, category, rangeLabel, refreshNonce }) {
+//
+// Bidding Pace lives at the top of this tab (relocated from its own
+// former standalone sidebar destination — see Sidebar.jsx) as the FIRST
+// section, using the SAME dateRange/rangeLabel/refreshNonce this view
+// already receives — no separate filter controls, no second fetch path.
+// `biddingPaceStore` is the raw (pre-ALL_STORES-normalized) store value:
+// useBiddingPace/BiddingPaceView already do their own ALL_STORES
+// normalization internally and use the raw value for display text, so
+// this is passed through as-is rather than this view's own normalized
+// `store` prop (which would render "undefined" in that display text when
+// All Stores is selected).
+export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore, category, rangeLabel, refreshNonce }) {
   const { data, loading, error } = useBidderAnalytics(dateRange, store, category, refreshNonce);
 
   if (error) {
@@ -45,6 +57,10 @@ export default function BidderAnalyticsView({ dateRange, store, category, rangeL
 
   return (
     <div>
+      <StorySection title="Bidding Pace">
+        <BiddingPaceView store={biddingPaceStore} dateRange={dateRange} rangeLabel={rangeLabel} refreshNonce={refreshNonce} />
+      </StorySection>
+
       <StorySection
         title="Bidder Analytics"
         insight={`Historical bidder engagement for auctions ending in the selected period (${rangeLabel}) — real bid-history participants union resolved winning bidders, the same canonical population as Bidder Composition.`}
