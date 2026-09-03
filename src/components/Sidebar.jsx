@@ -57,6 +57,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
 
         <NavGroup label="Dashboard">
           <NavItem label="Overview" active={active === "Overview"} onClick={() => go("Overview")} />
+          <NavItem label="Operational Flags" active={active === "Operational Flags"} onClick={() => go("Operational Flags")} />
           <NavItem label="Active Auctions" active={active === "Online Bidding"} onClick={() => go("Online Bidding")} />
           <NavItem
             label="Upcoming Auctions"

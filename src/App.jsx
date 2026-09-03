@@ -26,6 +26,7 @@ import FullAuctionDetailView from "./components/FullAuctionDetailView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import BidderAnalyticsView from "./components/BidderAnalyticsView";
 import VendorAnalyticsView from "./components/VendorAnalyticsView";
+import OperationalFlagsView from "./components/OperationalFlagsView";
 import BranchPerformanceTable from "./components/BranchPerformanceTable";
 import AuctionMixPanel from "./components/AuctionMixPanel";
 import { buildStoryline } from "./insights";
@@ -1454,6 +1455,7 @@ function OverviewTab({
 
 const TITLES = {
   Overview: "Overview",
+  "Operational Flags": "Operational Flags",
   "Online Bidding": "Online Bidding",
   "Upcoming Auctions": "Upcoming Auctions",
   Trends: "Yearly Trends",
@@ -1775,6 +1777,16 @@ export default function App() {
               dateRange={dateRange}
               rangeLabel={rangeLabel}
               refreshNonce={refreshNonce}
+            />
+          )}
+
+          {tab === "Operational Flags" && (
+            <OperationalFlagsView
+              dateRange={dateRange}
+              store={store === ALL_STORES ? undefined : store}
+              category={overviewCategory}
+              rangeLabel={rangeLabel}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 

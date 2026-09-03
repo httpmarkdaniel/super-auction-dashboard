@@ -1041,6 +1041,176 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
+    // OPERATIONAL FLAGS (type=operational-flags) — raw per-auction and
+    // live data-health aggregates ONLY. Deliberately dumb: this endpoint
+    // does not decide severities/thresholds/departments — that logic
+    // lives entirely in src/utils/operationalFlags.js on the frontend
+    // (one auditable module, easy for a non-engineer to read top to
+    // bottom) so this handler just supplies the numbers.
+    //
+    // Three independent, light queries (none touch BIDDER_IDENTITY_CTES,
+    // so no need for the heavy-query serialization discipline used
+    // elsewhere in this file) run concurrently:
+    //
+    // 1) Per-auction aggregates for the selected ending_time cohort,
+    //    reusing the EXACT same selected_auctions/STATUS_PRIORITY_SQL/
+    //    CATEGORY_CLASSIFICATION_SQL conventions as the AUCTION-LEVEL
+    //    SUMMARY query above (never a new classifier): lots_listed/
+    //    lots_sold (sell-through), unsold_reserve_value (Unsold lots'
+    //    reserved_price, same "reserve" field the Reserve Price
+    //    Performance query above already uses), unpaid_outstanding_value/
+    //    _count (Sold-but-not-yet-paid: 'Outstanding'/'Unpaid' — a "sold"
+    //    sub-status per the same Sold definition used dashboard-wide, NOT
+    //    the same as "Unsold"), and missing_name_count (item_name null/
+    //    blank — the one genuinely-detectable cataloging gap; category
+    //    itself can never be "missing" since CATEGORY_CLASSIFICATION_SQL
+    //    always resolves to a real value via its ELSE branch).
+    //
+    // 2) Global bid-history freshness: MAX(bid_created_at) across the
+    //    whole warehouse table, deliberately NOT scoped by from/to/store —
+    //    freshness is a pipeline-health question, not a historical-period
+    //    one (see the OPERATIONAL FLAGS section of the frontend module for
+    //    why this must never be filtered like a historical query).
+    //
+    // 3) A live active-auctions count — the exact same starting_time<=now()
+    //    AND ending_time>=now() predicate as the existing type=active-
+    //    auctions branch above, unscoped by store (freshness is evaluated
+    //    only when at least one auction is genuinely open right now,
+    //    dashboard-wide, matching the requirement that this be an
+    //    inherently live/global check, not filtered like a period one).
+    // =========================================================
+    if (type === "operational-flags") {
+      const opsFlagsParams = { from, to, store, category };
+
+      const [auctionAggResult, freshnessResult, activeCountResult] = await Promise.all([
+        client.query({
+          query: `
+            WITH selected_auctions AS (
+              SELECT
+                auction_number,
+                any(name) AS auction_name,
+                any(store_name) AS auction_store_name,
+                any(ending_time) AS auction_ending_time
+              FROM xv3.mart_auction_productivity_report
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+                AND ({store:String} = '' OR store_name = {store:String})
+              GROUP BY auction_number
+            ),
+
+            auction_type AS (
+              SELECT auction_number, any(type) AS auction_type
+              FROM xv3.auctions
+              WHERE auction_number IS NOT NULL
+              GROUP BY auction_number
+            ),
+
+            lots AS (
+              SELECT
+                v.auction_number AS auction_number,
+                v.lot_number AS lot_number,
+                argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+                any(ifNull(v.bid_amount, 0)) AS bid_amount,
+                max(ifNull(v.reserved_price, 0)) AS reserved_price,
+                any(v.name) AS item_name,
+                any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+              FROM xv3.mart_auction_vendor_analysis v
+
+              INNER JOIN selected_auctions a
+                ON v.auction_number = a.auction_number
+
+              WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+
+              GROUP BY v.auction_number, v.lot_number
+
+              HAVING ({category:String} = '' OR lot_category = {category:String})
+            )
+
+            SELECT
+              l.auction_number AS auction_number,
+              any(a.auction_name) AS name,
+              any(a.auction_store_name) AS store_name,
+              any(a.auction_ending_time) AS ending_time,
+              any(at.auction_type) AS type,
+              -- Computed in ClickHouse for the same naive-Manila-clock
+              -- reason as minutes_since_latest_bid above — never a JS-side
+              -- timezone diff.
+              dateDiff('day', any(a.auction_ending_time), now('Asia/Manila')) AS days_since_ended,
+
+              count() AS lots_listed,
+              countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
+              sumIf(reserved_price, status = 'Unsold') AS unsold_reserve_value,
+              sumIf(bid_amount, status IN ('Outstanding', 'Unpaid')) AS unpaid_outstanding_value,
+              countIf(status IN ('Outstanding', 'Unpaid')) AS unpaid_outstanding_count,
+              countIf(item_name IS NULL OR trim(item_name) = '') AS missing_name_count
+
+            FROM lots l
+
+            INNER JOIN selected_auctions a
+              ON l.auction_number = a.auction_number
+
+            LEFT JOIN auction_type at
+              ON l.auction_number = at.auction_number
+
+            GROUP BY l.auction_number
+          `,
+          query_params: opsFlagsParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            SELECT
+              max(bid_created_at) AS latest_bid_at,
+              -- Computed here (not in JS) specifically to avoid any
+              -- naive-vs-Manila-local timestamp ambiguity: bid_created_at
+              -- is stored the same "Asia/Manila wall-clock, no offset"
+              -- way as every other timestamp column in this codebase, so
+              -- diffing it against now('Asia/Manila') inside ClickHouse
+              -- (both on the same clock) is the only way to get a
+              -- trustworthy elapsed duration.
+              dateDiff('minute', max(bid_created_at), now('Asia/Manila')) AS minutes_since_latest_bid
+            FROM cms.mart_cms_bid_history_report
+          `,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            SELECT count() AS active_count
+            FROM xv3.mart_auction_productivity_report
+            WHERE starting_time <= now() AND ending_time >= now()
+          `,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const auctionAggRows = await auctionAggResult.json();
+      const freshnessRows = await freshnessResult.json();
+      const activeCountRows = await activeCountResult.json();
+
+      return res.status(200).json({
+        type: "operational-flags",
+        latest_bid_at: freshnessRows[0]?.latest_bid_at ?? null,
+        minutes_since_latest_bid: freshnessRows[0]?.minutes_since_latest_bid != null ? Number(freshnessRows[0].minutes_since_latest_bid) : null,
+        active_auctions_count: Number(activeCountRows[0]?.active_count ?? 0),
+        auctions: auctionAggRows.map((row) => ({
+          auction_number: row.auction_number,
+          name: row.name,
+          store_name: row.store_name,
+          ending_time: row.ending_time,
+          type: row.type ?? null,
+          days_since_ended: Number(row.days_since_ended ?? 0),
+          lots_listed: Number(row.lots_listed ?? 0),
+          lots_sold: Number(row.lots_sold ?? 0),
+          unsold_reserve_value: Number(row.unsold_reserve_value ?? 0),
+          unpaid_outstanding_value: Number(row.unpaid_outstanding_value ?? 0),
+          unpaid_outstanding_count: Number(row.unpaid_outstanding_count ?? 0),
+          missing_name_count: Number(row.missing_name_count ?? 0),
+        })),
+      });
+    }
+
+    // =========================================================
     // SUMMARY
     // =========================================================
 
