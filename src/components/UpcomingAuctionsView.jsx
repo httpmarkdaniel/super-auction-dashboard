@@ -21,6 +21,16 @@ function startsInLabel(startingTime) {
   return `${minutes}m`;
 }
 
+// Same "starting now" boundary as startsInLabel above (ms <= 0) — kept as
+// its own check purely so the card can swap "Starts in Starting now" for
+// a clean standalone "Starting Now" label, without touching the countdown
+// math itself.
+function isStartingNow(startingTime) {
+  const startMs = manilaToEpochMs(startingTime);
+  if (startMs == null) return false;
+  return startMs - Date.now() <= 0;
+}
+
 function AuctionCard({ a }) {
   return (
     <div className="tile px-5 py-4 flex items-center justify-between gap-4">
@@ -40,7 +50,9 @@ function AuctionCard({ a }) {
         </div>
       </div>
       <div className="text-right shrink-0">
-        <div className="text-[15.5px] font-semibold text-series1">Starts in {startsInLabel(a.starting_time)}</div>
+        <div className="text-[15.5px] font-semibold text-series1">
+          {isStartingNow(a.starting_time) ? "Starting Now" : `Starts in ${startsInLabel(a.starting_time)}`}
+        </div>
         <div className="text-[14.5px] text-ink tabular">{formatManila(a.starting_time)}</div>
         <div className="text-[13px] text-muted tabular">Ends {formatManila(a.ending_time)}</div>
       </div>
