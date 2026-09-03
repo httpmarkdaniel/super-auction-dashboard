@@ -1133,10 +1133,11 @@ export default async function handler(req, res) {
               any(a.auction_store_name) AS store_name,
               any(a.auction_ending_time) AS ending_time,
               any(at.auction_type) AS type,
-              -- Computed in ClickHouse for the same naive-Manila-clock
-              -- reason as minutes_since_latest_bid above — never a JS-side
-              -- timezone diff.
-              dateDiff('day', any(a.auction_ending_time), now('Asia/Manila')) AS days_since_ended,
+              -- Computed in ClickHouse for the same naive-column reason as
+              -- minutes_since_latest_bid below — bare now(), not now('Asia/
+              -- Manila'), matching the established type=active-auctions
+              -- comparison pattern (see that field's comment for why).
+              dateDiff('day', any(a.auction_ending_time), now()) AS days_since_ended,
 
               count() AS lots_listed,
               countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
@@ -1162,14 +1163,21 @@ export default async function handler(req, res) {
           query: `
             SELECT
               max(bid_created_at) AS latest_bid_at,
-              -- Computed here (not in JS) specifically to avoid any
-              -- naive-vs-Manila-local timestamp ambiguity: bid_created_at
-              -- is stored the same "Asia/Manila wall-clock, no offset"
-              -- way as every other timestamp column in this codebase, so
-              -- diffing it against now('Asia/Manila') inside ClickHouse
-              -- (both on the same clock) is the only way to get a
-              -- trustworthy elapsed duration.
-              dateDiff('minute', max(bid_created_at), now('Asia/Manila')) AS minutes_since_latest_bid
+              -- Computed here (not in JS) to avoid any naive-vs-Manila
+              -- timestamp ambiguity. bid_created_at is a NAIVE column
+              -- holding Manila wall-clock digits with no timezone tag
+              -- (same convention as starting_time/ending_time elsewhere),
+              -- and empirically, ClickHouse's bare now() — not now('Asia/
+              -- Manila') — is what already compares correctly against
+              -- naive columns in this codebase (see the existing
+              -- type=active-auctions branch's starting_time/ending_time
+              -- vs. now() comparison, unscoped by any explicit
+              -- timezone argument). Explicit now('Asia/Manila') was tried
+              -- here first and measured to under-report elapsed time by
+              -- exactly the Manila UTC+8 offset (~8h) against a known-real
+              -- bid timestamp — bare now() matches the established
+              -- pattern and reconciles correctly.
+              dateDiff('minute', max(bid_created_at), now()) AS minutes_since_latest_bid
             FROM cms.mart_cms_bid_history_report
           `,
           format: "JSONEachRow",
