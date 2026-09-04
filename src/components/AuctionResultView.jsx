@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useAuctionResult, useAuctionResultFilters } from "../useAuctionResult";
+import { useAuctionResult, useAuctionResultFilters, fetchAuctionResultExportData } from "../useAuctionResult";
 import { formatPeso } from "../utils/format";
 import { manilaYesterdayISODate } from "../utils/manilaTime";
 import { exportAuctionResultExcel, exportAuctionResultPdf } from "../utils/auctionResultExport";
@@ -98,11 +98,16 @@ function EndDateFilter({ value, onChange }) {
 }
 
 // Compact "Export ▼" control — Excel (primary/default, listed first) and
-// PDF. Both build their file entirely from the already-loaded
-// rows/totals/top_info props passed in — no refetch, no new HTTP request
-// of any kind (see src/utils/auctionResultExport.js).
+// PDF. Sheets 1-2 (Auction Result Summary/Top Info) come from the
+// already-loaded on-screen data; both handlers additionally fetch the
+// detailed export dataset ON CLICK ONLY (never on page load or filter
+// change — see useAuctionResult.js's fetchAuctionResultExportData) for
+// Sheet 3 / the Detailed Auction Result PDF section. One request per
+// click, disabled + "Exporting…" while in flight, inline error on failure.
 function ExportMenu({ onExportExcel, onExportPdf }) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -114,39 +119,43 @@ function ExportMenu({ onExportExcel, onExportPdf }) {
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [open]);
 
+  async function run(fn) {
+    setOpen(false);
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (err) {
+      setError(err.message || "Export failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="relative shrink-0 ml-auto" ref={containerRef}>
       <button
         type="button"
+        disabled={busy}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 bg-navy text-white border border-navy rounded-lg px-3 h-8 text-[14px] font-semibold shrink-0"
+        className="flex items-center gap-1.5 bg-navy text-white border border-navy rounded-lg px-3 h-8 text-[14px] font-semibold shrink-0 disabled:opacity-60"
       >
-        Export
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        {busy ? "Exporting…" : "Export"}
+        {!busy && (
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
       </button>
+
+      {error && <div className="absolute right-0 top-full mt-1 text-[12.5px] text-toneRedText whitespace-nowrap">{error}</div>}
 
       {open && (
         <div className="absolute right-0 mt-1.5 w-44 floating py-1.5 z-30">
-          <button
-            type="button"
-            onClick={() => {
-              onExportExcel();
-              setOpen(false);
-            }}
-            className="w-full text-left px-3.5 py-1.5 text-[14.5px] text-ink hover:bg-gridline/50"
-          >
+          <button type="button" onClick={() => run(onExportExcel)} className="w-full text-left px-3.5 py-1.5 text-[14.5px] text-ink hover:bg-gridline/50">
             Export Excel
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              onExportPdf();
-              setOpen(false);
-            }}
-            className="w-full text-left px-3.5 py-1.5 text-[14.5px] text-ink hover:bg-gridline/50"
-          >
+          <button type="button" onClick={() => run(onExportPdf)} className="w-full text-left px-3.5 py-1.5 text-[14.5px] text-ink hover:bg-gridline/50">
             Export PDF
           </button>
         </div>
@@ -203,7 +212,19 @@ export default function AuctionResultView({ refreshNonce }) {
     bdm: filters.bdm || "All BDMs",
   };
 
-  const exportPayload = { filters, filterLabels, totals, rows, topInfo };
+  // Detailed dataset is deliberately NOT part of `data`/useAuctionResult —
+  // it's fetched fresh, on demand, only inside these two handlers (see
+  // fetchAuctionResultExportData's own comment), using the filters active
+  // AT CLICK TIME, so there is never stale data from a previous filter
+  // selection carried into an export.
+  async function handleExportExcel() {
+    const detailed = await fetchAuctionResultExportData(filters);
+    exportAuctionResultExcel({ filters, filterLabels, totals, rows, topInfo, detailed });
+  }
+  async function handleExportPdf() {
+    const detailed = await fetchAuctionResultExportData(filters);
+    exportAuctionResultPdf({ filters, filterLabels, totals, rows, topInfo, detailed });
+  }
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Auction Result: {error}</div>;
@@ -229,10 +250,7 @@ export default function AuctionResultView({ refreshNonce }) {
             Reset Filters
           </button>
         )}
-        <ExportMenu
-          onExportExcel={() => exportAuctionResultExcel(exportPayload)}
-          onExportPdf={() => exportAuctionResultPdf(exportPayload)}
-        />
+        <ExportMenu onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">

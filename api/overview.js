@@ -122,6 +122,28 @@ function winningMaxBidQuery(groupByEntity) {
 // warehouse-only first.
 const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
+// Shared Auction Result filter parsing/WHERE builder — used by BOTH
+// type=auction-result (the on-screen Sales Summary/Top Info) and
+// type=auction-result-export (the detailed export dataset), so the two
+// can never drift into two different filter interpretations. See
+// type=auction-result's own big comment below for the full rationale
+// behind each column choice (end_date's UTC boundary, v.branch, v.vendor,
+// v.account_executive as BDM, etc.) — not repeated here.
+function buildAuctionResultFilter(query) {
+  const { endDate = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = query;
+  const params = { endDate, branch, vendor, auctionNumber, status, bdm };
+  const where = `
+    v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'))
+      AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00')), 1)
+      AND ({branch:String} = '' OR v.branch = {branch:String})
+      AND ({vendor:String} = '' OR v.vendor = {vendor:String})
+      AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
+      AND ({status:String} = '' OR v.status = {status:String})
+      AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
+  `;
+  return { params, where, endDate };
+}
+
 export default async function handler(req, res) {
   try {
     const { from, to, store = "", category = "", type = "summary", compareFrom = "", compareTo = "", preset = "" } = req.query;
@@ -286,38 +308,28 @@ export default async function handler(req, res) {
     // string-concatenated into the SQL.
     // =========================================================
     if (type === "auction-result") {
-      const { endDate = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = req.query;
+      const { params: auctionResultParams, where: auctionResultWhere, endDate } = buildAuctionResultFilter(req.query);
 
       if (!endDate) {
         return res.status(400).json({ error: "Missing endDate parameter" });
       }
-
-      const auctionResultParams = { endDate, branch, vendor, auctionNumber, status, bdm };
 
       // end_date's ClickHouse column type is Nullable(DateTime64(3, 'UTC'))
       // — a genuinely UTC-timezone-TYPED column (verified via
       // system.columns), unlike ending_time/bid_created_at elsewhere in
       // this file (naive DateTime columns that already store Manila
       // wall-clock values as-is — see utils/manilaTime.js's own comment on
-      // that distinction). Tagging {endDate} with 'Asia/Manila' here was
-      // therefore wrong: it shifted the boundary 8 hours earlier than the
+      // that distinction). Tagging {endDate} with 'Asia/Manila' would be
+      // wrong: it would shift the boundary 8 hours earlier than the
       // Superset "Auction Result" report's own End Date filter, which
       // operates on end_date's raw UTC calendar day with no Manila
       // conversion — proven by reproducing Superset's Sep 1, 2026 numbers
       // (22 distinct lots / ₱0 reserved / ₱4,100 bid, no Released row)
-      // exactly once the 'Asia/Manila' tag is removed; the previous,
-      // Manila-tagged version pulled in extra rows whose end_date fell in
-      // 2026-08-31 16:00–2026-09-01 00:00 UTC (e.g. auction 5447MS),
-      // which is Sep 1 00:00–08:00 Manila time but NOT Sep 1 in UTC terms.
-      const auctionResultWhere = `
-        v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'))
-          AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00')), 1)
-          AND ({branch:String} = '' OR v.branch = {branch:String})
-          AND ({vendor:String} = '' OR v.vendor = {vendor:String})
-          AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
-          AND ({status:String} = '' OR v.status = {status:String})
-          AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
-      `;
+      // with buildAuctionResultFilter()'s untagged boundary above; a
+      // previous, Manila-tagged version pulled in extra rows whose
+      // end_date fell in 2026-08-31 16:00–2026-09-01 00:00 UTC (e.g.
+      // auction 5447MS), which is Sep 1 00:00–08:00 Manila time but NOT
+      // Sep 1 in UTC terms.
 
       const [groupedResult, totalsResult, topInfoResult] = await Promise.all([
         client.query({
@@ -415,6 +427,166 @@ export default async function handler(req, res) {
           auction_number: row.auction_number || null,
           end_date: row.end_date || null,
         })),
+      });
+    }
+
+    // =========================================================
+    // AUCTION RESULT — DETAILED EXPORT (type=auction-result-export) —
+    // deliberately a SEPARATE branch from type=auction-result, fetched
+    // ONLY when the user clicks Export, never on normal page load (that
+    // stays lightweight — see AuctionResultView.jsx/useAuctionResult.js,
+    // neither of which reference this type). Reuses the EXACT SAME
+    // buildAuctionResultFilter() as the on-screen tables — same Branch/
+    // Vendor/Auction Number/End Date/Status/BDM filters, same end_date UTC
+    // boundary, same v.branch/v.vendor/v.account_executive column choices
+    // — so this can never drift into a second, different filter
+    // interpretation.
+    //
+    // The grouped query below is a literal translation of the task's own
+    // reference SQL: same source table, same 19-column GROUP BY grain
+    // (dr_received truncated to its day, receiving_number, vendor, branch,
+    // origin, dr_number, dr_pis, account_executive, auction_number,
+    // end_date, lot_number, item_barcode, qty, item_status,
+    // client_reference_number, description, status, buyers_premium,
+    // commission, for_approval_status), same SUM(bid_amount)/
+    // SUM(reserved_price), same ORDER BY bid_amount DESC — no deduping
+    // logic changed, no metric substituted. `totals` below is a second,
+    // separate non-grouped SUM over the identical filtered population
+    // (never a sum of the exported grouped rows), per the task's explicit
+    // instruction. Fetched LIMIT 10001 (one over the 10,000 cap) purely so
+    // the handler can tell "exactly 10000" apart from "more than 10000"
+    // without a second, more expensive count query — the 10001th row (if
+    // present) is trimmed before being returned.
+    //
+    // buyers_premium/commission are stored as plain percentage numbers
+    // already (verified against real data: 15, 17, 18, 30, ... — never
+    // 0.15/0.17), so they pass through as-is; the frontend/export layer
+    // must never multiply by 100.
+    // =========================================================
+    if (type === "auction-result-export") {
+      const { params: exportParams, where: exportWhere, endDate: exportEndDate } = buildAuctionResultFilter(req.query);
+
+      if (!exportEndDate) {
+        return res.status(400).json({ error: "Missing endDate parameter" });
+      }
+
+      const EXPORT_ROW_CAP = 10000;
+
+      const [detailedResult, detailedTotalsResult] = await Promise.all([
+        client.query({
+          query: `
+            SELECT
+              toStartOfDay(toDateTime(v.dr_received)) AS dr_received,
+              v.receiving_number AS receiving_number,
+              v.vendor AS vendor,
+              v.branch AS branch,
+              v.origin AS origin,
+              v.dr_number AS dr_number,
+              v.dr_pis AS dr_pis,
+              v.account_executive AS account_executive,
+              v.auction_number AS auction_number,
+              v.end_date AS end_date,
+              v.lot_number AS lot_number,
+              v.item_barcode AS item_barcode,
+              v.qty AS qty,
+              v.item_status AS item_status,
+              v.client_reference_number AS client_reference_number,
+              v.description AS description,
+              v.status AS payment_status,
+              v.buyers_premium AS bp_percent,
+              v.commission AS sf_percent,
+              v.for_approval_status AS for_approval_status,
+              sum(v.bid_amount) AS bid_amount,
+              sum(v.reserved_price) AS reserved_price
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${exportWhere}
+            GROUP BY
+              toStartOfDay(toDateTime(v.dr_received)),
+              v.receiving_number,
+              v.vendor,
+              v.branch,
+              v.origin,
+              v.dr_number,
+              v.dr_pis,
+              v.account_executive,
+              v.auction_number,
+              v.end_date,
+              v.lot_number,
+              v.item_barcode,
+              v.qty,
+              v.item_status,
+              v.client_reference_number,
+              v.description,
+              v.status,
+              v.buyers_premium,
+              v.commission,
+              v.for_approval_status
+            ORDER BY bid_amount DESC
+            LIMIT ${EXPORT_ROW_CAP + 1}
+          `,
+          query_params: exportParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            SELECT
+              sum(v.bid_amount) AS bid_amount,
+              sum(v.reserved_price) AS reserved_price
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${exportWhere}
+          `,
+          query_params: exportParams,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const detailedRowsRaw = await detailedResult.json();
+      const detailedTotalsRows = await detailedTotalsResult.json();
+      const detailedTotalsRow = detailedTotalsRows[0] ?? {};
+
+      const truncated = detailedRowsRaw.length > EXPORT_ROW_CAP;
+      const detailedRows = truncated ? detailedRowsRaw.slice(0, EXPORT_ROW_CAP) : detailedRowsRaw;
+
+      return res.status(200).json({
+        type: "auction-result-export",
+
+        rows: detailedRows.map((row) => ({
+          dr_received: row.dr_received || null,
+          receiving_number: row.receiving_number || null,
+          vendor: row.vendor || null,
+          branch: row.branch || null,
+          origin: row.origin || null,
+          dr_number: row.dr_number || null,
+          dr_pis: row.dr_pis || null,
+          account_executive: row.account_executive || null,
+          auction_number: row.auction_number || null,
+          end_date: row.end_date || null,
+          lot_number: row.lot_number || null,
+          item_barcode: row.item_barcode || null,
+          qty: row.qty == null ? null : Number(row.qty),
+          item_status: row.item_status || null,
+          client_reference_number: row.client_reference_number || null,
+          description: row.description || null,
+          payment_status: row.payment_status || null,
+          bp_percent: row.bp_percent == null ? null : Number(row.bp_percent),
+          sf_percent: row.sf_percent == null ? null : Number(row.sf_percent),
+          for_approval_status: row.for_approval_status || null,
+          bid_amount: Number(row.bid_amount ?? 0),
+          reserved_price: Number(row.reserved_price ?? 0),
+        })),
+
+        // Exact count only when it's cheaply known (i.e. we already fetched
+        // every row — under the cap). Above the cap, reporting a precise
+        // total would need a second full aggregation scan; honestly saying
+        // "more than 10,000" costs nothing extra and is never wrong.
+        rowCount: truncated ? null : detailedRows.length,
+        truncated,
+        truncationNote: truncated ? "Export limited to first 10,000 rows." : null,
+
+        totals: {
+          bid_amount: Number(detailedTotalsRow.bid_amount ?? 0),
+          reserved_price: Number(detailedTotalsRow.reserved_price ?? 0),
+        },
       });
     }
 

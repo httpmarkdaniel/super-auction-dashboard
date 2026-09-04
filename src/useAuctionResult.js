@@ -76,3 +76,24 @@ export function useAuctionResult(filters, refreshNonce = 0) {
 
   return state;
 }
+
+// On-demand detailed export dataset — NOT a hook, NOT fetched on normal
+// page load or on any filter change. Called imperatively exactly once,
+// only when the user clicks Export Excel/PDF (see AuctionResultView.jsx),
+// against /api/overview?type=auction-result-export (same filters as the
+// on-screen tables, via the SAME buildAuctionResultFilter() server-side —
+// see that handler's own comment). One request per export click; the
+// backend runs its own bounded grouped + totals ClickHouse queries inside
+// it — never a request per row/column/vendor/auction.
+export function fetchAuctionResultExportData(filters) {
+  const { endDate, branch, vendor, auctionNumber, status, bdm } = filters;
+  return fetchJson("/api/overview", {
+    type: "auction-result-export",
+    endDate,
+    branch,
+    vendor,
+    auctionNumber,
+    status,
+    bdm,
+  });
+}
