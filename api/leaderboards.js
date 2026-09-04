@@ -1208,8 +1208,18 @@ export default async function handler(req, res) {
 
         GROUP BY cb_email
         ORDER BY settled_bid_amount DESC
-        LIMIT 10
       `,
+      // No LIMIT (small targeted fix, see below): the GROUP BY/JOIN cost
+      // — dominated by bidder_first_competitive's ~19M-row unscoped
+      // bid_history scan — happens regardless of how many grouped rows
+      // are ultimately returned, so dropping the old LIMIT 10 adds no
+      // meaningful cost. Returning the FULL settled/winning-by-email
+      // population (not just the top 10) lets "Top 10 Bidders — By Bid
+      // Activity" (a DIFFERENT ranking, computed client-side from
+      // overview.bidder_engagement) look up any bidder's REAL winning
+      // record by the same canonical email key, not just the 10 who also
+      // happen to be top-by-amount. See the `bidders`/`all_settled_bidders`
+      // response fields below.
       query_params: queryParams,
       format: "JSONEachRow",
       // See settledCompositionQuery's identical comment above — this is
@@ -1450,7 +1460,13 @@ export default async function handler(req, res) {
       // mock-data leaderboard. A settled lot whose identity can't be
       // bridged contributes to no bidder here — see
       // unattributed_bidder_lots/unattributed_bidder_bid_amount below.
-      bidders: settledBidderRows.map((row) => {
+      // Top 10 by settled_bid_amount — settledBidderRows is now the FULL
+      // resolved settled/winning population (see settledBiddersQuery's own
+      // comment: the old LIMIT 10 was removed), sliced here so this
+      // field's shape/size is unchanged for existing consumers
+      // (CategoryView.jsx, BidderAnalyticsView.jsx "By Winning Bid Amount"
+      // mode).
+      bidders: settledBidderRows.slice(0, 10).map((row) => {
         const settled_lots = Number(row.settled_lots ?? 0);
         const settled_bid_amount = Number(row.settled_bid_amount ?? 0);
         const bidder_name = [row.lastname, row.firstname].filter(Boolean).join(", ") || "Unknown Bidder";
@@ -1487,6 +1503,27 @@ export default async function handler(req, res) {
           branches: Number(row.branches ?? 0),
         };
       }),
+
+      // SMALL TARGETED FIX (Top 10 Bidders — By Bid Activity, Winning
+      // Lots/Winning Bid Amount): the FULL resolved settled/winning
+      // population (not just the top 10 above), keyed by the SAME
+      // canonical email every dataset in this file already uses — lets
+      // BidderAnalyticsView.jsx look up a bidder's REAL winning record by
+      // deterministic key regardless of whether they also happen to rank
+      // in the top 10 by amount. No new query, no name matching: this is
+      // the exact same settledBiddersQuery result, just not truncated.
+      // Deliberately a lean projection (not the full `bidders` shape) to
+      // keep the payload small — only the fields the cross-reference
+      // actually needs.
+      all_settled_bidders: settledBidderRows
+        .filter((row) => row.bidder_email)
+        .map((row) => ({
+          bidder_email: row.bidder_email,
+          settled_lots: Number(row.settled_lots ?? 0),
+          settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+          winning_auctions: Number(row.winning_auctions ?? 0),
+          max_bid_usage_pct: Number(row.total_bids ?? 0) > 0 ? (Number(row.max_bid_events ?? 0) / Number(row.total_bids ?? 0)) * 100 : null,
+        })),
 
       // Top Bidders (settledBiddersResult above) intentionally still uses
       // only the primary competitive bridge — its ranking population is

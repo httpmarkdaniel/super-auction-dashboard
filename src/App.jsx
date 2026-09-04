@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
@@ -1456,23 +1456,21 @@ export default function App() {
     useState(defaultDateRange);
 
   // Bidder/Vendor Analytics default to Year to Date — a Week-to-Date
-  // window (the app's own global default, still correct for Overview)
-  // is close to useless for these two tabs specifically (registration
-  // dates, months-active, period-over-period vendor/bidder trends all
-  // need real history). Only fires while the user hasn't yet touched the
-  // Store/Date/Category picker for real (still exactly the untouched
-  // "wtd" default) — flips it to "ytd" once per visit to either tab, then
-  // gets out of the way: switching date range again, or navigating to any
-  // other tab, is never overridden.
-  useEffect(() => {
-    if ((tab === "Bidder Analytics" || tab === "Vendor Analytics") && dateRange === "wtd") {
-      setDateRange("ytd");
-    }
-    // Deliberately keyed on `tab` alone — this should re-check on every
-    // tab switch, never re-fire just because dateRange itself changed
-    // (that would fight a user who explicitly picks "wtd" back again).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  // window (the app's own global default, still correct for Overview) is
+  // close to useless for these two tabs specifically (registration dates,
+  // months-active, period-over-period vendor/bidder trends all need real
+  // history). SMALL TARGETED FIX (previous attempt mutated the shared
+  // `dateRange` above via an effect, which meant visiting either tab
+  // silently flipped Overview's own date range to YTD too the next time
+  // you looked — exactly the cross-tab bleed this must NOT do). Each tab
+  // now owns its OWN independent date-range state, defaulting to "ytd"
+  // from initial render — no effect, no shared state, so there is nothing
+  // for one tab's selection to leak into another's. See
+  // effectiveDateRange/effectiveSetDateRange below for how the ONE Topbar
+  // control still reads/writes whichever state is relevant to the
+  // currently active tab.
+  const [bidderAnalyticsDateRange, setBidderAnalyticsDateRange] = useState("ytd");
+  const [vendorAnalyticsDateRange, setVendorAnalyticsDateRange] = useState("ytd");
 
   const [overviewCategory, setOverviewCategory] =
     useState("");
@@ -1572,6 +1570,20 @@ export default function App() {
 
   const compareLabel = comparisonLabel(dateRange);
 
+  const bidderAnalyticsRangeLabel = resolveDateRange(bidderAnalyticsDateRange).label;
+  const vendorAnalyticsRangeLabel = resolveDateRange(vendorAnalyticsDateRange).label;
+
+  // ONE Topbar date control shared by every tab — while Bidder/Vendor
+  // Analytics is active it reads/writes THAT tab's own independent date
+  // state instead of Overview's global `dateRange`/`setDateRange`, so the
+  // familiar picker still works exactly the same way (WTD/MTD/YTD/Custom,
+  // switchable any time — see effectiveSetDateRange) without either tab's
+  // selection ever touching the other's or Overview's.
+  const effectiveDateRange =
+    tab === "Bidder Analytics" ? bidderAnalyticsDateRange : tab === "Vendor Analytics" ? vendorAnalyticsDateRange : dateRange;
+  const effectiveSetDateRange =
+    tab === "Bidder Analytics" ? setBidderAnalyticsDateRange : tab === "Vendor Analytics" ? setVendorAnalyticsDateRange : setDateRange;
+
   // DISABLED (Vercel P0 usage fix): useLiveOverview never populates a real
   // `overview.auctions` array — it only inherits MOCK_OVERVIEW's 10 fake
   // auction numbers (see mockApiData.js), so this was firing 10 wasted
@@ -1629,8 +1641,8 @@ export default function App() {
             setSidebarOpen(true)
           }
           searchPool={searchPool}
-          dateRange={dateRange}
-          onDateRangeChange={setDateRange}
+          dateRange={effectiveDateRange}
+          onDateRangeChange={effectiveSetDateRange}
           storeOptions={storeOptions}
           updatedAt={formatUpdatedAt(
             lastUpdated,
@@ -1755,11 +1767,11 @@ export default function App() {
 
           {tab === "Bidder Analytics" && (
             <BidderAnalyticsView
-              dateRange={dateRange}
+              dateRange={bidderAnalyticsDateRange}
               store={store === ALL_STORES ? undefined : store}
               biddingPaceStore={store}
               category={overviewCategory}
-              rangeLabel={rangeLabel}
+              rangeLabel={bidderAnalyticsRangeLabel}
               refreshNonce={manualRefreshNonce}
               biddingPaceRefreshNonce={manualRefreshNonce}
             />
@@ -1767,10 +1779,10 @@ export default function App() {
 
           {tab === "Vendor Analytics" && (
             <VendorAnalyticsView
-              dateRange={dateRange}
+              dateRange={vendorAnalyticsDateRange}
               store={store === ALL_STORES ? undefined : store}
               category={overviewCategory}
-              rangeLabel={rangeLabel}
+              rangeLabel={vendorAnalyticsRangeLabel}
               refreshNonce={manualRefreshNonce}
             />
           )}

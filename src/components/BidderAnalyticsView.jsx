@@ -118,12 +118,11 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
   // (already top-10, already sorted). "By Bid Activity" sorts/slices the
   // FULL per-bidder overview.bidder_engagement array (already fetched,
   // unbounded — see api/overview.js's bidderEngagementResultPromise) by
-  // bid_events instead. That array has no Winning Lots/Winning Bid Amount
-  // per bidder (only leaderboards.bidders' OWN top-10-by-amount set does,
-  // and a bidder who ranks highly by activity may not be in that set at
-  // all) — rather than guess via a fragile display-name match across two
-  // differently-formatted name fields, those columns show "—" in this mode
-  // (a genuine, documented gap, never a fabricated or misattributed value).
+  // bid_events instead. Winning Lots/Winning Bid Amount for THAT mode come
+  // from leaderboards.all_settled_bidders (the full resolved settled/
+  // winning population, not just the top 10 by amount — see
+  // api/leaderboards.js's settledBiddersQuery comment), cross-referenced
+  // by the shared canonical email key below — never a name match.
   const topBiddersByAmount = leaderboards.bidders || [];
   const topBiddersByActivity = [...(overview.bidder_engagement || [])]
     .sort((a, b) => (b.bid_events || 0) - (a.bid_events || 0))
@@ -137,6 +136,16 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
   // frequent-store/months-active profile fields "By Bid Activity" already
   // has, using data already fetched by this SAME tab — no new request.
   const engagementByEmail = new Map((overview.bidder_engagement || []).map((e) => [e.bidder_key, e]));
+
+  // SMALL TARGETED FIX: leaderboards.all_settled_bidders is the FULL
+  // resolved settled/winning population (not just the top 10 by amount),
+  // keyed by the SAME canonical email — see api/leaderboards.js's
+  // settledBiddersQuery comment. Every bidder_engagement row already has a
+  // valid, resolved identity by construction (built directly from a real,
+  // non-null bid_history email) — so a bidder_key with NO entry here
+  // genuinely has zero wins, not an unresolved identity. "—" is reserved
+  // for the one defensive case where bidder_key itself is missing.
+  const winningByEmail = new Map((leaderboards.all_settled_bidders || []).map((w) => [w.bidder_email, w]));
 
   function toHoverRow(b) {
     if (bidderRankMode === "amount") {
@@ -159,6 +168,15 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
         maxBidUsagePct: b.max_bid_usage_pct,
       };
     }
+    // SMALL TARGETED FIX: look up this bidder's REAL winning record via the
+    // deterministic email key. Found -> real (always >= 1 lot, by
+    // construction of the settled/winning population). Not found -> a
+    // genuinely identified bidder (bidder_key is always a real, non-null
+    // email here) with zero wins, so 0 / ₱0 — never "—" for that case.
+    // "—" only if bidder_key itself is somehow missing (defensive; should
+    // not happen given bidder_engagement's own NOT NULL/non-empty filter).
+    const win = b.bidder_key ? winningByEmail.get(b.bidder_key) : null;
+    const identityResolved = Boolean(b.bidder_key);
     return {
       name: b.bidder_name || b.bidder,
       registeredAt: b.registered_at,
@@ -170,14 +188,11 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
       distinctLotsBidOn: b.distinct_lots,
       totalBidActions: b.bid_events,
       avgBidActionsPerLot: b.distinct_lots > 0 ? b.bid_events / b.distinct_lots : null,
-      winningAuctions: null,
-      // This dataset is bid-activity only — winning figures require the
-      // separate settled-bidder identity bridge and can't be reliably
-      // joined here (see api/overview.js's bidderEngagement comment).
-      winningLots: b.winning_lots,
-      winningBidAmount: b.winning_bid_amount,
+      winningAuctions: win ? win.winning_auctions : identityResolved ? 0 : null,
+      winningLots: win ? win.settled_lots : identityResolved ? 0 : null,
+      winningBidAmount: win ? win.settled_bid_amount : identityResolved ? 0 : null,
       winRatePct: null,
-      maxBidUsagePct: b.max_bid_usage_pct,
+      maxBidUsagePct: win ? win.max_bid_usage_pct : b.max_bid_usage_pct ?? null,
     };
   }
 
@@ -321,8 +336,8 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
                         <td className="py-2 px-3 text-right tabular text-ink">{b.distinct_lots > 0 ? (b.bid_events / b.distinct_lots).toFixed(2) : "—"}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.auctions_participated}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.months_active ?? "—"}</td>
-                        <td className="py-2 px-3 text-right tabular text-muted">—</td>
-                        <td className="py-2 px-3 text-right tabular text-muted">—</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{hoverRow.winningLots ?? "—"}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{hoverRow.winningBidAmount != null ? formatPeso(hoverRow.winningBidAmount) : "—"}</td>
                       </>
                     )}
                   </tr>
@@ -340,7 +355,7 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
         </div>
         {bidderRankMode === "activity" && (
           <div className="text-[12px] text-muted mt-2">
-            Winning Lots/Winning Bid Amount are only reliably known for the top 10 bidders by winning amount (a separate ranking) — shown as "—" here rather than an unreliable name-matched guess.
+            Winning Lots/Winning Bid Amount are looked up by the bidder's own canonical email against the full settled/winning population (not just the top 10 by amount) — 0 / ₱0 for an identified bidder with no wins, "—" only if that identity genuinely can't be resolved.
           </div>
         )}
       </StorySection>
