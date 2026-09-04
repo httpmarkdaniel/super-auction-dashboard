@@ -36,13 +36,14 @@ export function useAuctionResultFilters() {
 
 // Auction Result's report data — one HTTP request to
 // /api/overview?type=auction-result per filter change (which itself runs
-// one grouped + one totals ClickHouse query — see that handler's own
+// several bounded ClickHouse queries — Vendor Summary grouped+totals,
+// Sales Summary grouped+totals, Top Info — see that handler's own
 // comment). Fetches only on mount, filter change, or manual refresh — no
 // polling interval. No dependency on the dashboard's global from/to/
 // store/category state any more; this tab owns its own filter set
-// entirely (endDate/branch/vendor/auctionNumber/status/bdm).
+// entirely (from/to/branch/vendor/auctionNumber/status/bdm).
 export function useAuctionResult(filters, refreshNonce = 0) {
-  const { endDate, branch, vendor, auctionNumber, status, bdm } = filters;
+  const { from, to, branch, vendor, auctionNumber, status, bdm } = filters;
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
   useEffect(() => {
@@ -53,7 +54,8 @@ export function useAuctionResult(filters, refreshNonce = 0) {
       try {
         const result = await fetchJson("/api/overview", {
           type: "auction-result",
-          endDate,
+          from,
+          to,
           branch,
           vendor,
           auctionNumber,
@@ -72,7 +74,7 @@ export function useAuctionResult(filters, refreshNonce = 0) {
     return () => {
       cancelled = true;
     };
-  }, [endDate, branch, vendor, auctionNumber, status, bdm, refreshNonce]);
+  }, [from, to, branch, vendor, auctionNumber, status, bdm, refreshNonce]);
 
   return state;
 }
@@ -86,10 +88,11 @@ export function useAuctionResult(filters, refreshNonce = 0) {
 // backend runs its own bounded grouped + totals ClickHouse queries inside
 // it — never a request per row/column/vendor/auction.
 export function fetchAuctionResultExportData(filters) {
-  const { endDate, branch, vendor, auctionNumber, status, bdm } = filters;
+  const { from, to, branch, vendor, auctionNumber, status, bdm } = filters;
   return fetchJson("/api/overview", {
     type: "auction-result-export",
-    endDate,
+    from,
+    to,
     branch,
     vendor,
     auctionNumber,

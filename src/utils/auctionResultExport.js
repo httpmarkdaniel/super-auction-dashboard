@@ -26,9 +26,17 @@ function numOrBlank(value) {
   return value == null ? "" : value;
 }
 
+// Single date when From=To (the default, single-day case), a range
+// otherwise — keeps the old single-day filename shape unchanged when
+// nothing multi-day was selected.
+function exportDateSuffix(filters) {
+  return filters.from === filters.to ? filters.from : `${filters.from}_to_${filters.to}`;
+}
+
 function buildFilterLines(filters, filterLabels) {
   return [
-    ["End Date", filters.endDate],
+    ["From", filters.from],
+    ["To", filters.to],
     ["Branch", filterLabels.branch],
     ["Vendor", filterLabels.vendor],
     ["Auction Number", filterLabels.auctionNumber],
@@ -203,7 +211,7 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
     XLSX.utils.book_append_sheet(wb, ws3, "Detailed Auction Result");
   }
 
-  XLSX.writeFile(wb, `Auction_Result_${filters.endDate}.xlsx`);
+  XLSX.writeFile(wb, `Auction_Result_${exportDateSuffix(filters)}.xlsx`);
 }
 
 // ============================================================
@@ -318,5 +326,5 @@ export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, to
     });
   }
 
-  doc.save(`Auction_Result_${filters.endDate}.pdf`);
+  doc.save(`Auction_Result_${exportDateSuffix(filters)}.pdf`);
 }

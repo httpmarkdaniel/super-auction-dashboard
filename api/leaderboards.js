@@ -15,6 +15,94 @@ export default async function handler(req, res) {
   try {
     const { from, to, store = "", category = "", type = "" } = req.query;
 
+    // =========================================================
+    // TOP VENDORS — 5-YEAR BID VALUE (type=vendor-top-5-year) — a fixed,
+    // rolling 5-calendar-year reference table (this server's current year
+    // and the 4 before it — 2022-2026 as of 2026), deliberately NOT scoped
+    // by the dashboard's date-range/Store/Category filters: it's meant to
+    // read as a standing "hall of fame" table inside Vendor Analytics, not
+    // another filtered view. Placed BEFORE the from/to guard below since
+    // it needs neither param.
+    //
+    // Reuses Vendor Analytics' OWN existing settled-value definition
+    // exactly (verified against vendorAllLotsQuery below): status IN
+    // ('Paid','Released'), and the SAME per-lot dedup CTE (GROUP BY
+    // auction_number, lot_number with argMax(status, STATUS_PRIORITY_SQL)
+    // + any(bid_amount)) — never Auction Result's own different, raw-
+    // fanout-sum convention, since this table lives in Vendor Analytics
+    // and is described as an extension of it, not of Auction Result.
+    //
+    // Date field: ending_time on xv3.mart_auction_productivity_report —
+    // Vendor Analytics' own established "ending_time cohort" convention
+    // (verified: vendorAllLotsQuery below scopes by ending_time via this
+    // exact same selected_auctions join, NOT vendor_analysis's own
+    // end_date column) — kept consistent with the rest of this tab.
+    if (type === "vendor-top-5-year") {
+      const VENDOR_5YEAR_CAP = 100;
+      const endYear = new Date().getUTCFullYear();
+      const startYear = endYear - 4;
+
+      const result = await client.query({
+        query: `
+          WITH lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(v.vendor) AS vendor,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              any(v.bid_amount) AS bid_amount
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+          ),
+          auction_year AS (
+            SELECT DISTINCT auction_number, toYear(ending_time) AS yr
+            FROM xv3.mart_auction_productivity_report
+            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          )
+          SELECT
+            l.vendor AS vendor,
+            ay.yr AS yr,
+            sum(ifNull(l.bid_amount, 0)) AS bid_amount
+          FROM lots l
+          INNER JOIN auction_year ay ON l.auction_number = ay.auction_number
+          WHERE l.status IN ('Paid', 'Released') AND l.vendor IS NOT NULL AND trim(l.vendor) != ''
+          GROUP BY l.vendor, ay.yr
+        `,
+        query_params: { startYear, endYear },
+        format: "JSONEachRow",
+      });
+
+      const rawRows = await result.json();
+
+      const byVendor = new Map();
+      for (const row of rawRows) {
+        const vendor = row.vendor;
+        if (!byVendor.has(vendor)) {
+          const years = {};
+          for (let y = startYear; y <= endYear; y++) years[y] = 0;
+          byVendor.set(vendor, { vendor, years, total: 0 });
+        }
+        const entry = byVendor.get(vendor);
+        const amount = Number(row.bid_amount ?? 0);
+        entry.years[row.yr] = amount;
+        entry.total += amount;
+      }
+
+      const vendors = [...byVendor.values()]
+        .sort((a, b) => b.total - a.total)
+        .slice(0, VENDOR_5YEAR_CAP);
+
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
+
+      return res.status(200).json({
+        type: "vendor-top-5-year",
+        startYear,
+        endYear,
+        rows: vendors,
+      });
+    }
+
     if (!from || !to) {
       return res.status(400).json({
         error: "Missing from/to date parameters",

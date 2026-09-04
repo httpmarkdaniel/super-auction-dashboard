@@ -238,10 +238,24 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // would silently revert to Total / Count, the formula this task
     // explicitly rules out.
     const pAvgBidsPerUniqueBidder = row.avg_bids_per_unique_bidder != null ? Number(row.avg_bids_per_unique_bidder) : null;
-    const pTotal = pNew + pReturning;
+    // Unclassified — a real Participating/Winning bidder with no first-
+    // ever-bid record at all (e.g. a Negotiated sale) — see api/
+    // overview.js's participating_unclassified/winning_unclassified
+    // comment. Previously silently excluded from BOTH the New/Returning
+    // counts AND the entity's own total; now counted explicitly instead
+    // of dropped, per this task's Branch/Category click-detail spec.
+    const pUnclassified = Number(row.participating_unclassified) || 0;
+    const pTotal = pNew + pReturning + pUnclassified;
     const wNew = Number(row.winning_new) || 0;
     const wReturning = Number(row.winning_returning) || 0;
+    const wUnclassified = Number(row.winning_unclassified) || 0;
     const wNewAmt = Number(row.winning_new_amount) || 0;
+    // wReturningAmt already includes Unclassified's winning value, folded
+    // in by the established canonical rule (see api/overview.js's
+    // winning_returning_amount CTE comment) — there is no separate,
+    // safely-attributable "Unclassified winning amount" to show without
+    // contradicting that rule; disclosed via unclassifiedAmountNote below
+    // rather than fabricated as its own number.
     const wReturningAmt = Number(row.winning_returning_amount) || 0;
 
     return {
@@ -256,16 +270,24 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         total: pTotal,
         newBidders: pNew,
         returningBidders: pReturning,
+        unclassifiedBidders: pUnclassified,
         totalBids: pBidEvents,
         avgBidsPerUniqueBidder: pAvgBidsPerUniqueBidder,
+        // Participating Bid Amount is deliberately NOT included here — see
+        // BranchPerformanceTable.jsx/CategoryPerformanceTable.jsx's own
+        // comment on why summing a bidder's own raw bid-event amounts
+        // would double-count the same lot's value across every competing
+        // bidder on it.
       },
       winning: {
-        total: wNew + wReturning,
+        total: wNew + wReturning + wUnclassified,
         newBidders: wNew,
         returningBidders: wReturning,
+        unclassifiedBidders: wUnclassified,
         amount: wNewAmt + wReturningAmt,
         newAmount: wNewAmt,
         returningAmount: wReturningAmt,
+        unclassifiedAmountNote: "Unclassified bidders' winning value is included in Returning above (see methodology).",
       },
     };
   }
@@ -1257,7 +1279,6 @@ function OverviewTab({
           compareLabel={compareLabel}
           globalCategory={selectedCategory}
           onSelectCategory={onSelectCategory}
-          onOpenBidderComposition={() => setBidderCompositionOpen(true)}
         />
       </div>
 
@@ -1326,59 +1347,114 @@ function OverviewTab({
           </button>
         </div>
 
-        {/* C. WINNING BIDDERS — merged: the old separate "Winning Bidders"
-            BidderPopulationCard (which had the peso value) and the "Winning
-            Bidders panel" (which had Win Rate/Unmatched) are now ONE
-            full-width card, so nothing that was previously shown is lost. */}
-        <button
-          type="button"
-          onClick={() => setBidderCompositionOpen(true)}
-          className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
-        >
-          <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
-          <div className="flex items-baseline gap-2 mb-3">
-            <div className="font-display text-[28px] leading-none text-ink">
-              {overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
-            </div>
-            {overview.bidderComposition.pctChange != null && (
-              <span className={`text-[13px] font-medium ${overview.bidderComposition.pctChange >= 0 ? "text-toneGreenText" : "text-toneRedText"}`}>
-                {overview.bidderComposition.pctChange >= 0 ? "▲" : "▼"} {Math.abs(overview.bidderComposition.pctChange).toFixed(1)}% vs previous
-              </span>
-            )}
-          </div>
-          {(() => {
-            const bc = overview.bidderComposition;
-            const countTotal = bc.newBidders + bc.returningBidders + bc.unclassifiedBidders || 1;
-            const amountTotal = bc.newBiddersBidAmount + bc.returningBiddersBidAmount || 1;
-            return (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                <div>
-                  <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Bidders</div>
-                  <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
-                    <div className="bg-series8 h-full" style={{ width: `${(bc.newBidders / countTotal) * 100}%` }} />
-                    <div className="bg-navy h-full" style={{ width: `${(bc.returningBidders / countTotal) * 100}%` }} />
-                    <div className="bg-muted h-full" style={{ width: `${(bc.unclassifiedBidders / countTotal) * 100}%` }} />
-                  </div>
-                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink">
-                    <span>New {bc.newBidders}</span>
-                    <span>Returning {bc.returningBidders}</span>
-                    {bc.unclassifiedBidders > 0 && <span className="text-muted">Unmatched {bc.unclassifiedBidders}</span>}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Winning Value · {formatCompactPeso(bc.newBiddersBidAmount + bc.returningBiddersBidAmount)}</div>
-                  <div className="h-2 rounded-full overflow-hidden bg-gridline mb-1.5">
-                    <div className="bg-series1 h-full" style={{ width: `${(bc.newBiddersBidAmount / amountTotal) * 100}%` }} />
-                  </div>
-                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink">
-                    <span>New {formatCompactPeso(bc.newBiddersBidAmount)}</span>
-                    <span>Returning {formatCompactPeso(bc.returningBiddersBidAmount)}</span>
-                  </div>
-                </div>
+        {/* C. WINNING BIDDERS (beside Registration → Bidder, ~half width
+            each — executive cleanup task) — merged: the old separate
+            "Winning Bidders" BidderPopulationCard (which had the peso
+            value) and the "Winning Bidders panel" (which had Win
+            Rate/Unmatched) were already combined into one card; Win Rate
+            itself was already dropped in an earlier pass (never shown).
+            Registration → Bidder moved here from Headline Performance
+            (HeroKPIs.jsx) — same fields/methodology, just relocated. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-3">
+          <button
+            type="button"
+            onClick={() => setBidderCompositionOpen(true)}
+            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
+          >
+            <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
+            <div className="flex items-baseline gap-2 mb-3">
+              <div className="font-display text-[28px] leading-none text-ink">
+                {overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
               </div>
-            );
-          })()}
-        </button>
+              {overview.bidderComposition.pctChange != null && (
+                <span className={`text-[13px] font-medium ${overview.bidderComposition.pctChange >= 0 ? "text-toneGreenText" : "text-toneRedText"}`}>
+                  {overview.bidderComposition.pctChange >= 0 ? "▲" : "▼"} {Math.abs(overview.bidderComposition.pctChange).toFixed(1)}% vs previous
+                </span>
+              )}
+            </div>
+            {(() => {
+              const bc = overview.bidderComposition;
+              // Denominator for every % share below is total Winning
+              // Bidders (New + Returning + Unclassified) — never a
+              // narrower/broader population. Unclassified's WINNING VALUE
+              // is deliberately not shown as its own number: it is already
+              // folded into returningBiddersBidAmount by an established
+              // rule (see the bidderComposition construction above this
+              // component), so a separate "Unclassified value" figure
+              // would either double-count or contradict that rule —
+              // disclosed below instead of fabricated.
+              const countTotal = bc.newBidders + bc.returningBidders + bc.unclassifiedBidders || 1;
+              const amountTotal = bc.newBiddersBidAmount + bc.returningBiddersBidAmount || 1;
+              const newPct = (bc.newBidders / countTotal) * 100;
+              const returningPct = (bc.returningBidders / countTotal) * 100;
+              const unclassifiedPct = (bc.unclassifiedBidders / countTotal) * 100;
+              const newValuePct = (bc.newBiddersBidAmount / amountTotal) * 100;
+              const returningValuePct = (bc.returningBiddersBidAmount / amountTotal) * 100;
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+                    <div>
+                      <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Bidders · {countTotal.toLocaleString()}</div>
+                      <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
+                        <div className="bg-series8 h-full" style={{ width: `${newPct}%` }} />
+                        <div className="bg-navy h-full" style={{ width: `${returningPct}%` }} />
+                        <div className="bg-muted h-full" style={{ width: `${unclassifiedPct}%` }} />
+                      </div>
+                      <div className="flex flex-col gap-1 text-[12.5px] text-ink">
+                        <span>New {bc.newBidders} ({newPct.toFixed(1)}%)</span>
+                        <span>Returning {bc.returningBidders} ({returningPct.toFixed(1)}%)</span>
+                        {bc.unclassifiedBidders > 0 && (
+                          <span className="text-muted">Unmatched {bc.unclassifiedBidders} ({unclassifiedPct.toFixed(1)}%)</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Winning Value · {formatCompactPeso(amountTotal)}</div>
+                      <div className="h-2 rounded-full overflow-hidden bg-gridline mb-1.5">
+                        <div className="bg-series1 h-full" style={{ width: `${newValuePct}%` }} />
+                      </div>
+                      <div className="flex flex-col gap-1 text-[12.5px] text-ink">
+                        <span>New {formatCompactPeso(bc.newBiddersBidAmount)} ({newValuePct.toFixed(1)}%)</span>
+                        <span>Returning {formatCompactPeso(bc.returningBiddersBidAmount)} ({returningValuePct.toFixed(1)}%)</span>
+                        {bc.unclassifiedBidders > 0 && <span className="text-muted">Unmatched · value included in Returning</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-muted">% share of {countTotal.toLocaleString()} total Winning Bidders / {formatCompactPeso(amountTotal)} total winning value.</div>
+                </>
+              );
+            })()}
+          </button>
+
+          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 group/tip">
+            <div className="flex items-center gap-1.5 mb-2.5">
+              <span className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold">Registration → Bidder</span>
+              <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
+            </div>
+            <div className="font-display text-[36.5px] leading-none text-ink mb-2">
+              {overview.heroKPIs.registrationConversionPct != null ? `${overview.heroKPIs.registrationConversionPct.toFixed(1)}%` : "—"}
+            </div>
+            <div className="text-[14.5px] text-ink">
+              {overview.heroKPIs.participatingRegisteredBidders} of {overview.heroKPIs.registeredCustomers} registered
+            </div>
+            {overview.comparison && overview.comparison.registration_conversion_pct != null && (
+              <div className="text-[13px] mt-1.5">
+                <span className={overview.comparison.registration_conversion_pct >= 0 ? "text-toneGreenText" : "text-toneRedText"}>
+                  {overview.comparison.registration_conversion_pct >= 0 ? "▲" : "▼"} {Math.abs(overview.comparison.registration_conversion_pct).toFixed(1)}%
+                </span>
+                <span className="text-muted ml-1">{compareLabel}</span>
+              </div>
+            )}
+            <div
+              role="tooltip"
+              className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
+            >
+              <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">
+                Participating Bidders divided by Registered Bidders for the selected auction reporting cohort (auctions ending in this period). Participating Bidders uses the same canonical population shown in Bidder Composition — real bid-history participants union resolved winning bidders, deduplicated by canonical identity — not a registration-record flag.
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div className="mt-3 text-[13.5px]">
           <button type="button" onClick={() => setAvgBidsOpen(true)} className="font-semibold text-series1 hover:underline">

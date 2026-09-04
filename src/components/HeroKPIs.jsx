@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
-import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 
 const METHODOLOGY = {
@@ -11,12 +10,6 @@ const METHODOLOGY = {
     "Distinct auction events contributing to the settled Total Bid Amount above — same population, same scope. Click to see them.",
   lotsSoldListed:
     "Lots sold ÷ lots listed, scoped to auctions that have already ended. \"Sold\" counts any lot past the Unsold stage — Outstanding (won, payment pending), Released, or Paid — not just fully paid lots. Click to see the contributing auctions.",
-  serviceIncome:
-    "Revenue generated from settled Paid/Released auction lots, consisting of buyer's premium plus vendor commission, within the selected date range. Click to see the underlying settled lots.",
-  registration:
-    "Participating Bidders divided by Registered Bidders for the selected auction reporting cohort (auctions ending in this period). Participating Bidders uses the same canonical population shown in Bidder Composition — real bid-history participants union resolved winning bidders, deduplicated by canonical identity — not a registration-record flag.",
-  participatingBidders:
-    "Real bid-history participants union resolved winning bidders, deduplicated by canonical identity — the SAME canonical population shown in Bidder Composition, scoped to auctions ending in the selected period. Click to see the Branch/Category breakdown.",
 };
 
 // Signed % delta, small and quiet — green for an increase, red for a
@@ -93,26 +86,24 @@ function HeadlineCard({ eyebrow, onClick, methodology, children }) {
 // Auction Performance -> renamed HEADLINE PERFORMANCE (presentation only —
 // see PART 1 of this task): auction-level KPIs only. Every historical
 // BIDDER metric (Participating/Winning/New-Returning/Total Bids/Avg Bids
-// per Unique Bidder/Winning via Max Bid) lives under the Bidder
-// Composition section instead (see App.jsx's OverviewTab) so bidder
-// analytics aren't scattered across unrelated Overview sections — the
-// Headline Performance row's own Participating Bidders card is a summary
-// entry point into that same section, not a duplicate definition. Today/
-// live bidder activity (Total Bids Today, New Bidders Today) lives under
-// Auction Events / Live Now (see App.jsx's LiveMiniCard footer) — a
-// different scope entirely (bid_created_at today vs. this section's
-// ending_time auction cohort).
-export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "", onOpenBidderComposition }) {
-  const {
-    heroKPIs,
-    operationsDetail,
-    auctionSummary,
-    serviceIncomeLots,
-    categoryBreakdown,
-    branchBreakdown,
-    comparison,
-    participatingComposition,
-  } = overview;
+// per Unique Bidder/Winning via Max Bid/Registration → Bidder) lives under
+// the Bidder Composition section instead (see App.jsx's OverviewTab) so
+// bidder analytics aren't scattered across unrelated Overview sections.
+// SIMPLIFIED (executive cleanup task): this component now renders ONLY
+// Row 1 (Total Bid Amount / Auctions Concluded / Lots Sold-Listed) — the
+// old Row 2 (Participating Bidders, Registration → Bidder, Service
+// Income) was removed/relocated, not just visually hidden: Participating
+// Bidders duplicated Bidder Composition's own Participating card;
+// Registration → Bidder moved into Bidder Composition beside Winning
+// Bidders; Service Income stays fully intact as Total Bid Amount's own
+// breakdown row above and in Vendor/Category/Branch tables elsewhere —
+// nothing computed for any of the three was deleted, only this row's
+// redundant/relocated presentation of it. Today/live bidder activity
+// (Total Bids Today, New Bidders Today) lives under Auction Events / Live
+// Now (see App.jsx's LiveMiniCard footer) — a different scope entirely
+// (bid_created_at today vs. this section's ending_time auction cohort).
+export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel, globalCategory = "" }) {
+  const { heroKPIs, operationsDetail, auctionSummary, categoryBreakdown, branchBreakdown, comparison } = overview;
   const [drilldown, setDrilldown] = useState(null);
 
   const lotsByAuction = useMemo(() => {
@@ -138,29 +129,25 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
     [auctionSummary],
   );
 
-  const newBidders = participatingComposition.newBidders;
-  const returningBidders = participatingComposition.returningBidders;
-  const participatingTotal = participatingComposition.total;
-  const newSharePct = participatingTotal > 0 ? (newBidders / participatingTotal) * 100 : 0;
-
   return (
     <div className="flex flex-col gap-5">
-      {/* HEADLINE PERFORMANCE (PART REORG task) — Total Bid Amount is now
-          the dominant KPI: a 6-column row where it spans 4 (~2/3 width),
-          Auctions Concluded and Lots Sold/Listed each take 1. Participating
-          Bidders moved down to row 2 alongside Registration → Bidder and
-          Service Income (3 balanced cards) — no bidder-engagement/Max Bid
-          scorecards in this area, per this task's explicit sequence. No
-          hardcoded period text — compareLabel is already the dashboard's
-          own dynamic WTD/MTD/YTD/Custom comparison label. */}
+      {/* HEADLINE PERFORMANCE (executive cleanup task) — Total Bid Amount
+          is the dominant KPI: a 6-column row where it spans 4 (~2/3
+          width), Auctions Concluded and Lots Sold/Listed each take 1. This
+          is now the ONLY row here — Participating Bidders, Registration →
+          Bidder, and Service Income were removed/relocated (see this
+          file's top comment) rather than replaced with a second row, per
+          this task's explicit "do not add another cluttered headline row
+          just to fill space" instruction. No hardcoded period text —
+          compareLabel is already the dashboard's own dynamic WTD/MTD/YTD/
+          Custom comparison label. */}
       <div>
         <div className="flex items-baseline gap-2 mb-2.5">
           <span className="panel-title">Headline Performance</span>
           {comparison && <span className="text-[12.5px] text-muted font-medium normal-case tracking-normal">— {compareLabel}</span>}
         </div>
 
-        {/* ROW 1 */}
-        <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 mb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
           {/* TOTAL BID AMOUNT — the financial headline of the whole
               dashboard: largest type, strongest elevation/border, its own
               generous padding, and its own Buyer's Premium/Service Fee/
@@ -213,80 +200,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             </HeadlineCard>
           </div>
         </div>
-
-        {/* ROW 2 */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <HeadlineCard eyebrow="Participating Bidders" methodology={METHODOLOGY.participatingBidders} onClick={onOpenBidderComposition}>
-            <div className="font-display text-[36.5px] leading-none text-ink mb-2 tabular">{participatingTotal}</div>
-            <DeltaRow pct={participatingComposition.pctChange} label={compareLabel} />
-            <div className="mt-2.5">
-              <div className="h-1.5 rounded-full overflow-hidden flex bg-gridline">
-                <div className="bg-series8 h-full" style={{ width: `${newSharePct}%` }} />
-              </div>
-              <div className="flex justify-between gap-2 text-[11.5px] text-muted mt-1.5">
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-series8 shrink-0" />
-                  New {newBidders} ({newSharePct.toFixed(1)}%)
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-baseline shrink-0" />
-                  Returning {returningBidders}
-                </span>
-              </div>
-            </div>
-          </HeadlineCard>
-
-          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip">
-            <div className="flex items-center gap-1.5 mb-2.5">
-              <span className="kpi-label">Registration → Bidder</span>
-              <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
-            </div>
-            <div className="font-display text-[36.5px] leading-none text-ink mb-2">
-              {heroKPIs.registrationConversionPct != null ? `${heroKPIs.registrationConversionPct.toFixed(1)}%` : "—"}
-            </div>
-            <div className="text-[14.5px] text-ink">
-              {heroKPIs.participatingRegisteredBidders} of {heroKPIs.registeredCustomers} registered
-            </div>
-            {comparison && comparison.registration_conversion_pct != null && (
-              <div className="text-[13px] mt-1.5">
-                <span className={comparison.registration_conversion_pct >= 0 ? "text-toneGreenText" : "text-toneRedText"}>
-                  {comparison.registration_conversion_pct >= 0 ? "▲" : "▼"} {Math.abs(comparison.registration_conversion_pct).toFixed(1)}%
-                </span>
-                <span className="text-muted ml-1">{compareLabel}</span>
-              </div>
-            )}
-            {methodologyTip(METHODOLOGY.registration)}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setDrilldown("serviceIncome")}
-            className="text-left relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip hover:border-navy/40 transition-colors"
-          >
-            <div className="flex items-center gap-1.5 mb-2.5">
-              <span className="kpi-label">Service Income</span>
-              <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
-            </div>
-            <div className="font-display text-[36.5px] leading-none text-ink mb-2">{formatPeso(heroKPIs.serviceIncome)}</div>
-            <div className="text-[14.5px] text-ink mb-1.5">HMR revenue · Paid &amp; Released</div>
-            <div className="flex justify-between gap-3 text-[12.5px] text-muted">
-              <span>Buyer's Premium · {formatCompactPeso(heroKPIs.buyersPremium)}</span>
-              <span>Service Fee · {formatCompactPeso(heroKPIs.serviceFee)}</span>
-            </div>
-            {comparison && (
-              <div className="mt-1.5"><DeltaRow pct={comparison.service_income_pct} label={compareLabel} /></div>
-            )}
-            {methodologyTip(METHODOLOGY.serviceIncome)}
-          </button>
-        </div>
       </div>
-
-      <ServiceIncomeModal
-        open={drilldown === "serviceIncome"}
-        onClose={() => setDrilldown(null)}
-        rows={serviceIncomeLots}
-        rangeLabel={rangeLabel}
-      />
 
       <TotalBidAmountModal
         open={drilldown === "totalBidAmount"}

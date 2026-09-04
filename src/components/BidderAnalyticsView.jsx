@@ -4,67 +4,8 @@ import StorySection from "./primitives/StorySection";
 import StatTile from "./primitives/StatTile";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import BiddingPaceView from "./BiddingPaceView";
+import BidderDetailModal from "./primitives/BidderDetailModal";
 import { formatPeso } from "../utils/format";
-import { formatManila } from "../utils/manilaTime";
-
-function HoverField({ label, value }) {
-  return (
-    <div>
-      <div className="text-muted text-[12px]">{label}</div>
-      <div className="tabular font-medium">{value ?? "—"}</div>
-    </div>
-  );
-}
-
-// Compact hover profile for a Top 10 Bidder row (PART REORG task) — zero
-// network requests. Registered/Most Frequent Store/Months Active/Last
-// Active come from api/overview.js's enriched bidder_engagement (real
-// cms.mart_cms_bidder_registrations.bidder_registered_at + real bid-history
-// store activity, joined by canonical email — see that file's comments);
-// for "By Winning Bid Amount" mode rows, BidderAnalyticsView.jsx
-// cross-references the SAME already-fetched dataset by the shared
-// bidder_email/bidder_key canonical identity, never by name matching.
-// Winning Auctions/Lots/Amount/Max Bid Usage % are null (shown as "—") in
-// "By Bid Activity" mode — that dataset is bid-activity-only and cannot be
-// reliably joined to the separate settled-bidder identity bridge.
-function BidderHoverCard({ row }) {
-  return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[290px] max-h-[70vh] overflow-y-auto">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="font-semibold text-[14px] uppercase tracking-wide break-words">{row.name}</span>
-        {row.isNew != null && (
-          <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${row.isNew ? "bg-navySoft text-navy" : "bg-gridline text-muted"}`}>
-            {row.isNew ? "New" : "Returning"}
-          </span>
-        )}
-      </div>
-
-      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Profile</div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
-        <HoverField label="Date Registered" value={row.registeredAt ? formatManila(row.registeredAt, { withYear: true }) : "Not Available"} />
-        <HoverField label="Most Frequent Store" value={row.mostFrequentStore || "Not Available"} />
-      </div>
-
-      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Activity</div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
-        <HoverField label="Auctions Participated" value={row.auctionsParticipated} />
-        <HoverField label="Distinct Lots Bid On" value={row.distinctLotsBidOn} />
-        <HoverField label="Total Bid Actions" value={row.totalBidActions} />
-        <HoverField label="Avg Bid Actions / Lot" value={row.avgBidActionsPerLot != null ? row.avgBidActionsPerLot.toFixed(2) : null} />
-        <HoverField label="Months Active" value={row.monthsActive} />
-        <HoverField label="Last Active" value={row.lastActiveAt ? formatManila(row.lastActiveAt, { withYear: true }) : null} />
-      </div>
-
-      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Winning</div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-        <HoverField label="Winning Auctions" value={row.winningAuctions} />
-        <HoverField label="Winning Lots" value={row.winningLots} />
-        <HoverField label="Winning Bid Amount" value={row.winningBidAmount != null ? formatPeso(row.winningBidAmount) : null} />
-        <HoverField label="Max Bid Usage %" value={row.maxBidUsagePct != null ? `${row.maxBidUsagePct.toFixed(1)}%` : null} />
-      </div>
-    </div>
-  );
-}
 
 // BIDDER ANALYTICS — fully dynamic to the selected Date/Store/Category
 // filters (see useBidderAnalytics.js). Historical/ending_time-cohort
@@ -95,6 +36,11 @@ function BidderHoverCard({ row }) {
 export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore, category, rangeLabel, refreshNonce, biddingPaceRefreshNonce }) {
   const { data, loading, error } = useBidderAnalytics(dateRange, store, category, refreshNonce);
   const [bidderRankMode, setBidderRankMode] = useState("amount");
+  // Click-to-view-details (executive cleanup task) — replaces the old
+  // hover-only card. Holds the already-computed hoverRow for whichever
+  // bidder was clicked; no new fetch, same data toHoverRow() already
+  // builds per row.
+  const [selectedBidder, setSelectedBidder] = useState(null);
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Bidder Analytics: {error}</div>;
@@ -309,15 +255,17 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
                 const key = bidderRankMode === "amount" ? b.bidder_email || b.bidder_name : b.bidder_key;
                 const name = bidderRankMode === "amount" ? b.bidder_name : b.bidder_name || b.bidder;
                 const nameCell = (
-                  <td className="relative py-2 px-3 text-ink group/tip max-w-[220px]">
+                  <td className="py-2 px-3 text-ink max-w-[220px]">
                     <span className="block truncate" title={name}>{name}</span>
-                    <div className={`pointer-events-none absolute left-0 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60] ${i >= topBidders.length - 3 ? "bottom-full mb-1" : "top-full mt-1"}`}>
-                      <BidderHoverCard row={hoverRow} />
-                    </div>
+                    <span className="text-[11px] text-series1 font-medium">Click to view details</span>
                   </td>
                 );
                 return (
-                  <tr key={`${key}-${i}`} className="border-t border-gridline hover:bg-plane/60 transition-colors">
+                  <tr
+                    key={`${key}-${i}`}
+                    onClick={() => setSelectedBidder(hoverRow)}
+                    className="border-t border-gridline hover:bg-plane/60 transition-colors cursor-pointer"
+                  >
                     {bidderRankMode === "amount" ? (
                       <>
                         {nameCell}
@@ -359,6 +307,8 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
           </div>
         )}
       </StorySection>
+
+      <BidderDetailModal bidder={selectedBidder} onClose={() => setSelectedBidder(null)} />
     </div>
   );
 }

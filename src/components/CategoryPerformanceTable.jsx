@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import EntityBidderBreakdown from "./primitives/EntityBidderBreakdown";
 
 function ChangeBadge({ pct, isNew }) {
   if (isNew) return <span className="text-[12.5px] font-semibold text-series1">New</span>;
@@ -24,41 +25,8 @@ function CategoryDetail({ row }) {
   return (
     <tr className="border-t border-gridline bg-plane">
       <td colSpan={13} className="py-4 px-4">
-        <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">
-          Current vs Previous Comparable Period — {row.category}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Bid Amount</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.bidAmount)}</div>
-            <ChangeBadge pct={row.bidValueChangePct} isNew={row.isNewEntity} />
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Buyer's Premium</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.buyersPremiumIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Service Fee</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.commissionIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Service Income</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.serviceIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Auctions</div>
-            <div className="tabular font-medium text-ink">{row.auctions}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Participating Bidders</div>
-            <div className="tabular font-medium text-ink">{row.participating.total}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Winning Bidders</div>
-            <div className="tabular font-medium text-ink">{row.winning.total}</div>
-          </div>
-        </div>
-        <div className="text-[11.5px] text-muted mt-3">
+        <EntityBidderBreakdown participating={row.participating} winning={row.winning} entityLabel={row.category} />
+        <div className="text-[11px] text-muted mt-3">
           No channel/store breakdown here — an auction can span multiple categories, so there is no per-auction category grain to split by channel the way Branch Performance does.
         </div>
       </td>

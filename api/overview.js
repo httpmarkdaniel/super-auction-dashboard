@@ -122,26 +122,48 @@ function winningMaxBidQuery(groupByEntity) {
 // warehouse-only first.
 const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
-// Shared Auction Result filter parsing/WHERE builder — used by BOTH
-// type=auction-result (the on-screen Sales Summary/Top Info) and
-// type=auction-result-export (the detailed export dataset), so the two
-// can never drift into two different filter interpretations. See
+// Shared Auction Result filter parsing/WHERE builder — used by
+// type=auction-result (the on-screen Vendor Summary/Sales Summary/Top
+// Info), type=auction-result-export (the detailed export dataset), so
+// they can never drift into different filter interpretations. See
 // type=auction-result's own big comment below for the full rationale
 // behind each column choice (end_date's UTC boundary, v.branch, v.vendor,
 // v.account_executive as BDM, etc.) — not repeated here.
+//
+// REVISED (executive cleanup task): End Date became a FROM/TO range.
+// Same UTC-day-boundary convention proven correct against Superset for a
+// single day — `to` is inclusive at the calendar-day level (< the day
+// AFTER `to`), so FROM=TO reproduces the exact previous single-day
+// behavior with zero change in numbers.
+//
+// Also returns `vendorSummaryWhere` — the SAME From/To/Branch/Vendor/
+// Auction Number/BDM scope, but with Status intentionally EXCLUDED and
+// hardcoded to `status IN ('Paid','Released')` instead, per the new
+// Vendor Summary section's own explicit requirement (its financial
+// population is always Paid+Released regardless of the Status filter
+// dropdown, which only affects Sales Summary/Top Info below it).
 function buildAuctionResultFilter(query) {
-  const { endDate = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = query;
-  const params = { endDate, branch, vendor, auctionNumber, status, bdm };
+  const { from = "", to = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = query;
+  const params = { from, to, branch, vendor, auctionNumber, status, bdm };
   const where = `
-    v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'))
-      AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00')), 1)
+    v.end_date >= toDateTime(concat({from:String}, ' 00:00:00'))
+      AND v.end_date < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
       AND ({branch:String} = '' OR v.branch = {branch:String})
       AND ({vendor:String} = '' OR v.vendor = {vendor:String})
       AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
       AND ({status:String} = '' OR v.status = {status:String})
       AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
   `;
-  return { params, where, endDate };
+  const vendorSummaryWhere = `
+    v.end_date >= toDateTime(concat({from:String}, ' 00:00:00'))
+      AND v.end_date < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
+      AND v.status IN ('Paid', 'Released')
+      AND ({branch:String} = '' OR v.branch = {branch:String})
+      AND ({vendor:String} = '' OR v.vendor = {vendor:String})
+      AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
+      AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
+  `;
+  return { params, where, vendorSummaryWhere, from, to };
 }
 
 export default async function handler(req, res) {
@@ -246,15 +268,21 @@ export default async function handler(req, res) {
     // AUCTION RESULT (type=auction-result) — reproduces, EXACTLY, the two
     // Superset "Auction Result" reference queries against
     // xv3.mart_auction_vendor_analysis (grouped by status/for_approval_status,
-    // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)).
+    // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)) —
+    // now under "Sales Summary" — PLUS a Vendor Summary (Paid/Released-
+    // only financial rollup by calendar year) and the Top Info table, all
+    // sharing the same From/To/Branch/Vendor/Auction Number/BDM scope.
     //
-    // REVISED (operational redesign): this is no longer a WTD/MTD/YTD/
-    // Custom-scoped analytical view — it is a single-calendar-day
-    // operational report keyed on endDate (defaults to Yesterday PHT on
-    // the frontend — see manilaYesterdayISODate() — but any single day can
-    // be selected), plus independent Branch/Vendor/Auction Number/Status/
-    // BDM filters. It no longer reads the dashboard's global from/to/
-    // store/category params at all.
+    // REVISED (operational redesign, then executive cleanup task): this
+    // is no longer a WTD/MTD/YTD/Custom-scoped analytical view — it is a
+    // From/To-ranged operational report (defaults to Yesterday-Yesterday
+    // on the frontend — see manilaYesterdayISODate() — reproducing the
+    // exact original single-day report when From=To; any multi-day range
+    // can be selected), plus independent Branch/Vendor/Auction Number/
+    // Status/BDM filters. It no longer reads the dashboard's global from/
+    // to/store/category params at all (this handler's own `from`/`to`
+    // below are Auction Result's OWN, unrelated to the outer destructure
+    // at the top of this function).
     //
     // end_date remains v.mart_auction_vendor_analysis's OWN date field
     // (verified to exist directly on this table), never substituted with
@@ -266,9 +294,9 @@ export default async function handler(req, res) {
     // proven bug (reconciled against the Superset "Auction Result"
     // report's own Sep 1, 2026 numbers). The frontend's Yesterday DEFAULT
     // is still computed in Manila wall-clock time (a UI convenience for
-    // Manila-based users picking "yesterday"), but once a day is picked,
-    // the query treats it as that literal UTC calendar day, matching
-    // Superset exactly.
+    // Manila-based users picking "yesterday"), but once a range is picked,
+    // the query treats each boundary as a literal UTC calendar day,
+    // matching Superset exactly.
     //
     // Deliberately NOT deduped into a per-lot CTE the way other
     // vendor_analysis queries in this file are (see settled_lots patterns
@@ -308,10 +336,16 @@ export default async function handler(req, res) {
     // string-concatenated into the SQL.
     // =========================================================
     if (type === "auction-result") {
-      const { params: auctionResultParams, where: auctionResultWhere, endDate } = buildAuctionResultFilter(req.query);
+      const {
+        params: auctionResultParams,
+        where: auctionResultWhere,
+        vendorSummaryWhere,
+        from: auctionResultFrom,
+        to: auctionResultTo,
+      } = buildAuctionResultFilter(req.query);
 
-      if (!endDate) {
-        return res.status(400).json({ error: "Missing endDate parameter" });
+      if (!auctionResultFrom || !auctionResultTo) {
+        return res.status(400).json({ error: "Missing from/to parameters" });
       }
 
       // end_date's ClickHouse column type is Nullable(DateTime64(3, 'UTC'))
@@ -319,9 +353,9 @@ export default async function handler(req, res) {
       // system.columns), unlike ending_time/bid_created_at elsewhere in
       // this file (naive DateTime columns that already store Manila
       // wall-clock values as-is — see utils/manilaTime.js's own comment on
-      // that distinction). Tagging {endDate} with 'Asia/Manila' would be
+      // that distinction). Tagging {from}/{to} with 'Asia/Manila' would be
       // wrong: it would shift the boundary 8 hours earlier than the
-      // Superset "Auction Result" report's own End Date filter, which
+      // Superset "Auction Result" report's own date filter, which
       // operates on end_date's raw UTC calendar day with no Manila
       // conversion — proven by reproducing Superset's Sep 1, 2026 numbers
       // (22 distinct lots / ₱0 reserved / ₱4,100 bid, no Released row)
@@ -331,7 +365,7 @@ export default async function handler(req, res) {
       // auction 5447MS), which is Sep 1 00:00–08:00 Manila time but NOT
       // Sep 1 in UTC terms.
 
-      const [groupedResult, totalsResult, topInfoResult] = await Promise.all([
+      const [groupedResult, totalsResult, topInfoResult, vendorSummaryResult, vendorSummaryTotalsResult] = await Promise.all([
         client.query({
           query: `
             SELECT
@@ -392,12 +426,73 @@ export default async function handler(req, res) {
           query_params: auctionResultParams,
           format: "JSONEachRow",
         }),
+        // VENDOR SUMMARY (new) — a separate, hardcoded Paid/Released-only
+        // financial rollup (see vendorSummaryWhere's own comment above),
+        // grouped by the calendar year each lot's end_date falls in. Exact
+        // formulas per the task's own reference SQL: BUYER'S PREMIUM =
+        // SUM(bid_amount * buyers_premium/100), SERVICE FEE = SUM(bid_
+        // amount * commission/100), SERVICE INCOME = their sum — verified
+        // against real data that buyers_premium/commission are already
+        // stored as plain percentage numbers (15, 18, ...), never
+        // fractions, so no additional /100 correction is applied beyond
+        // what the reference formula itself specifies. Deliberately NOT
+        // the per-lot-deduped vendorAllLotsQuery convention (api/
+        // leaderboards.js) or the sold_price-based buyers_premium_income
+        // definition used there — this is a distinct, task-specified
+        // metric living inside Auction Result, not a substitute for
+        // Vendor Analytics' own Service Income. GROUP BY toStartOfYear
+        // (toDateTime(end_date)) exactly as specified; ORDER BY the same
+        // year-start value DESC is equivalent to the reference's "ORDER BY
+        // max(end_date) DESC" since each group is exactly one calendar
+        // year.
+        client.query({
+          query: `
+            SELECT
+              toStartOfYear(toDateTime(v.end_date)) AS year_start,
+              sum(v.bid_amount) AS total_bid_amount,
+              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
+              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
+              sum(
+                v.bid_amount * coalesce(v.commission, 0) / 100
+                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
+              ) AS service_income
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${vendorSummaryWhere}
+            GROUP BY toStartOfYear(toDateTime(v.end_date))
+            ORDER BY year_start DESC
+          `,
+          query_params: auctionResultParams,
+          format: "JSONEachRow",
+        }),
+        // Separate exact total aggregation — never a sum of the grouped
+        // year rows above, per the task's explicit instruction (same
+        // "don't sum grouped rows" discipline already established for
+        // Sales Summary's own totals query).
+        client.query({
+          query: `
+            SELECT
+              sum(v.bid_amount) AS total_bid_amount,
+              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
+              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
+              sum(
+                v.bid_amount * coalesce(v.commission, 0) / 100
+                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
+              ) AS service_income
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${vendorSummaryWhere}
+          `,
+          query_params: auctionResultParams,
+          format: "JSONEachRow",
+        }),
       ]);
 
       const groupedRows = await groupedResult.json();
       const totalsRows = await totalsResult.json();
       const totalsRow = totalsRows[0] ?? {};
       const topInfoRows = await topInfoResult.json();
+      const vendorSummaryRows = await vendorSummaryResult.json();
+      const vendorSummaryTotalsRows = await vendorSummaryTotalsResult.json();
+      const vendorSummaryTotalsRow = vendorSummaryTotalsRows[0] ?? {};
 
       const cleanStatus = (value) => (value && String(value).trim() ? value : "No Status");
 
@@ -427,6 +522,21 @@ export default async function handler(req, res) {
           auction_number: row.auction_number || null,
           end_date: row.end_date || null,
         })),
+
+        vendor_summary: vendorSummaryRows.map((row) => ({
+          year: row.year_start ? String(row.year_start).slice(0, 4) : "—",
+          total_bid_amount: Number(row.total_bid_amount ?? 0),
+          buyers_premium: Number(row.buyers_premium ?? 0),
+          service_fee: Number(row.service_fee ?? 0),
+          service_income: Number(row.service_income ?? 0),
+        })),
+
+        vendor_summary_totals: {
+          total_bid_amount: Number(vendorSummaryTotalsRow.total_bid_amount ?? 0),
+          buyers_premium: Number(vendorSummaryTotalsRow.buyers_premium ?? 0),
+          service_fee: Number(vendorSummaryTotalsRow.service_fee ?? 0),
+          service_income: Number(vendorSummaryTotalsRow.service_income ?? 0),
+        },
       });
     }
 
@@ -464,10 +574,10 @@ export default async function handler(req, res) {
     // must never multiply by 100.
     // =========================================================
     if (type === "auction-result-export") {
-      const { params: exportParams, where: exportWhere, endDate: exportEndDate } = buildAuctionResultFilter(req.query);
+      const { params: exportParams, where: exportWhere, from: exportFrom, to: exportTo } = buildAuctionResultFilter(req.query);
 
-      if (!exportEndDate) {
-        return res.status(400).json({ error: "Missing endDate parameter" });
+      if (!exportFrom || !exportTo) {
+        return res.status(400).json({ error: "Missing from/to parameters" });
       }
 
       const EXPORT_ROW_CAP = 10000;
@@ -3238,6 +3348,14 @@ export default async function handler(req, res) {
             sl.store_name AS branch,
             uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new,
             uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_returning,
+            -- Same overall-grain precedent as api/overview.js's own
+            -- winning_unclassified field elsewhere in this file — a
+            -- resolved winner with no first-ever-bid record at all (e.g. a
+            -- Negotiated sale). Its VALUE stays folded into
+            -- winning_returning_amount below (unchanged, established
+            -- rule) — this is a count only, for disclosure in the Branch
+            -- click detail's Unclassified row.
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NULL) AS winning_unclassified,
             sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new_amount,
             sumIf(ifNull(sl.lot_bid_amount, 0), (fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) OR fe.first_ever_at IS NULL) AS winning_returning_amount
           FROM settled_lots sl
@@ -3275,6 +3393,9 @@ export default async function handler(req, res) {
             sl.category AS category,
             uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new,
             uniqExactIf(rli.resolved_email, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_returning,
+            -- See branch's identical comment above — same overall-grain
+            -- winning_unclassified precedent, count only.
+            uniqExactIf(rli.resolved_email, fe.first_ever_at IS NULL) AS winning_unclassified,
             sumIf(ifNull(sl.lot_bid_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS winning_new_amount,
             sumIf(ifNull(sl.lot_bid_amount, 0), (fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) OR fe.first_ever_at IS NULL) AS winning_returning_amount
           FROM settled_lots sl
@@ -3370,6 +3491,13 @@ export default async function handler(req, res) {
             u.store_name AS branch,
             uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
             uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            -- Count only, matching winning_unclassified's precedent — see
+            -- this file's Branch/Category click-detail comment on why NO
+            -- amount is exposed for Participating (unlike Winning, a
+            -- per-bidder SUM of raw bid-event amounts here would double-
+            -- count the same lot's value across every competing bidder,
+            -- which the executive-cleanup task explicitly rules out).
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NULL) AS participating_unclassified,
             sumIf(ifNull(ba.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
             sumIf(ifNull(ba.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
             -- ENGAGED BIDDERS (real bid participants only, NOT the union
@@ -3458,6 +3586,8 @@ export default async function handler(req, res) {
             u.category AS category,
             uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new,
             uniqExactIf(u.bidder_key, fe.first_ever_at IS NOT NULL AND fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning,
+            -- See branch's identical comment above — count only.
+            uniqExactIf(u.bidder_key, fe.first_ever_at IS NULL) AS participating_unclassified,
             sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NOT NULL AND fe.first_ever_at >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_new_amount,
             sumIf(ifNull(ca.bidder_amount, 0), fe.first_ever_at IS NULL OR fe.first_ever_at < toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')) AS participating_returning_amount,
             uniqExactIf(ca.bidder_key, ca.bidder_key IS NOT NULL) AS engaged_bidders,
@@ -3493,6 +3623,16 @@ export default async function handler(req, res) {
       return {
         participating_new: Number(p.participating_new ?? 0),
         participating_returning: Number(p.participating_returning ?? 0),
+        participating_unclassified: Number(p.participating_unclassified ?? 0),
+        // participating_new_amount/participating_returning_amount are
+        // computed here but deliberately NOT surfaced as a "Participating
+        // Bid Amount" business metric in the Branch/Category click detail
+        // (see BranchPerformanceTable.jsx/CategoryPerformanceTable.jsx) —
+        // summing a bidder's own raw bid-event amounts would double-count
+        // the same lot's value across every competing bidder on it, which
+        // the executive-cleanup task explicitly rules out. Left in this
+        // response object unused by the frontend rather than deleted, in
+        // case a future task finds a safe way to use them.
         participating_new_amount: Number(p.participating_new_amount ?? 0),
         participating_returning_amount: Number(p.participating_returning_amount ?? 0),
         // Total Bids for this entity — see branch_bidder_activity/
@@ -3517,6 +3657,10 @@ export default async function handler(req, res) {
         avg_bids_per_unique_bidder: p.avg_bids_per_unique_bidder != null ? Number(p.avg_bids_per_unique_bidder) : null,
         winning_new: Number(w.winning_new ?? 0),
         winning_returning: Number(w.winning_returning ?? 0),
+        // Count only — its winning VALUE stays folded into
+        // winning_returning_amount (established rule, unchanged; see the
+        // winning_returning_amount CTEs above).
+        winning_unclassified: Number(w.winning_unclassified ?? 0),
         winning_new_amount: Number(w.winning_new_amount ?? 0),
         winning_returning_amount: Number(w.winning_returning_amount ?? 0),
       };

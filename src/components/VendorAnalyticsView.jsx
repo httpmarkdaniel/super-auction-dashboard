@@ -1,78 +1,65 @@
 import { useState } from "react";
 import { useVendorAnalytics } from "../useVendorAnalytics";
+import { useVendorTop5Year } from "../useVendorTop5Year";
 import StorySection from "./primitives/StorySection";
 import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
+import VendorDetailModal from "./primitives/VendorDetailModal";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 
-// Compact hover profile for a Top 10 Vendor row (PART REORG task) — zero
-// network requests, every field already present on the enriched
-// vendor_analytics.all_lots row (see api/leaderboards.js's vendorAllLotsQuery
-// comment). "Date Registered" has no genuine source field on any vendor
-// mart this dashboard queries — only `first_seen` (min date_created, an
-// activity proxy) exists, so it's labeled "First Seen" rather than
-// misrepresented as a real registration date. Account Executive comes
-// straight off xv3.mart_auction_vendor_analysis.account_executive, keyed
-// by the exact `vendor` this row is already grouped by (see
-// vendorAccountExecutiveResult) — never inferred/derived. A vendor with
-// more than one distinct AE on file shows "(N assigned)" rather than
-// silently picking one.
-function VendorHoverCard({ v }) {
-  const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
-  const branchNames = v.branch_names || [];
-  const allAEs = v.all_account_executives || [];
+// TOP VENDORS — 5-YEAR BID VALUE (executive cleanup task) — one row per
+// distinct vendor, one column per calendar year (2022-2026 as of 2026,
+// see api/leaderboards.js's type=vendor-top-5-year for the exact rolling-
+// window rule), Total DESC. Sticky Vendor column + header, horizontal
+// scroll for the year columns — capped at 100 rows server-side (never
+// unbounded).
+function VendorTop5YearTable() {
+  const { data, loading, error } = useVendorTop5Year();
+
+  if (error && !data) {
+    return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load 5-Year Top Vendors: {error}</div>;
+  }
+  if (!data) {
+    return <div className="text-center text-ink text-[15.5px] py-8">Loading 5-Year Top Vendors…</div>;
+  }
+
+  const years = [];
+  for (let y = data.startYear; y <= data.endYear; y++) years.push(y);
+  const rows = data.rows || [];
+
   return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[300px] max-h-[70vh] overflow-y-auto">
-      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide break-words">{v.vendor}</div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
-        <div>
-          <div className="text-muted text-[12px]">First Seen</div>
-          <div className="tabular font-medium">{v.first_seen ? String(v.first_seen).slice(0, 10) : "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Assigned Account Executive</div>
-          <div className="tabular font-medium">
-            {v.account_executive || "Not Available"}
-            {allAEs.length > 1 && <span className="text-muted font-normal"> ({allAEs.length} assigned)</span>}
-          </div>
-        </div>
-        <div className="col-span-2">
-          <div className="text-muted text-[12px]">Branches Supplied <span className="font-normal">(this period)</span></div>
-          <div className="tabular font-medium">
-            {branchNames.length > 0 ? branchNames.slice(0, 4).join(" · ") : "—"}
-            {branchNames.length > 4 && <span className="text-muted"> +{branchNames.length - 4} more</span>}
-          </div>
-        </div>
+    <div className={loading ? "opacity-60" : ""}>
+      <div className="overflow-x-auto max-h-[480px] overflow-y-auto border border-gridline rounded-lg">
+        <table className="w-full text-[14px] min-w-[720px]">
+          <thead>
+            <tr className="text-white text-[12px] uppercase tracking-wide bg-navy sticky top-0 z-20">
+              <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy z-30">Vendor</th>
+              {years.map((y) => (
+                <th key={y} className="text-right font-medium py-2 px-3">{y}</th>
+              ))}
+              <th className="text-right font-medium py-2 px-3">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.vendor} className="border-t border-gridline hover:bg-plane">
+                <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate" title={r.vendor}>{r.vendor}</td>
+                {years.map((y) => (
+                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(r.years[y] || 0)}</td>
+                ))}
+                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatCompactPeso(r.total)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={years.length + 2} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-        <div>
-          <div className="text-muted text-[12px]">Lots Listed</div>
-          <div className="tabular font-medium">{v.lots_listed}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Lots Sold</div>
-          <div className="tabular font-medium">{v.lots_sold}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Sell-Through</div>
-          <div className="tabular font-medium">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Sold Bid Value</div>
-          <div className="tabular font-medium">{formatPeso(v.settled_bid_amount)}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Buyer's Premium</div>
-          <div className="tabular font-medium">{formatPeso(v.buyers_premium_income || 0)}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Service Fee</div>
-          <div className="tabular font-medium">{formatPeso(v.commission_income || 0)}</div>
-        </div>
-        <div className="col-span-2">
-          <div className="text-muted text-[12px]">Service Income</div>
-          <div className="tabular font-medium text-series1">{formatPeso((v.buyers_premium_income || 0) + (v.commission_income || 0))}</div>
-        </div>
+      <div className="text-[11.5px] text-muted mt-2">
+        Settled Bid Value (status Paid/Released, same definition as the rest of Vendor Analytics), grouped by the calendar year each auction ended, top {rows.length} of all active vendors by 5-year total — not filtered by the Store/Category/date controls above.
       </div>
     </div>
   );
@@ -85,6 +72,9 @@ function VendorHoverCard({ v }) {
 export default function VendorAnalyticsView({ dateRange, store, category, rangeLabel, refreshNonce }) {
   const { data, loading, error } = useVendorAnalytics(dateRange, store, category, refreshNonce);
   const [vendorRankMode, setVendorRankMode] = useState("value");
+  // Click-to-view-details (executive cleanup task) — replaces the old
+  // hover-only card. No new fetch — holds the already-loaded allLots row.
+  const [selectedVendor, setSelectedVendor] = useState(null);
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Vendor Analytics: {error}</div>;
@@ -169,8 +159,7 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
 
       <StorySection
         title={`Top 10 Vendors — ${rangeLabel}`}
-        insight="Hover a vendor for their profile. Switch ranking mode to see the same 10-row limit ranked a different way."
-        last
+        insight="Click a vendor row for their full profile. Switch ranking mode to see the same 10-row limit ranked a different way."
       >
         <div className="flex items-center gap-2 mb-3">
           <button
@@ -215,16 +204,18 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
               )}
             </thead>
             <tbody>
-              {topVendors.map((v, i) => {
+              {topVendors.map((v) => {
                 const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
                 const serviceIncome = (v.buyers_premium_income || 0) + (v.commission_income || 0);
                 return (
-                  <tr key={v.vendor} className="border-t border-gridline hover:bg-plane/60 transition-colors">
-                    <td className="relative py-2 px-3 text-ink group/tip max-w-[220px]">
+                  <tr
+                    key={v.vendor}
+                    onClick={() => setSelectedVendor(v)}
+                    className="border-t border-gridline hover:bg-plane/60 transition-colors cursor-pointer"
+                  >
+                    <td className="py-2 px-3 text-ink max-w-[220px]">
                       <span className="block truncate" title={v.vendor}>{v.vendor}</span>
-                      <div className={`pointer-events-none absolute left-0 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60] ${i >= topVendors.length - 3 ? "bottom-full mb-1" : "top-full mt-1"}`}>
-                        <VendorHoverCard v={v} />
-                      </div>
+                      <span className="text-[11px] text-series1 font-medium">Click to view details</span>
                     </td>
                     {vendorRankMode === "value" ? (
                       <>
@@ -259,6 +250,12 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
           </table>
         </div>
       </StorySection>
+
+      <StorySection title="Top Vendors — 5-Year Bid Value" insight="Standing reference table, independent of the Store/Category/date filters above." last>
+        <VendorTop5YearTable />
+      </StorySection>
+
+      <VendorDetailModal vendor={selectedVendor} onClose={() => setSelectedVendor(null)} />
     </div>
   );
 }

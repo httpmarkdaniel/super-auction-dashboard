@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import EntityBidderBreakdown from "./primitives/EntityBidderBreakdown";
 
 function ChangeBadge({ pct, isNew }) {
   if (isNew) return <span className="text-[12.5px] font-semibold text-series1">New</span>;
@@ -40,43 +41,7 @@ function BranchDetail({ row }) {
           {row.channels.length === 0 && <div className="text-[13.5px] text-muted">No channel data available.</div>}
         </div>
 
-        <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">
-          Current vs Previous Comparable Period
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Bid Amount</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.bidAmount)}</div>
-            <ChangeBadge pct={row.bidValueChangePct} isNew={row.isNewEntity} />
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Buyer's Premium</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.buyersPremiumIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Service Fee</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.commissionIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Service Income</div>
-            <div className="tabular font-medium text-ink">{formatPeso(row.serviceIncome)}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Auctions</div>
-            <div className="tabular font-medium text-ink">{row.auctions}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Participating Bidders</div>
-            <div className="tabular font-medium text-ink">{row.participating.total}</div>
-          </div>
-          <div>
-            <div className="text-[12px] text-muted mb-0.5">Winning Bidders</div>
-            <div className="tabular font-medium text-ink">{row.winning.total}</div>
-          </div>
-        </div>
-        <div className="text-[11.5px] text-muted mt-2">
-          Auctions/Participating/Winning comparisons for the previous period aren't cheaply available at branch grain yet — only Bid Amount's comparison is shown.
-        </div>
+        <EntityBidderBreakdown participating={row.participating} winning={row.winning} entityLabel={row.branch} />
       </td>
     </tr>
   );
