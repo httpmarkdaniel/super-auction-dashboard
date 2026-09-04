@@ -319,7 +319,7 @@ export default async function handler(req, res) {
           AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
       `;
 
-      const [groupedResult, totalsResult] = await Promise.all([
+      const [groupedResult, totalsResult, topInfoResult] = await Promise.all([
         client.query({
           query: `
             SELECT
@@ -349,11 +349,43 @@ export default async function handler(req, res) {
           query_params: auctionResultParams,
           format: "JSONEachRow",
         }),
+        // TOP INFO (new) — same filtered population as the Sales Summary
+        // table above (identical auctionResultWhere/params), grouped by
+        // vendor/account_executive/branch/auction_number with the latest
+        // end_date per group — the exact Superset "Top Info" reference
+        // query, just re-scoped to this handler's own filters instead of a
+        // hardcoded date. Reconciled against real data for Sep 1, 2026:
+        // reproduces both of the task's reference rows exactly (HMR
+        // PHILIPPINES INC. / Affiliates Affiliates / MEGA AUCTION SHOWROOM
+        // / 5448MS / 2026-09-01, and .../CAGAYAN DE ORO AUCTION/509D/
+        // 2026-09-01). v.end_date is referenced with its table alias in
+        // both this query and auctionResultWhere so the bare column name
+        // is never ambiguous with the `end_date` output alias below (a
+        // bare, unqualified alias there previously raised ClickHouse's
+        // "aggregate function found in WHERE" error during development).
+        client.query({
+          query: `
+            SELECT
+              v.vendor AS vendor,
+              v.account_executive AS account_executive,
+              v.branch AS branch,
+              v.auction_number AS auction_number,
+              max(v.end_date) AS end_date
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${auctionResultWhere}
+            GROUP BY v.vendor, v.account_executive, v.branch, v.auction_number
+            ORDER BY end_date DESC
+            LIMIT 10000
+          `,
+          query_params: auctionResultParams,
+          format: "JSONEachRow",
+        }),
       ]);
 
       const groupedRows = await groupedResult.json();
       const totalsRows = await totalsResult.json();
       const totalsRow = totalsRows[0] ?? {};
+      const topInfoRows = await topInfoResult.json();
 
       const cleanStatus = (value) => (value && String(value).trim() ? value : "No Status");
 
@@ -375,6 +407,14 @@ export default async function handler(req, res) {
           reserved_price: Number(totalsRow.reserved_price ?? 0),
           bid_amount: Number(totalsRow.bid_amount ?? 0),
         },
+
+        top_info: topInfoRows.map((row) => ({
+          vendor: row.vendor || null,
+          account_executive: row.account_executive || null,
+          branch: row.branch || null,
+          auction_number: row.auction_number || null,
+          end_date: row.end_date || null,
+        })),
       });
     }
 
