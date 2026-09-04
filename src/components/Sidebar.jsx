@@ -94,7 +94,12 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
         </NavGroup>
 
         <NavGroup label="Reports">
-          <NavItem label="Export" active={active === "Export"} onClick={() => go("Export")} />
+          {/* Export — removed as a standalone destination; exporting now
+              lives contextually inside Auction Result (Export Excel/PDF,
+              including the detailed dataset). The route/component/Topbar
+              quick-export button are untouched below, just no longer
+              reachable via any nav item — same pattern as Bidding
+              Pace/Revenue Breakdown above. */}
           <NavItem label="Auction Result" active={active === "Auction Result"} onClick={() => go("Auction Result")} />
         </NavGroup>
 
