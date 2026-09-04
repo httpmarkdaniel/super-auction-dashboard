@@ -187,7 +187,7 @@ function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
       {/* 3. AUCTION EVENTS BY BRANCH — moved right after Total Bid Amount
           (was previously last/buried at the bottom of this hover). */}
       <div className="mb-2.5 pb-2.5 border-b border-gridline">
-        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Auction Events by Branch</div>
+        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Auctions Concluded by Branch</div>
         {financials.branches.length === 0 ? (
           <div className="text-[12px] text-muted">No settled auction activity.</div>
         ) : (

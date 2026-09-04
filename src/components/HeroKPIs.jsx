@@ -58,7 +58,7 @@ function HeadlineCard({ eyebrow, onClick, methodology, children }) {
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`relative text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip ${
+      className={`relative text-left w-full h-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip ${
         onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""
       }`}
     >
@@ -183,14 +183,14 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
             {methodologyTip(METHODOLOGY.totalBidAmount)}
           </button>
 
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 h-full">
             <HeadlineCard eyebrow="Auctions Concluded" methodology={METHODOLOGY.auctionsConcluded} onClick={() => setDrilldown("auctionsConcluded")}>
               <div className="font-display text-[36.5px] leading-none text-ink mb-2">{heroKPIs.auctionsConcluded}</div>
               <DeltaRow pct={comparison?.auctions_concluded_pct} label={compareLabel} />
             </HeadlineCard>
           </div>
 
-          <div className="lg:col-span-1">
+          <div className="lg:col-span-1 h-full">
             <HeadlineCard eyebrow="Lots Sold / Listed" methodology={METHODOLOGY.lotsSoldListed} onClick={() => setDrilldown("lotsSoldListed")}>
               <div className="font-display text-[28px] leading-none text-ink mb-1.5 tabular">
                 {heroKPIs.lotsSold.toLocaleString()} <span className="text-muted text-[17px]">/ {heroKPIs.lotsListed.toLocaleString()}</span>

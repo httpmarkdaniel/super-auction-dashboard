@@ -27,6 +27,7 @@ import AuctionResultView from "./components/AuctionResultView";
 import BranchPerformanceTable from "./components/BranchPerformanceTable";
 import CategoryPerformanceTable from "./components/CategoryPerformanceTable";
 import AuctionMixPanel from "./components/AuctionMixPanel";
+import SegmentedShareBar from "./components/primitives/SegmentedShareBar";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
 import { useLiveOverview } from "./useLiveOverview";
@@ -1395,11 +1396,13 @@ function OverviewTab({
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
                     <div>
                       <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Bidders · {countTotal.toLocaleString()}</div>
-                      <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
-                        <div className="bg-series8 h-full" style={{ width: `${newPct}%` }} />
-                        <div className="bg-navy h-full" style={{ width: `${returningPct}%` }} />
-                        <div className="bg-muted h-full" style={{ width: `${unclassifiedPct}%` }} />
-                      </div>
+                      <SegmentedShareBar
+                        segments={[
+                          { pct: newPct, colorClass: "bg-series8" },
+                          { pct: returningPct, colorClass: "bg-navy" },
+                          { pct: unclassifiedPct, colorClass: "bg-muted" },
+                        ]}
+                      />
                       <div className="flex flex-col gap-1 text-[12.5px] text-ink">
                         <span>New {bc.newBidders} ({newPct.toFixed(1)}%)</span>
                         <span>Returning {bc.returningBidders} ({returningPct.toFixed(1)}%)</span>
@@ -1410,9 +1413,12 @@ function OverviewTab({
                     </div>
                     <div>
                       <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Winning Value · {formatCompactPeso(amountTotal)}</div>
-                      <div className="h-2 rounded-full overflow-hidden bg-gridline mb-1.5">
-                        <div className="bg-series1 h-full" style={{ width: `${newValuePct}%` }} />
-                      </div>
+                      <SegmentedShareBar
+                        segments={[
+                          { pct: newValuePct, colorClass: "bg-series8" },
+                          { pct: returningValuePct, colorClass: "bg-navy" },
+                        ]}
+                      />
                       <div className="flex flex-col gap-1 text-[12.5px] text-ink">
                         <span>New {formatCompactPeso(bc.newBiddersBidAmount)} ({newValuePct.toFixed(1)}%)</span>
                         <span>Returning {formatCompactPeso(bc.returningBiddersBidAmount)} ({returningValuePct.toFixed(1)}%)</span>

@@ -100,7 +100,7 @@ export default function BidTrendDetailModal({ bucket, onClose, bucketLabel, data
       </div>
 
       <div>
-        <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">Auction Events by Branch</div>
+        <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">Auctions Concluded by Branch</div>
         {financials.branches.length === 0 ? (
           <div className="text-[14px] text-muted py-2">No settled auction activity in this period.</div>
         ) : (

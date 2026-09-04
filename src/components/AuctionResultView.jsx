@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuctionResult, useAuctionResultFilters, fetchAuctionResultExportData } from "../useAuctionResult";
-import { formatPeso, formatCompactPeso } from "../utils/format";
+import { formatPeso } from "../utils/format";
 import { manilaYesterdayISODate } from "../utils/manilaTime";
 import { exportAuctionResultExcel, exportAuctionResultPdf } from "../utils/auctionResultExport";
+import { FilterSelect, AuctionNumberFilter, FromToFilter } from "./primitives/AuctionFilterControls";
 
 function dash(value) {
   return value && String(value).trim() ? value : "—";
@@ -32,92 +33,6 @@ function defaultFilters() {
     status: "",
     bdm: "",
   };
-}
-
-function FilterSelect({ label, value, onChange, options, allLabel, disabled }) {
-  return (
-    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
-      <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">{label}</span>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className="text-[14px] font-medium text-ink bg-transparent outline-none cursor-pointer max-w-[150px]"
-      >
-        <option value="">{allLabel}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-// Free-text exact-match filter, not a dropdown — auction_number has 10,772
-// distinct values on this table (verified against real data), far too
-// many for a usable <select>. Commits on blur/Enter only, never per
-// keystroke, so typing doesn't trigger a fetch on every character.
-function AuctionNumberFilter({ value, onChange }) {
-  const [draft, setDraft] = useState(value);
-
-  useEffect(() => setDraft(value), [value]);
-
-  function commit() {
-    const trimmed = draft.trim();
-    if (trimmed !== value) onChange(trimmed);
-  }
-
-  return (
-    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
-      <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">Auction #</span>
-      <input
-        type="text"
-        value={draft}
-        placeholder="All Auctions"
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            commit();
-            e.currentTarget.blur();
-          }
-        }}
-        className="text-[14px] font-medium text-ink bg-transparent outline-none w-[110px] placeholder:text-muted placeholder:font-normal"
-      />
-    </div>
-  );
-}
-
-// From/To (executive cleanup task) — replaces the single End Date input.
-// Both bound to the same v.end_date column server-side; `to` is inclusive
-// at the calendar-day level (see api/overview.js's buildAuctionResultFilter).
-function FromToFilter({ from, to, onFromChange, onToChange }) {
-  return (
-    <>
-      <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
-        <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">From</span>
-        <input
-          type="date"
-          value={from}
-          max={to || undefined}
-          onChange={(e) => onFromChange(e.target.value)}
-          className="text-[14px] font-medium text-ink bg-transparent outline-none"
-        />
-      </div>
-      <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
-        <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">To</span>
-        <input
-          type="date"
-          value={to}
-          min={from || undefined}
-          onChange={(e) => onToChange(e.target.value)}
-          className="text-[14px] font-medium text-ink bg-transparent outline-none"
-        />
-      </div>
-    </>
-  );
 }
 
 // Compact "Export ▼" control — Excel (primary/default, listed first) and
@@ -189,65 +104,16 @@ function ExportMenu({ onExportExcel, onExportPdf }) {
   );
 }
 
-// VENDOR SUMMARY (new) — a distinct, hardcoded Paid/Released-only
-// financial rollup by calendar year, ALWAYS scoped this way regardless of
-// the Status filter above it (see api/overview.js's vendorSummaryWhere
-// comment) — labeled explicitly so it's never mistaken for Sales
-// Summary's own Status-sensitive population.
-function VendorSummaryTable({ rows, totals }) {
-  return (
-    <div className="mb-8">
-      <h3 className="text-[13px] uppercase tracking-wide text-muted font-semibold mb-1">Vendor Summary</h3>
-      <div className="text-[12px] text-muted mb-2">Paid + Released lots only — always, regardless of the Status filter above (which affects Sales Summary/Top Info only).</div>
-      <div className="overflow-x-auto bg-surface1 border border-gridline rounded-lg shadow-card">
-        <table className="w-full text-[14px] min-w-[600px]">
-          <thead>
-            <tr className="text-white text-[12px] uppercase tracking-wide bg-navy">
-              <th className="text-left font-medium py-2 px-3">Year</th>
-              <th className="text-right font-medium py-2 px-3">Total Bid Amount</th>
-              <th className="text-right font-medium py-2 px-3">Buyer's Premium</th>
-              <th className="text-right font-medium py-2 px-3">Service Fee</th>
-              <th className="text-right font-medium py-2 px-3">Service Income</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.year} className="border-t border-gridline hover:bg-plane">
-                <td className="py-2 px-3 text-ink font-medium">{row.year}</td>
-                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatPeso(row.total_bid_amount)}</td>
-                <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(row.buyers_premium)}</td>
-                <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(row.service_fee)}</td>
-                <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(row.service_income)}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="py-6 text-center text-muted text-[14px]">No Paid/Released activity in this period.</td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-navy bg-navySoft font-semibold">
-              <td className="py-2.5 px-3 text-navy">Total</td>
-              <td className="py-2.5 px-3 text-right tabular text-navy">{formatPeso(totals.total_bid_amount)}</td>
-              <td className="py-2.5 px-3 text-right tabular text-navy">{formatCompactPeso(totals.buyers_premium)}</td>
-              <td className="py-2.5 px-3 text-right tabular text-navy">{formatCompactPeso(totals.service_fee)}</td>
-              <td className="py-2.5 px-3 text-right tabular text-navy">{formatCompactPeso(totals.service_income)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 // AUCTION RESULT — operational report keyed on a From/To Manila-anchored
 // date range (defaulting to Yesterday-Yesterday, reproducing the exact
 // original single-day report), reproducing the Superset "Auction Result"
 // report (xv3.mart_auction_vendor_analysis grouped by Payment Status/For
-// Approval Status — "Sales Summary") plus a Vendor Summary (Paid/
-// Released-only, by year) and Top Info, all sharing one Branch/Vendor/
-// Auction Number/Status/BDM filter set. Deliberately independent of the
+// Approval Status — "Sales Summary") plus Top Info, sharing one Branch/
+// Vendor/Auction Number/Status/BDM filter set. Vendor Summary (Paid/
+// Released-only rollup by year) USED to live here — it has MOVED to
+// Vendor Analysis (see VendorAnalyticsView.jsx's VendorSummarySection),
+// since it's a vendor-financial concept, not an operational per-lot one.
+// Deliberately independent of the
 // dashboard's global Store/Category/WTD-MTD-YTD-Custom controls — see
 // App.jsx's hideFilters wiring on Topbar. One request per filter change
 // via useAuctionResult.js; filter option lists load once via
@@ -275,8 +141,6 @@ export default function AuctionResultView({ refreshNonce }) {
   const rows = data?.rows || [];
   const totals = data?.totals || { count_of_lot: 0, reserved_price: 0, bid_amount: 0 };
   const topInfo = data?.top_info || [];
-  const vendorSummaryRows = data?.vendor_summary || [];
-  const vendorSummaryTotals = data?.vendor_summary_totals || { total_bid_amount: 0, buyers_premium: 0, service_fee: 0, service_income: 0 };
 
   const branches = filterOptions?.branches || [];
   const vendors = filterOptions?.vendors || [];
@@ -313,8 +177,8 @@ export default function AuctionResultView({ refreshNonce }) {
   // TOP INFO VENDOR CLICK (executive cleanup task) — selecting a distinct
   // vendor here is EXACTLY equivalent to picking that vendor in the
   // Vendor filter dropdown above: it sets the SAME `filters.vendor` state,
-  // so Sales Summary/Top Info/Vendor Summary/Export all immediately
-  // reflect it while Branch/Auction Number/From/To/Status/BDM stay
+  // so Sales Summary/Top Info/Export all immediately reflect it while
+  // Branch/Auction Number/From/To/Status/BDM stay
   // exactly as they were — no separate "selected vendor" state, no new
   // request beyond the normal single refetch any filter change already
   // causes. Deterministic regardless of which specific Top Info ROW
@@ -350,8 +214,6 @@ export default function AuctionResultView({ refreshNonce }) {
           </button>
         )}
       </div>
-
-      <VendorSummaryTable rows={vendorSummaryRows} totals={vendorSummaryTotals} />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <div className="bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5">

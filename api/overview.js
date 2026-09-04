@@ -123,9 +123,9 @@ function winningMaxBidQuery(groupByEntity) {
 const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 
 // Shared Auction Result filter parsing/WHERE builder — used by
-// type=auction-result (the on-screen Vendor Summary/Sales Summary/Top
-// Info), type=auction-result-export (the detailed export dataset), so
-// they can never drift into different filter interpretations. See
+// type=auction-result (the on-screen Sales Summary/Top Info),
+// type=auction-result-export (the detailed export dataset), so they can
+// never drift into different filter interpretations. See
 // type=auction-result's own big comment below for the full rationale
 // behind each column choice (end_date's UTC boundary, v.branch, v.vendor,
 // v.account_executive as BDM, etc.) — not repeated here.
@@ -136,12 +136,11 @@ const OVERVIEW_LIVE_CORRECTION_ENABLED = false;
 // AFTER `to`), so FROM=TO reproduces the exact previous single-day
 // behavior with zero change in numbers.
 //
-// Also returns `vendorSummaryWhere` — the SAME From/To/Branch/Vendor/
-// Auction Number/BDM scope, but with Status intentionally EXCLUDED and
-// hardcoded to `status IN ('Paid','Released')` instead, per the new
-// Vendor Summary section's own explicit requirement (its financial
-// population is always Paid+Released regardless of the Status filter
-// dropdown, which only affects Sales Summary/Top Info below it).
+// Vendor Summary (Paid/Released-only financial rollup by year) used to
+// live inside this same type=auction-result response — it has since
+// MOVED to Vendor Analysis (see api/leaderboards.js's
+// type=vendor-financial-summary), so this function no longer builds a
+// vendorSummaryWhere at all.
 function buildAuctionResultFilter(query) {
   const { from = "", to = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = query;
   const params = { from, to, branch, vendor, auctionNumber, status, bdm };
@@ -154,16 +153,7 @@ function buildAuctionResultFilter(query) {
       AND ({status:String} = '' OR v.status = {status:String})
       AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
   `;
-  const vendorSummaryWhere = `
-    v.end_date >= toDateTime(concat({from:String}, ' 00:00:00'))
-      AND v.end_date < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
-      AND v.status IN ('Paid', 'Released')
-      AND ({branch:String} = '' OR v.branch = {branch:String})
-      AND ({vendor:String} = '' OR v.vendor = {vendor:String})
-      AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
-      AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
-  `;
-  return { params, where, vendorSummaryWhere, from, to };
+  return { params, where, from, to };
 }
 
 export default async function handler(req, res) {
@@ -269,9 +259,14 @@ export default async function handler(req, res) {
     // Superset "Auction Result" reference queries against
     // xv3.mart_auction_vendor_analysis (grouped by status/for_approval_status,
     // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)) —
-    // now under "Sales Summary" — PLUS a Vendor Summary (Paid/Released-
-    // only financial rollup by calendar year) and the Top Info table, all
-    // sharing the same From/To/Branch/Vendor/Auction Number/BDM scope.
+    // "Sales Summary" — plus the Top Info table, both sharing the same
+    // From/To/Branch/Vendor/Auction Number/Status/BDM scope. Vendor
+    // Summary (Paid/Released-only financial rollup by calendar year) USED
+    // to live in this same response — it has MOVED to Vendor Analysis
+    // (see api/leaderboards.js's type=vendor-financial-summary), so this
+    // handler no longer runs those two queries at all: 3 bounded
+    // ClickHouse queries now (Sales Summary grouped, Sales Summary
+    // totals, Top Info), down from 5.
     //
     // REVISED (operational redesign, then executive cleanup task): this
     // is no longer a WTD/MTD/YTD/Custom-scoped analytical view — it is a
@@ -339,7 +334,6 @@ export default async function handler(req, res) {
       const {
         params: auctionResultParams,
         where: auctionResultWhere,
-        vendorSummaryWhere,
         from: auctionResultFrom,
         to: auctionResultTo,
       } = buildAuctionResultFilter(req.query);
@@ -365,7 +359,7 @@ export default async function handler(req, res) {
       // auction 5447MS), which is Sep 1 00:00–08:00 Manila time but NOT
       // Sep 1 in UTC terms.
 
-      const [groupedResult, totalsResult, topInfoResult, vendorSummaryResult, vendorSummaryTotalsResult] = await Promise.all([
+      const [groupedResult, totalsResult, topInfoResult] = await Promise.all([
         client.query({
           query: `
             SELECT
@@ -426,73 +420,12 @@ export default async function handler(req, res) {
           query_params: auctionResultParams,
           format: "JSONEachRow",
         }),
-        // VENDOR SUMMARY (new) — a separate, hardcoded Paid/Released-only
-        // financial rollup (see vendorSummaryWhere's own comment above),
-        // grouped by the calendar year each lot's end_date falls in. Exact
-        // formulas per the task's own reference SQL: BUYER'S PREMIUM =
-        // SUM(bid_amount * buyers_premium/100), SERVICE FEE = SUM(bid_
-        // amount * commission/100), SERVICE INCOME = their sum — verified
-        // against real data that buyers_premium/commission are already
-        // stored as plain percentage numbers (15, 18, ...), never
-        // fractions, so no additional /100 correction is applied beyond
-        // what the reference formula itself specifies. Deliberately NOT
-        // the per-lot-deduped vendorAllLotsQuery convention (api/
-        // leaderboards.js) or the sold_price-based buyers_premium_income
-        // definition used there — this is a distinct, task-specified
-        // metric living inside Auction Result, not a substitute for
-        // Vendor Analytics' own Service Income. GROUP BY toStartOfYear
-        // (toDateTime(end_date)) exactly as specified; ORDER BY the same
-        // year-start value DESC is equivalent to the reference's "ORDER BY
-        // max(end_date) DESC" since each group is exactly one calendar
-        // year.
-        client.query({
-          query: `
-            SELECT
-              toStartOfYear(toDateTime(v.end_date)) AS year_start,
-              sum(v.bid_amount) AS total_bid_amount,
-              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
-              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
-              sum(
-                v.bid_amount * coalesce(v.commission, 0) / 100
-                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
-              ) AS service_income
-            FROM xv3.mart_auction_vendor_analysis v
-            WHERE ${vendorSummaryWhere}
-            GROUP BY toStartOfYear(toDateTime(v.end_date))
-            ORDER BY year_start DESC
-          `,
-          query_params: auctionResultParams,
-          format: "JSONEachRow",
-        }),
-        // Separate exact total aggregation — never a sum of the grouped
-        // year rows above, per the task's explicit instruction (same
-        // "don't sum grouped rows" discipline already established for
-        // Sales Summary's own totals query).
-        client.query({
-          query: `
-            SELECT
-              sum(v.bid_amount) AS total_bid_amount,
-              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
-              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
-              sum(
-                v.bid_amount * coalesce(v.commission, 0) / 100
-                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
-              ) AS service_income
-            FROM xv3.mart_auction_vendor_analysis v
-            WHERE ${vendorSummaryWhere}
-          `,
-          query_params: auctionResultParams,
-          format: "JSONEachRow",
-        }),
       ]);
 
       const groupedRows = await groupedResult.json();
       const totalsRows = await totalsResult.json();
       const totalsRow = totalsRows[0] ?? {};
       const topInfoRows = await topInfoResult.json();
-      const vendorSummaryRows = await vendorSummaryResult.json();
-      const vendorSummaryTotalsRows = await vendorSummaryTotalsResult.json();
-      const vendorSummaryTotalsRow = vendorSummaryTotalsRows[0] ?? {};
 
       const cleanStatus = (value) => (value && String(value).trim() ? value : "No Status");
 
@@ -522,21 +455,6 @@ export default async function handler(req, res) {
           auction_number: row.auction_number || null,
           end_date: row.end_date || null,
         })),
-
-        vendor_summary: vendorSummaryRows.map((row) => ({
-          year: row.year_start ? String(row.year_start).slice(0, 4) : "—",
-          total_bid_amount: Number(row.total_bid_amount ?? 0),
-          buyers_premium: Number(row.buyers_premium ?? 0),
-          service_fee: Number(row.service_fee ?? 0),
-          service_income: Number(row.service_income ?? 0),
-        })),
-
-        vendor_summary_totals: {
-          total_bid_amount: Number(vendorSummaryTotalsRow.total_bid_amount ?? 0),
-          buyers_premium: Number(vendorSummaryTotalsRow.buyers_premium ?? 0),
-          service_fee: Number(vendorSummaryTotalsRow.service_fee ?? 0),
-          service_income: Number(vendorSummaryTotalsRow.service_income ?? 0),
-        },
       });
     }
 
@@ -2037,8 +1955,16 @@ export default async function handler(req, res) {
           -- period it ENDS in, not the period it started in (see the
           -- ENDING_TIME COHORT task) — an auction starting Jul 30 and
           -- ending Aug 2 belongs to August, never split across both.
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          -- FIXED (global Bid Trend reconciliation task): no 'Asia/Manila'
+          -- tag — see bidTrendBucketExpr's own comment below for the full
+          -- proof (auction 546O on 2026-08-10). This query feeds both
+          -- Overview's Auctions Concluded/Lots Sold-Listed drilldown row
+          -- lists AND Bid Trend's client-side branch breakdown
+          -- (computeBucketFinancials), so the fix applies to both
+          -- consistently — it does not change Overview's own separately-
+          -- computed headline Auctions Concluded number.
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),
@@ -2418,7 +2344,26 @@ export default async function handler(req, res) {
     // ending_time, never starting_time" cohort rule below.
     // ---------------------------------------------------------
     const { fn: bidTrendBucketFn, label: bidTrendBucketLabel } = pickBucketGrain(preset, from, to);
-    const bidTrendBucketExpr = (col) => `${bidTrendBucketFn}(${col}, 'Asia/Manila')`;
+    // FIXED (global Bid Trend reconciliation task): NO 'Asia/Manila' tag.
+    // ending_time's ClickHouse column type is Nullable(DateTime64(3,
+    // 'UTC')) — a genuinely UTC-TYPED column, but proven (same class of
+    // bug already fixed for end_date on xv3.mart_auction_vendor_analysis)
+    // to hold raw values that already represent Manila wall-clock numbers
+    // loaded without conversion, not true UTC instants needing +8h
+    // translation. Tagging this bucket function with 'Asia/Manila'
+    // therefore shifts an event ending exactly at a Manila-midnight-
+    // equivalent UTC instant into the WRONG following bucket — proven on
+    // real data for auction 546O (ONSITE, ending_time "2026-08-10
+    // 16:00:00.000"): with the tag, toStartOfDay(...,'Asia/Manila')
+    // converts this to Manila-local "2026-08-11 00:00:00" and buckets it
+    // into Aug 11 instead of Aug 10, which is why the old Aug 10 tooltip
+    // showed only 2 Auctions Concluded instead of the true 3. Removing
+    // the tag buckets purely on the column's own raw calendar date/time,
+    // matching real auction records and Superset's own end_date
+    // precedent. Applies uniformly to every bucket grain (day/week/month)
+    // since bidTrendBucketFn is the only thing that varies per grain —
+    // this expression wrapper is shared by ALL of them.
+    const bidTrendBucketExpr = (col) => `${bidTrendBucketFn}(${col})`;
 
     // ---------------------------------------------------------
     // BID TREND
@@ -2444,8 +2389,8 @@ export default async function handler(req, res) {
             auction_number,
             any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),
@@ -2477,12 +2422,15 @@ export default async function handler(req, res) {
         ${BIDDER_IDENTITY_CTES}
 
         SELECT
-          -- Explicit Asia/Manila conversion, matching every other date
-          -- boundary in this file (and the Participating series' own
-          -- bucket below) — an auction_ending_time without it would bucket
-          -- by the server's default timezone instead, causing a real
-          -- 1-day mismatch against Participating for an auction ending
-          -- near local midnight (confirmed during this task's validation).
+          -- FIXED (global Bid Trend reconciliation task): no 'Asia/Manila'
+          -- conversion — see bidTrendBucketExpr's own comment above for
+          -- the full proof. The previous comment here (claiming a tag was
+          -- REQUIRED to avoid a 1-day mismatch against the Participating
+          -- series) was itself the bug: both this bucket AND the
+          -- Participating series' bucket below share the SAME
+          -- bidTrendBucketExpr function, so removing the tag here keeps
+          -- them consistent with EACH OTHER while fixing both against the
+          -- real auction_ending_time value.
           ${bidTrendBucketExpr("sl.auction_ending_time")} AS bucket,
           sum(ifNull(sl.lot_bid_amount, 0)) AS bid_amount,
           countDistinct(sl.auction_number) AS auctions_concluded,
@@ -2560,10 +2508,15 @@ export default async function handler(req, res) {
     const bidTrendParticipatingResultPromise = client.query({
       query: `
         WITH selected_auctions AS (
+          -- FIXED (global Bid Trend reconciliation task): no 'Asia/Manila'
+          -- tag — see bidTrendBucketExpr's own comment above; kept
+          -- consistent with bidTrendResultPromise's identical fix so
+          -- Participating and Winning/Auctions-Concluded never disagree
+          -- on which bucket an auction belongs to.
           SELECT auction_number, any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),

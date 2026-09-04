@@ -103,6 +103,121 @@ export default async function handler(req, res) {
       });
     }
 
+    // =========================================================
+    // VENDOR SUMMARY (type=vendor-financial-summary) — MOVED here from
+    // Auction Result (api/overview.js's type=auction-result used to carry
+    // this same data as `vendor_summary`/`vendor_summary_totals`; verified
+    // zero other consumers before removing it from that handler). Lives in
+    // Vendor Analysis now, with its OWN independent filter set — Branch/
+    // Vendor/Auction Number/From/To/BDM — deliberately NOT tied to the
+    // main Vendor Analytics tab's Store/Category/date-range state (see
+    // useVendorFinancialSummary.js: its own hook, own fetch, refetches
+    // only on its own filter change, never when the main Vendor Analytics
+    // filters change and vice versa).
+    //
+    // Status is intentionally NOT a filter here — this population is
+    // hardcoded to status IN ('Paid','Released') always, per the task's
+    // own explicit requirement ("Settled results only — Paid & Released"),
+    // shown as static explanatory text on the frontend rather than a
+    // control the user can change.
+    //
+    // Source/formulas are byte-for-byte identical to the version
+    // previously in api/overview.js (only the endpoint moved, not the
+    // math): BUYER'S PREMIUM = SUM(bid_amount * buyers_premium/100),
+    // SERVICE FEE = SUM(bid_amount * commission/100), SERVICE INCOME =
+    // their sum — buyers_premium/commission are stored as plain
+    // percentage numbers already (verified against real data: 15, 18,
+    // ...), never fractions. Deliberately NOT the per-lot-deduped
+    // vendorAllLotsQuery convention below, nor its sold_price-based
+    // buyers_premium_income definition — this is the task's own distinct,
+    // explicitly-specified metric, not a substitute for either.
+    //
+    // Grouped by toStartOfYear(toDateTime(end_date)) exactly as specified;
+    // the Total row is a SEPARATE non-grouped aggregation, never a sum of
+    // the grouped year rows (same "don't sum grouped rows" discipline as
+    // Auction Result's own Sales Summary totals).
+    if (type === "vendor-financial-summary") {
+      const { from: vsFrom = "", to: vsTo = "", branch: vsBranch = "", vendor: vsVendor = "", auctionNumber: vsAuctionNumber = "", bdm: vsBdm = "" } = req.query;
+
+      if (!vsFrom || !vsTo) {
+        return res.status(400).json({ error: "Missing from/to parameters" });
+      }
+
+      const vsParams = { from: vsFrom, to: vsTo, branch: vsBranch, vendor: vsVendor, auctionNumber: vsAuctionNumber, bdm: vsBdm };
+      const vsWhere = `
+        v.end_date >= toDateTime(concat({from:String}, ' 00:00:00'))
+          AND v.end_date < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
+          AND v.status IN ('Paid', 'Released')
+          AND ({branch:String} = '' OR v.branch = {branch:String})
+          AND ({vendor:String} = '' OR v.vendor = {vendor:String})
+          AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
+          AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
+      `;
+
+      const [groupedResult, totalsResult] = await Promise.all([
+        client.query({
+          query: `
+            SELECT
+              toStartOfYear(toDateTime(v.end_date)) AS year_start,
+              sum(v.bid_amount) AS total_bid_amount,
+              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
+              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
+              sum(
+                v.bid_amount * coalesce(v.commission, 0) / 100
+                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
+              ) AS service_income
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${vsWhere}
+            GROUP BY toStartOfYear(toDateTime(v.end_date))
+            ORDER BY year_start DESC
+          `,
+          query_params: vsParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            SELECT
+              sum(v.bid_amount) AS total_bid_amount,
+              sum(v.bid_amount * coalesce(v.buyers_premium, 0) / 100) AS buyers_premium,
+              sum(v.bid_amount * coalesce(v.commission, 0) / 100) AS service_fee,
+              sum(
+                v.bid_amount * coalesce(v.commission, 0) / 100
+                + v.bid_amount * coalesce(v.buyers_premium, 0) / 100
+              ) AS service_income
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${vsWhere}
+          `,
+          query_params: vsParams,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const groupedRows = await groupedResult.json();
+      const totalsRows = await totalsResult.json();
+      const totalsRow = totalsRows[0] ?? {};
+
+      res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
+
+      return res.status(200).json({
+        type: "vendor-financial-summary",
+
+        rows: groupedRows.map((row) => ({
+          year: row.year_start ? String(row.year_start).slice(0, 4) : "—",
+          total_bid_amount: Number(row.total_bid_amount ?? 0),
+          buyers_premium: Number(row.buyers_premium ?? 0),
+          service_fee: Number(row.service_fee ?? 0),
+          service_income: Number(row.service_income ?? 0),
+        })),
+
+        totals: {
+          total_bid_amount: Number(totalsRow.total_bid_amount ?? 0),
+          buyers_premium: Number(totalsRow.buyers_premium ?? 0),
+          service_fee: Number(totalsRow.service_fee ?? 0),
+          service_income: Number(totalsRow.service_income ?? 0),
+        },
+      });
+    }
+
     if (!from || !to) {
       return res.status(400).json({
         error: "Missing from/to date parameters",

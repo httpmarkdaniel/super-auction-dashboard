@@ -1,14 +1,5 @@
 import { formatCompactPeso } from "../../utils/format";
-
-function ShareBar({ segments }) {
-  return (
-    <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
-      {segments.map((s, i) => (
-        <div key={i} className={`${s.colorClass} h-full`} style={{ width: `${s.pct}%` }} />
-      ))}
-    </div>
-  );
-}
+import SegmentedShareBar from "./SegmentedShareBar";
 
 // Shared Branch/Category click-detail body (executive cleanup task) —
 // replaces the removed financial summary block (Bid Amount/Buyer's
@@ -43,7 +34,7 @@ export default function EntityBidderBreakdown({ participating, winning, entityLa
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl">
         <div>
           <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Participating Bidders · {participating.total.toLocaleString()}</div>
-          <ShareBar
+          <SegmentedShareBar
             segments={[
               { pct: pNewPct, colorClass: "bg-series8" },
               { pct: pReturningPct, colorClass: "bg-navy" },
@@ -64,7 +55,7 @@ export default function EntityBidderBreakdown({ participating, winning, entityLa
         </div>
         <div>
           <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Winning Bidders · {winning.total.toLocaleString()} · {formatCompactPeso(winning.amount)}</div>
-          <ShareBar
+          <SegmentedShareBar
             segments={[
               { pct: wNewPct, colorClass: "bg-series8" },
               { pct: wReturningPct, colorClass: "bg-navy" },

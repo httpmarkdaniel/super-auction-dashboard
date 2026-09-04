@@ -87,3 +87,13 @@ export function manilaYesterdayISODate() {
   d.setUTCDate(d.getUTCDate() - 1);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
+
+// First calendar day of the CURRENT Manila month — used by Vendor
+// Summary's default From (see VendorAnalyticsView.jsx). Callers must
+// guard the month-boundary edge case themselves: if today is the 1st,
+// this returns TODAY's month start while manilaYesterdayISODate() returns
+// the LAST day of the PREVIOUS month, which would make From > To.
+export function manilaFirstDayOfCurrentMonthISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
