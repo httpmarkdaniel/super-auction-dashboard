@@ -227,7 +227,7 @@ export default async function handler(req, res) {
     // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)).
     //
     // REVISED (operational redesign): this is no longer a WTD/MTD/YTD/
-    // Custom-scoped analytical view — it is a single-Manila-calendar-day
+    // Custom-scoped analytical view — it is a single-calendar-day
     // operational report keyed on endDate (defaults to Yesterday PHT on
     // the frontend — see manilaYesterdayISODate() — but any single day can
     // be selected), plus independent Branch/Vendor/Auction Number/Status/
@@ -238,6 +238,15 @@ export default async function handler(req, res) {
     // (verified to exist directly on this table), never substituted with
     // ending_time/starting_time/date_created — this table's end_date is
     // NOT the same "ending_time cohort" rule used elsewhere in this file.
+    // IMPORTANT: end_date's day boundary is evaluated in its own stored
+    // UTC calendar day (see the fix note just above the WHERE clause
+    // below), NOT converted to/from Asia/Manila — that conversion was a
+    // proven bug (reconciled against the Superset "Auction Result"
+    // report's own Sep 1, 2026 numbers). The frontend's Yesterday DEFAULT
+    // is still computed in Manila wall-clock time (a UI convenience for
+    // Manila-based users picking "yesterday"), but once a day is picked,
+    // the query treats it as that literal UTC calendar day, matching
+    // Superset exactly.
     //
     // Deliberately NOT deduped into a per-lot CTE the way other
     // vendor_analysis queries in this file are (see settled_lots patterns
@@ -285,9 +294,24 @@ export default async function handler(req, res) {
 
       const auctionResultParams = { endDate, branch, vendor, auctionNumber, status, bdm };
 
+      // end_date's ClickHouse column type is Nullable(DateTime64(3, 'UTC'))
+      // — a genuinely UTC-timezone-TYPED column (verified via
+      // system.columns), unlike ending_time/bid_created_at elsewhere in
+      // this file (naive DateTime columns that already store Manila
+      // wall-clock values as-is — see utils/manilaTime.js's own comment on
+      // that distinction). Tagging {endDate} with 'Asia/Manila' here was
+      // therefore wrong: it shifted the boundary 8 hours earlier than the
+      // Superset "Auction Result" report's own End Date filter, which
+      // operates on end_date's raw UTC calendar day with no Manila
+      // conversion — proven by reproducing Superset's Sep 1, 2026 numbers
+      // (22 distinct lots / ₱0 reserved / ₱4,100 bid, no Released row)
+      // exactly once the 'Asia/Manila' tag is removed; the previous,
+      // Manila-tagged version pulled in extra rows whose end_date fell in
+      // 2026-08-31 16:00–2026-09-01 00:00 UTC (e.g. auction 5447MS),
+      // which is Sep 1 00:00–08:00 Manila time but NOT Sep 1 in UTC terms.
       const auctionResultWhere = `
-        v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'), 'Asia/Manila')
-          AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+        v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'))
+          AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00')), 1)
           AND ({branch:String} = '' OR v.branch = {branch:String})
           AND ({vendor:String} = '' OR v.vendor = {vendor:String})
           AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
