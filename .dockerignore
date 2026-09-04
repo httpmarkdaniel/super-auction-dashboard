@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-ssr
+src
+public
+.git
+.vercel
+.firebase
+.claude
+*.md
+*.local
+.env*

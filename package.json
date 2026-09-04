@@ -7,10 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "server": "node --env-file=.env.local server/index.js"
   },
   "dependencies": {
     "@clickhouse/client": "^1.23.1",
+    "express": "^4.22.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "recharts": "^3.9.2"
