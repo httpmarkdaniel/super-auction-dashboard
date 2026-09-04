@@ -171,6 +171,189 @@ export default async function handler(req, res) {
       });
     }
 
+    // =========================================================
+    // AUCTION RESULT FILTER OPTIONS (type=auction-result-filters) — the
+    // reference lists for Auction Result's own Branch/Vendor/Status/BDM
+    // dropdowns. Deliberately global/all-time and NOT scoped to the
+    // selected End Date (or any other Auction Result filter): scoping
+    // these to the current day would make every dropdown empty on any day
+    // with no activity (a real, observed case — see the handler below's
+    // comment), making it impossible to broaden the search back out. One
+    // single-scan query (groupUniqArray on 4 columns at once, no GROUP BY)
+    // fetched ONCE per Auction Result mount by the frontend, never on
+    // every filter change — see useAuctionResult.js.
+    //
+    // Auction Number is deliberately NOT included here — verified 10,772
+    // distinct values on this table, far too large for a dropdown or a
+    // response payload; Auction Result exposes it as a free-text exact-
+    // match filter instead (see AuctionResultView.jsx).
+    // =========================================================
+    if (type === "auction-result-filters") {
+      const result = await client.query({
+        query: `
+          SELECT
+            groupUniqArray(branch) AS branches,
+            groupUniqArray(status) AS statuses,
+            groupUniqArray(account_executive) AS bdms,
+            groupUniqArray(vendor) AS vendors
+          FROM xv3.mart_auction_vendor_analysis
+        `,
+        format: "JSONEachRow",
+      });
+
+      const rows = await result.json();
+      const row = rows[0] ?? {};
+
+      const clean = (arr) =>
+        (arr || [])
+          .filter((v) => v != null && String(v).trim() !== "")
+          .sort((a, b) => String(a).localeCompare(String(b)));
+
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
+
+      return res.status(200).json({
+        type: "auction-result-filters",
+        branches: clean(row.branches),
+        statuses: clean(row.statuses),
+        bdms: clean(row.bdms),
+        vendors: clean(row.vendors),
+      });
+    }
+
+    // =========================================================
+    // AUCTION RESULT (type=auction-result) — reproduces, EXACTLY, the two
+    // Superset "Auction Result" reference queries against
+    // xv3.mart_auction_vendor_analysis (grouped by status/for_approval_status,
+    // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)).
+    //
+    // REVISED (operational redesign): this is no longer a WTD/MTD/YTD/
+    // Custom-scoped analytical view — it is a single-Manila-calendar-day
+    // operational report keyed on endDate (defaults to Yesterday PHT on
+    // the frontend — see manilaYesterdayISODate() — but any single day can
+    // be selected), plus independent Branch/Vendor/Auction Number/Status/
+    // BDM filters. It no longer reads the dashboard's global from/to/
+    // store/category params at all.
+    //
+    // end_date remains v.mart_auction_vendor_analysis's OWN date field
+    // (verified to exist directly on this table), never substituted with
+    // ending_time/starting_time/date_created — this table's end_date is
+    // NOT the same "ending_time cohort" rule used elsewhere in this file.
+    //
+    // Deliberately NOT deduped into a per-lot CTE the way other
+    // vendor_analysis queries in this file are (see settled_lots patterns
+    // above): the reference query groups raw item_barcode-fanout rows
+    // directly, and reproducing its own arithmetic exactly (not "fixing"
+    // it to this file's usual per-lot dedup convention) is the explicit
+    // ask here. Verified against real data: a lot_number can appear in
+    // more than one (status, for_approval_status) group, so the grouped
+    // rows' count_of_lot values do NOT sum to the true distinct-lot total
+    // — this is exactly why `totals` below is its own separate,
+    // non-GROUP-BY query over the SAME filtered population, never a sum
+    // of the grouped rows.
+    //
+    // Branch: v.branch is a real column directly on this table, verified
+    // to match xv3.mart_auction_productivity_report's store_name strings
+    // — a safe, non-invented mapping.
+    // Vendor: v.vendor — the same field/semantics Vendor Analytics already
+    // groups by (api/leaderboards.js's vendorAllLotsQuery).
+    // Auction Number: v.auction_number, exact match on free-text input
+    // (too many distinct values — 10,772 — for a dropdown; see
+    // type=auction-result-filters' comment).
+    // Status: v.status, real distinct values only (never a hardcoded
+    // guess) — verified 7 real values (Released/Paid/Unsold/Unpaid/
+    // Returned/Refunded/Outstanding), never NULL on this table.
+    // BDM: v.account_executive — the ONLY column on this table
+    // corresponding to a per-vendor/lot person-in-charge (verified against
+    // the full column list; no separate "bdm" column exists), and the
+    // exact same field Vendor Analytics already surfaces as "Assigned
+    // Account Executive" (api/leaderboards.js's vendorAccountExecutiveResult).
+    //
+    // Null status/for_approval_status: real status is never NULL in this
+    // table, but for_approval_status genuinely is for some rows — mapped
+    // to a consistent "No Status" label below, never a fabricated value.
+    //
+    // All filter values are bound via ClickHouse query_params ({x:String}
+    // placeholders) exactly like every other query in this file — never
+    // string-concatenated into the SQL.
+    // =========================================================
+    if (type === "auction-result") {
+      const { endDate = "", branch = "", vendor = "", auctionNumber = "", status = "", bdm = "" } = req.query;
+
+      if (!endDate) {
+        return res.status(400).json({ error: "Missing endDate parameter" });
+      }
+
+      const auctionResultParams = { endDate, branch, vendor, auctionNumber, status, bdm };
+
+      const auctionResultWhere = `
+        v.end_date >= toDateTime(concat({endDate:String}, ' 00:00:00'), 'Asia/Manila')
+          AND v.end_date < addDays(toDateTime(concat({endDate:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          AND ({branch:String} = '' OR v.branch = {branch:String})
+          AND ({vendor:String} = '' OR v.vendor = {vendor:String})
+          AND ({auctionNumber:String} = '' OR v.auction_number = {auctionNumber:String})
+          AND ({status:String} = '' OR v.status = {status:String})
+          AND ({bdm:String} = '' OR v.account_executive = {bdm:String})
+      `;
+
+      const [groupedResult, totalsResult] = await Promise.all([
+        client.query({
+          query: `
+            SELECT
+              v.status AS payment_status,
+              v.for_approval_status AS approval_status,
+              count(DISTINCT v.lot_number) AS count_of_lot,
+              sum(v.reserved_price) AS reserved_price,
+              sum(v.bid_amount) AS bid_amount
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${auctionResultWhere}
+            GROUP BY v.status, v.for_approval_status
+            ORDER BY count_of_lot DESC
+            LIMIT 10000
+          `,
+          query_params: auctionResultParams,
+          format: "JSONEachRow",
+        }),
+        client.query({
+          query: `
+            SELECT
+              count(DISTINCT v.lot_number) AS count_of_lot,
+              sum(v.reserved_price) AS reserved_price,
+              sum(v.bid_amount) AS bid_amount
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE ${auctionResultWhere}
+          `,
+          query_params: auctionResultParams,
+          format: "JSONEachRow",
+        }),
+      ]);
+
+      const groupedRows = await groupedResult.json();
+      const totalsRows = await totalsResult.json();
+      const totalsRow = totalsRows[0] ?? {};
+
+      const cleanStatus = (value) => (value && String(value).trim() ? value : "No Status");
+
+      res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
+
+      return res.status(200).json({
+        type: "auction-result",
+
+        rows: groupedRows.map((row) => ({
+          payment_status: cleanStatus(row.payment_status),
+          for_approval_status: cleanStatus(row.approval_status),
+          count_of_lot: Number(row.count_of_lot ?? 0),
+          reserved_price: Number(row.reserved_price ?? 0),
+          bid_amount: Number(row.bid_amount ?? 0),
+        })),
+
+        totals: {
+          count_of_lot: Number(totalsRow.count_of_lot ?? 0),
+          reserved_price: Number(totalsRow.reserved_price ?? 0),
+          bid_amount: Number(totalsRow.bid_amount ?? 0),
+        },
+      });
+    }
+
     // ONLY SUMMARY / LOT DRILLDOWNS REQUIRE DATES
     if (!from || !to) {
       return res.status(400).json({
@@ -1037,113 +1220,6 @@ export default async function handler(req, res) {
         },
 
         rows: mappedRows,
-      });
-    }
-
-    // =========================================================
-    // AUCTION RESULT (type=auction-result) — reproduces, EXACTLY, the two
-    // Superset "Auction Result" reference queries against
-    // xv3.mart_auction_vendor_analysis (grouped by status/for_approval_status,
-    // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)), with
-    // the reference's hardcoded end_date bounds replaced by this
-    // handler's own {from}/{to} — the dashboard's real WTD/MTD/YTD/Custom
-    // filter, same 'Asia/Manila' boundary convention every other query in
-    // this file uses. end_date is v.mart_auction_vendor_analysis's OWN
-    // date field (verified to exist directly on this table) and is kept
-    // as the filter field on purpose — this table's end_date is NOT the
-    // same "ending_time cohort" rule used elsewhere in this file, and this
-    // view is not meant to unify with that rule.
-    //
-    // Deliberately NOT deduped into a per-lot CTE the way other
-    // vendor_analysis queries in this file are (see settled_lots patterns
-    // above): the reference query groups raw item_barcode-fanout rows
-    // directly, and reproducing its own arithmetic exactly (not "fixing"
-    // it to this file's usual per-lot dedup convention) is the explicit
-    // ask here. Verified against real data: a lot_number can appear in
-    // more than one (status, for_approval_status) group, so the grouped
-    // rows' count_of_lot values do NOT sum to the true distinct-lot total
-    // (e.g. YTD 2026: grouped rows sum to 553 vs a true total of 120) —
-    // this is exactly why `totals` below is its own separate,
-    // non-GROUP-BY query, never a sum of the grouped rows.
-    //
-    // Store: v.branch is a real column directly on this table, and its
-    // values were verified to match xv3.mart_auction_productivity_report's
-    // store_name strings exactly (same dropdown values used dashboard-wide)
-    // — a safe, non-invented mapping, applied with no join needed.
-    // Category: the raw `category` column on this table is ~96% NULL and
-    // uses a different, incompatible taxonomy, so it is NOT used — instead
-    // this reuses CATEGORY_CLASSIFICATION_SQL(v.name), the same canonical,
-    // always-resolving classifier already applied to this exact table
-    // everywhere else in this file.
-    //
-    // Null status/for_approval_status: real status is never NULL in this
-    // table, but for_approval_status genuinely is for ~70k rows — mapped
-    // to a consistent "No Status" label below, never a fabricated value.
-    // =========================================================
-    if (type === "auction-result") {
-      const auctionResultWhere = `
-        v.end_date >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-          AND v.end_date < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
-          AND ({store:String} = '' OR v.branch = {store:String})
-          AND ({category:String} = '' OR ${CATEGORY_CLASSIFICATION_SQL("v.name")} = {category:String})
-      `;
-
-      const [groupedResult, totalsResult] = await Promise.all([
-        client.query({
-          query: `
-            SELECT
-              v.status AS payment_status,
-              v.for_approval_status AS approval_status,
-              count(DISTINCT v.lot_number) AS count_of_lot,
-              sum(v.reserved_price) AS reserved_price,
-              sum(v.bid_amount) AS bid_amount
-            FROM xv3.mart_auction_vendor_analysis v
-            WHERE ${auctionResultWhere}
-            GROUP BY v.status, v.for_approval_status
-            ORDER BY count_of_lot DESC
-            LIMIT 10000
-          `,
-          query_params: queryParams,
-          format: "JSONEachRow",
-        }),
-        client.query({
-          query: `
-            SELECT
-              count(DISTINCT v.lot_number) AS count_of_lot,
-              sum(v.reserved_price) AS reserved_price,
-              sum(v.bid_amount) AS bid_amount
-            FROM xv3.mart_auction_vendor_analysis v
-            WHERE ${auctionResultWhere}
-          `,
-          query_params: queryParams,
-          format: "JSONEachRow",
-        }),
-      ]);
-
-      const groupedRows = await groupedResult.json();
-      const totalsRows = await totalsResult.json();
-      const totalsRow = totalsRows[0] ?? {};
-
-      const cleanStatus = (value) => (value && String(value).trim() ? value : "No Status");
-
-      res.setHeader("Cache-Control", "public, s-maxage=30, stale-while-revalidate=30");
-
-      return res.status(200).json({
-        type: "auction-result",
-
-        rows: groupedRows.map((row) => ({
-          payment_status: cleanStatus(row.payment_status),
-          for_approval_status: cleanStatus(row.approval_status),
-          count_of_lot: Number(row.count_of_lot ?? 0),
-          reserved_price: Number(row.reserved_price ?? 0),
-          bid_amount: Number(row.bid_amount ?? 0),
-        })),
-
-        totals: {
-          count_of_lot: Number(totalsRow.count_of_lot ?? 0),
-          reserved_price: Number(totalsRow.reserved_price ?? 0),
-          bid_amount: Number(totalsRow.bid_amount ?? 0),
-        },
       });
     }
 

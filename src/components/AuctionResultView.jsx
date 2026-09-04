@@ -1,35 +1,147 @@
-import { useAuctionResult } from "../useAuctionResult";
+import { useEffect, useState } from "react";
+import { useAuctionResult, useAuctionResultFilters } from "../useAuctionResult";
 import { formatPeso } from "../utils/format";
+import { manilaYesterdayISODate } from "../utils/manilaTime";
 
-// AUCTION RESULT — reproduces the Superset "Auction Result" report
-// (xv3.mart_auction_vendor_analysis grouped by Payment Status/For Approval
-// Status) inside the dashboard, scoped to this tab's own Date filter (see
-// App.jsx's auctionResultDateRange, defaulting to YTD, independent of
-// Overview/Bidder/Vendor Analytics — no cross-tab bleed). One request via
-// useAuctionResult.js -> /api/overview?type=auction-result. No drilldowns,
-// modals, exports, or charts this round — table + totals only.
+function defaultFilters() {
+  return {
+    endDate: manilaYesterdayISODate(),
+    branch: "",
+    vendor: "",
+    auctionNumber: "",
+    status: "",
+    bdm: "",
+  };
+}
+
+function FilterSelect({ label, value, onChange, options, allLabel, disabled }) {
+  return (
+    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
+      <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">{label}</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        className="text-[14px] font-medium text-ink bg-transparent outline-none cursor-pointer max-w-[150px]"
+      >
+        <option value="">{allLabel}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+// Free-text exact-match filter, not a dropdown — auction_number has 10,772
+// distinct values on this table (verified against real data), far too
+// many for a usable <select>. Commits on blur/Enter only, never per
+// keystroke, so typing doesn't trigger a fetch on every character.
+function AuctionNumberFilter({ value, onChange }) {
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => setDraft(value), [value]);
+
+  function commit() {
+    const trimmed = draft.trim();
+    if (trimmed !== value) onChange(trimmed);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
+      <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">Auction #</span>
+      <input
+        type="text"
+        value={draft}
+        placeholder="All Auctions"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commit();
+            e.currentTarget.blur();
+          }
+        }}
+        className="text-[14px] font-medium text-ink bg-transparent outline-none w-[110px] placeholder:text-muted placeholder:font-normal"
+      />
+    </div>
+  );
+}
+
+function EndDateFilter({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 shrink-0">
+      <span className="text-[11px] uppercase tracking-wide text-muted font-semibold shrink-0">End Date</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="text-[14px] font-medium text-ink bg-transparent outline-none"
+      />
+    </div>
+  );
+}
+
+// AUCTION RESULT — operational report keyed on a single Manila calendar
+// day (End Date, defaulting to Yesterday PHT), reproducing the Superset
+// "Auction Result" report (xv3.mart_auction_vendor_analysis grouped by
+// Payment Status/For Approval Status) with its own Branch/Vendor/Auction
+// Number/Status/BDM filter set. Deliberately independent of the
+// dashboard's global Store/Category/WTD-MTD-YTD-Custom controls — see
+// App.jsx's hideFilters wiring on Topbar. One request per filter change
+// via useAuctionResult.js; filter option lists load once via
+// useAuctionResultFilters.js. No drilldowns, modals, exports, or charts.
 //
 // The Total row comes from the API's own separate, non-grouped `totals`
-// query — never a sum of this page's grouped rows, since a lot_number can
-// appear in more than one Payment/Approval status combination (verified
-// against real data; see api/overview.js's own comment on this handler).
-export default function AuctionResultView({ dateRange, store, category, rangeLabel, refreshNonce }) {
-  const { data, loading, error } = useAuctionResult(dateRange, store, category, refreshNonce);
+// query over the SAME filtered population — never a sum of this page's
+// grouped rows, since a lot_number can appear in more than one Payment/
+// Approval status combination (verified against real data; see
+// api/overview.js's own comment on this handler).
+export default function AuctionResultView({ refreshNonce }) {
+  const [filters, setFilters] = useState(defaultFilters);
+  const { filters: filterOptions, loading: filtersLoading } = useAuctionResultFilters();
+  const { data, loading, error } = useAuctionResult(filters, refreshNonce);
+
+  const setFilter = (key) => (value) => setFilters((f) => ({ ...f, [key]: value }));
+  const resetFilters = () => setFilters(defaultFilters());
+
+  const rows = data?.rows || [];
+  const totals = data?.totals || { count_of_lot: 0, reserved_price: 0, bid_amount: 0 };
+
+  const branches = filterOptions?.branches || [];
+  const vendors = filterOptions?.vendors || [];
+  const statuses = filterOptions?.statuses || [];
+  const bdms = filterOptions?.bdms || [];
+
+  const activeFilterCount = ["branch", "vendor", "auctionNumber", "status", "bdm"].filter((k) => filters[k]).length;
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Auction Result: {error}</div>;
   }
 
-  const rows = data?.rows || [];
-  const totals = data?.totals || { count_of_lot: 0, reserved_price: 0, bid_amount: 0 };
-
   return (
     <div className={loading && !data ? "opacity-50" : ""}>
-      <p className="text-[15.5px] text-muted mb-6">
-        Lot payment and approval status summary for the selected period. <span className="text-ink font-medium">{rangeLabel}</span>
-        {store ? <span> · {store}</span> : null}
-        {category ? <span> · {category}</span> : null}
-      </p>
+      <p className="text-[15.5px] text-muted mb-4">Lot payment and approval status summary for the selected End Date.</p>
+
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <FilterSelect label="Branch" value={filters.branch} onChange={setFilter("branch")} options={branches} allLabel="All Branches" disabled={filtersLoading} />
+        <FilterSelect label="Vendor" value={filters.vendor} onChange={setFilter("vendor")} options={vendors} allLabel="All Vendors" disabled={filtersLoading} />
+        <AuctionNumberFilter value={filters.auctionNumber} onChange={setFilter("auctionNumber")} />
+        <EndDateFilter value={filters.endDate} onChange={setFilter("endDate")} />
+        <FilterSelect label="Status" value={filters.status} onChange={setFilter("status")} options={statuses} allLabel="All Statuses" disabled={filtersLoading} />
+        <FilterSelect label="BDM" value={filters.bdm} onChange={setFilter("bdm")} options={bdms} allLabel="All BDMs" disabled={filtersLoading} />
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="text-[13.5px] font-semibold text-navy hover:underline shrink-0 px-1"
+          >
+            Reset Filters
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <div className="bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5">
@@ -70,7 +182,7 @@ export default function AuctionResultView({ dateRange, store, category, rangeLab
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-6 text-center text-muted text-[14px]">
-                  No auction result activity in this scope.
+                  No auction result activity for {filters.endDate} with the selected filters.
                 </td>
               </tr>
             )}
@@ -89,7 +201,7 @@ export default function AuctionResultView({ dateRange, store, category, rangeLab
       </div>
 
       <div className="text-[11.5px] text-muted mt-3">
-        Reflects every lot/status/approval combination for the selected period — not limited to Paid/Released lots. The Total row is its own distinct-lot count, not a sum of the rows above (a lot can appear under more than one status/approval combination).
+        Reflects every lot/status/approval combination for the selected End Date and filters — not limited to Paid/Released lots. The Total row is its own distinct-lot count, not a sum of the rows above (a lot can appear under more than one status/approval combination).
       </div>
     </div>
   );

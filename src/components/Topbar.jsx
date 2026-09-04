@@ -242,6 +242,7 @@ export default function Topbar({
   searchPool,
   dateRange,
   onDateRangeChange,
+  hideFilters = false,
   storeOptions,
   updatedAt,
   onRefresh,
@@ -268,8 +269,14 @@ export default function Topbar({
         <SearchBar pool={searchPool} />
 
         <div className="flex items-center gap-2 ml-auto shrink-0">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-          <StoreChip value={store} onChange={onStoreChange} options={storeOptions} />
+          {/* Auction Result owns its own Branch/Vendor/Auction Number/End
+              Date/Status/BDM filter bar (see AuctionResultView.jsx) and no
+              longer reads/writes the dashboard's global Store/Date-range
+              state at all, so these two shared controls are hidden while
+              it's active rather than shown but disconnected. Every other
+              tab is completely unaffected — hideFilters defaults to false. */}
+          {!hideFilters && <DateRangePicker value={dateRange} onChange={onDateRangeChange} />}
+          {!hideFilters && <StoreChip value={store} onChange={onStoreChange} options={storeOptions} />}
           <LiveDataBadge />
           <ExportButton onClick={onExportClick} />
           <RefreshButton onRefresh={onRefresh} />

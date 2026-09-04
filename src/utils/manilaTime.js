@@ -70,3 +70,20 @@ export function isEndingSoon(endingChDateTime, thresholdSec = 3600) {
   if (endMs == null) return false;
   return (endMs - Date.now()) / 1000 <= thresholdSec;
 }
+
+// Today's/yesterday's calendar date in Asia/Manila (fixed UTC+8, no DST) as
+// YYYY-MM-DD, computed from the real current instant — correct regardless
+// of the viewer's own browser timezone, unlike utils/dateRange.js's WTD/
+// MTD/YTD helpers (which intentionally use the browser's local calendar).
+// Used by Auction Result's End Date default (a genuinely Manila-anchored
+// operational report field, not a dashboard-wide date-range preset).
+export function manilaTodayISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+export function manilaYesterdayISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}

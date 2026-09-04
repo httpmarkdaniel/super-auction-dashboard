@@ -1473,10 +1473,13 @@ export default function App() {
   // currently active tab.
   const [bidderAnalyticsDateRange, setBidderAnalyticsDateRange] = useState("ytd");
   const [vendorAnalyticsDateRange, setVendorAnalyticsDateRange] = useState("ytd");
-  // Auction Result — same independent tab-scoped state pattern as the two
-  // above, also defaulting to YTD, so it can never leak its date range
-  // into (or inherit one from) Overview or any other tab.
-  const [auctionResultDateRange, setAuctionResultDateRange] = useState("ytd");
+  // Auction Result is NOT part of this WTD/MTD/YTD/Custom machinery at
+  // all any more (REVISED per operational redesign) — it's a single-
+  // Manila-day operational report with its own independent Branch/
+  // Vendor/Auction Number/End Date/Status/BDM filter bar, owned entirely
+  // by AuctionResultView.jsx's own component-local state. See
+  // effectiveDateRange/hideFilters below for how the shared Topbar
+  // controls stay out of its way.
 
   const [overviewCategory, setOverviewCategory] =
     useState("");
@@ -1578,31 +1581,19 @@ export default function App() {
 
   const bidderAnalyticsRangeLabel = resolveDateRange(bidderAnalyticsDateRange).label;
   const vendorAnalyticsRangeLabel = resolveDateRange(vendorAnalyticsDateRange).label;
-  const auctionResultRangeLabel = resolveDateRange(auctionResultDateRange).label;
 
-  // ONE Topbar date control shared by every tab — while Bidder/Vendor
-  // Analytics or Auction Result is active it reads/writes THAT tab's own
-  // independent date state instead of Overview's global `dateRange`/
-  // `setDateRange`, so the familiar picker still works exactly the same
-  // way (WTD/MTD/YTD/Custom, switchable any time — see
-  // effectiveSetDateRange) without any tab's selection ever touching
-  // another's or Overview's.
+  // ONE Topbar date control shared by every OTHER tab — while Bidder/
+  // Vendor Analytics is active it reads/writes THAT tab's own independent
+  // date state instead of Overview's global `dateRange`/`setDateRange`,
+  // so the familiar picker still works exactly the same way (WTD/MTD/
+  // YTD/Custom, switchable any time — see effectiveSetDateRange) without
+  // either tab's selection ever touching the other's or Overview's.
+  // Auction Result is NOT part of this indirection at all any more (see
+  // hideFilters below) — it never reads or writes any of these values.
   const effectiveDateRange =
-    tab === "Bidder Analytics"
-      ? bidderAnalyticsDateRange
-      : tab === "Vendor Analytics"
-        ? vendorAnalyticsDateRange
-        : tab === "Auction Result"
-          ? auctionResultDateRange
-          : dateRange;
+    tab === "Bidder Analytics" ? bidderAnalyticsDateRange : tab === "Vendor Analytics" ? vendorAnalyticsDateRange : dateRange;
   const effectiveSetDateRange =
-    tab === "Bidder Analytics"
-      ? setBidderAnalyticsDateRange
-      : tab === "Vendor Analytics"
-        ? setVendorAnalyticsDateRange
-        : tab === "Auction Result"
-          ? setAuctionResultDateRange
-          : setDateRange;
+    tab === "Bidder Analytics" ? setBidderAnalyticsDateRange : tab === "Vendor Analytics" ? setVendorAnalyticsDateRange : setDateRange;
 
   // DISABLED (Vercel P0 usage fix): useLiveOverview never populates a real
   // `overview.auctions` array — it only inherits MOCK_OVERVIEW's 10 fake
@@ -1663,6 +1654,7 @@ export default function App() {
           searchPool={searchPool}
           dateRange={effectiveDateRange}
           onDateRangeChange={effectiveSetDateRange}
+          hideFilters={tab === "Auction Result"}
           storeOptions={storeOptions}
           updatedAt={formatUpdatedAt(
             lastUpdated,
@@ -1807,15 +1799,7 @@ export default function App() {
             />
           )}
 
-          {tab === "Auction Result" && (
-            <AuctionResultView
-              dateRange={auctionResultDateRange}
-              store={store === ALL_STORES ? undefined : store}
-              category={overviewCategory}
-              rangeLabel={auctionResultRangeLabel}
-              refreshNonce={manualRefreshNonce}
-            />
-          )}
+          {tab === "Auction Result" && <AuctionResultView refreshNonce={manualRefreshNonce} />}
 
           {tab === "Export" && (
             <ExportView

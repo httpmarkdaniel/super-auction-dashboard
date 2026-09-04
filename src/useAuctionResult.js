@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { resolveDateRange } from "./utils/dateRange";
 
 function fetchJson(path, params = {}) {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))
@@ -11,11 +10,39 @@ function fetchJson(path, params = {}) {
   });
 }
 
-// Auction Result tab — one HTTP request to /api/overview?type=auction-result
-// (which itself runs one grouped + one totals ClickHouse query — see that
-// handler's own comment). Fetches only on mount, filter change, or manual
-// refresh — same pattern as useBidderAnalytics.js, no polling interval.
-export function useAuctionResult(dateRangeKey, store, category, refreshNonce = 0) {
+// Auction Result's own filter reference lists (Branch/Vendor/Status/BDM) —
+// fetched ONCE per Auction Result mount, never on every filter change (see
+// api/overview.js's type=auction-result-filters comment for why these are
+// global/all-time rather than scoped to the selected End Date).
+export function useAuctionResultFilters() {
+  const [state, setState] = useState({ filters: null, loading: true, error: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson("/api/overview", { type: "auction-result-filters" })
+      .then((result) => {
+        if (!cancelled) setState({ filters: result, loading: false, error: null });
+      })
+      .catch((err) => {
+        if (!cancelled) setState({ filters: null, loading: false, error: err.message });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
+// Auction Result's report data — one HTTP request to
+// /api/overview?type=auction-result per filter change (which itself runs
+// one grouped + one totals ClickHouse query — see that handler's own
+// comment). Fetches only on mount, filter change, or manual refresh — no
+// polling interval. No dependency on the dashboard's global from/to/
+// store/category state any more; this tab owns its own filter set
+// entirely (endDate/branch/vendor/auctionNumber/status/bdm).
+export function useAuctionResult(filters, refreshNonce = 0) {
+  const { endDate, branch, vendor, auctionNumber, status, bdm } = filters;
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
   useEffect(() => {
@@ -24,9 +51,15 @@ export function useAuctionResult(dateRangeKey, store, category, refreshNonce = 0
 
     async function load() {
       try {
-        const { from, to } = resolveDateRange(dateRangeKey);
-        const params = { from, to, store, category, type: "auction-result" };
-        const result = await fetchJson("/api/overview", params);
+        const result = await fetchJson("/api/overview", {
+          type: "auction-result",
+          endDate,
+          branch,
+          vendor,
+          auctionNumber,
+          status,
+          bdm,
+        });
         if (cancelled) return;
         setState({ data: result, loading: false, error: null });
       } catch (err) {
@@ -39,7 +72,7 @@ export function useAuctionResult(dateRangeKey, store, category, refreshNonce = 0
     return () => {
       cancelled = true;
     };
-  }, [dateRangeKey, store, category, refreshNonce]);
+  }, [endDate, branch, vendor, auctionNumber, status, bdm, refreshNonce]);
 
   return state;
 }
