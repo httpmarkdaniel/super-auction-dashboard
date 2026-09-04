@@ -159,7 +159,11 @@ export default async function handler(req, res) {
             sumIf(ifNull(sold_price, 0) - ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS buyers_premium_income,
             sumIf(ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100, status IN ('Paid', 'Released')) AS commission_income,
             uniqExact(auction_number) AS auction_events,
-            uniqExact(store_name) AS branches
+            uniqExact(store_name) AS branches,
+            -- Branch NAMES (not just the count above) for the hover's
+            -- "Branches Supplied" list — same current-period scope as
+            -- every other figure in this row, not all-time coverage.
+            groupUniqArray(store_name) AS branch_names
           FROM lots
           GROUP BY vendor
           ORDER BY settled_bid_amount DESC
@@ -181,10 +185,39 @@ export default async function handler(req, res) {
         format: "JSONEachRow",
       });
 
+      // ACCOUNT EXECUTIVE — account_executive lives directly on
+      // xv3.mart_auction_vendor_analysis, the SAME row/table every other
+      // vendor figure above already comes from, keyed by the exact same
+      // `vendor` column — no separate join, no fuzzy name matching, no
+      // inference from branch/category/auction. All-time/unscoped (an AE
+      // assignment is a vendor-level attribute, not a per-period one — same
+      // convention as vendorFirstSeenResult above). A vendor can show more
+      // than one AE across different lots/times in the source data; rather
+      // than arbitrarily pick one, this reports the MOST RECENT (by that
+      // lot's own date_created — the closest real timestamp available,
+      // since no dedicated AE-assignment-date field exists) via argMax,
+      // plus the full distinct set so the UI can honestly show "multiple
+      // assigned" instead of silently hiding the ambiguity.
+      const vendorAccountExecutiveResult = await client.query({
+        query: `
+          SELECT
+            ifNull(vendor, 'Unknown Vendor') AS vendor,
+            argMax(account_executive, date_created) AS latest_account_executive,
+            groupUniqArray(account_executive) AS all_account_executives
+          FROM xv3.mart_auction_vendor_analysis
+          WHERE vendor IS NOT NULL AND account_executive IS NOT NULL AND trim(account_executive) != ''
+          GROUP BY vendor
+        `,
+        query_params: {},
+        format: "JSONEachRow",
+      });
+
       const vendorAllLotsRows = await vendorAllLotsResult.json();
       const vendorFirstSeenRows = await vendorFirstSeenResult.json();
+      const vendorAccountExecutiveRows = await vendorAccountExecutiveResult.json();
 
       const vendorFirstSeenMap = new Map(vendorFirstSeenRows.map((r) => [r.vendor, r.first_seen]));
+      const vendorAccountExecutiveMap = new Map(vendorAccountExecutiveRows.map((r) => [r.vendor, r]));
       const activeVendorsCount = vendorAllLotsRows.length;
       const totalVendorBidAmount = vendorAllLotsRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
       const top5VendorRows = vendorAllLotsRows.slice(0, 5);
@@ -204,17 +237,29 @@ export default async function handler(req, res) {
           total_vendor_bid_amount: totalVendorBidAmount,
           top5_vendor_bid_amount: top5BidAmount,
           top5_vendor_concentration_pct: totalVendorBidAmount > 0 ? (top5BidAmount / totalVendorBidAmount) * 100 : null,
-          all_lots: vendorAllLotsRows.map((row) => ({
-            vendor: row.vendor,
-            lots_listed: Number(row.lots_listed ?? 0),
-            lots_sold: Number(row.lots_sold ?? 0),
-            settled_bid_amount: Number(row.settled_bid_amount ?? 0),
-            buyers_premium_income: Number(row.buyers_premium_income ?? 0),
-            commission_income: Number(row.commission_income ?? 0),
-            auction_events: Number(row.auction_events ?? 0),
-            branches: Number(row.branches ?? 0),
-            first_seen: vendorFirstSeenMap.get(row.vendor) ?? null,
-          })),
+          all_lots: vendorAllLotsRows.map((row) => {
+            const ae = vendorAccountExecutiveMap.get(row.vendor);
+            const allAEs = ae?.all_account_executives ?? [];
+            return {
+              vendor: row.vendor,
+              lots_listed: Number(row.lots_listed ?? 0),
+              lots_sold: Number(row.lots_sold ?? 0),
+              settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+              buyers_premium_income: Number(row.buyers_premium_income ?? 0),
+              commission_income: Number(row.commission_income ?? 0),
+              auction_events: Number(row.auction_events ?? 0),
+              branches: Number(row.branches ?? 0),
+              branch_names: row.branch_names ?? [],
+              first_seen: vendorFirstSeenMap.get(row.vendor) ?? null,
+              // account_executive: null when this vendor genuinely has no
+              // account_executive value on file — never fabricated.
+              // all_account_executives.length > 1 flags a real multi-AE
+              // case (see vendorAccountExecutiveResult comment) so the UI
+              // can say "multiple assigned" instead of silently picking one.
+              account_executive: ae?.latest_account_executive ?? null,
+              all_account_executives: allAEs,
+            };
+          }),
         },
       });
     }
@@ -1414,6 +1459,13 @@ export default async function handler(req, res) {
         const maxBidEvents = Number(row.max_bid_events ?? 0);
         return {
           bidder_name,
+          // Canonical email key (same lowerUTF8(trim(email)) identity as
+          // api/overview.js's bidder_engagement bidder_key) — exposed so
+          // the frontend can deterministically cross-reference this
+          // settled-bidder row against that SAME already-fetched dataset's
+          // registration/most-frequent-store/months-active enrichment
+          // (see BidderAnalyticsView.jsx) by KEY, never by name matching.
+          bidder_email: row.bidder_email ?? null,
           settled_lots,
           settled_wins: settled_lots,
           settled_bid_amount,

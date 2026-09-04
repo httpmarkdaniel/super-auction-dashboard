@@ -67,13 +67,29 @@ export function computeBucketFinancials(auctionSummary, bucket, bucketLabel) {
   const byBranch = new Map();
   for (const a of settledInBucket) {
     const key = a.storeName || "—";
-    if (!byBranch.has(key)) byBranch.set(key, { branch: key, auctions: new Set(), bidAmount: 0 });
+    if (!byBranch.has(key)) {
+      byBranch.set(key, { branch: key, auctions: new Set(), bidAmount: 0, lotsSold: 0, buyersPremium: 0, commission: 0 });
+    }
     const b = byBranch.get(key);
     b.auctions.add(a.auctionNumber);
     b.bidAmount += a.settledBidAmount || 0;
+    // Lots Sold is safe to sum per branch (an auction — and every lot in
+    // it — belongs to exactly one branch, unlike bidder counts which can
+    // repeat a person across auctions in the same branch).
+    b.lotsSold += a.lotsSold || 0;
+    b.buyersPremium += a.buyersPremiumIncome || 0;
+    b.commission += a.commissionIncome || 0;
   }
   const branches = [...byBranch.values()]
-    .map((b) => ({ branch: b.branch, auctionEvents: b.auctions.size, bidAmount: b.bidAmount }))
+    .map((b) => ({
+      branch: b.branch,
+      auctionEvents: b.auctions.size,
+      bidAmount: b.bidAmount,
+      lotsSold: b.lotsSold,
+      buyersPremium: b.buyersPremium,
+      commission: b.commission,
+      serviceIncome: b.buyersPremium + b.commission,
+    }))
     .sort((x, y) => y.bidAmount - x.bidAmount);
 
   return {

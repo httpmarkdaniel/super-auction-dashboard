@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
@@ -1377,16 +1377,6 @@ function OverviewTab({
               </div>
             );
           })()}
-          <div className="pt-2.5 border-t border-gridline grid grid-cols-2 gap-3">
-            <div>
-              <div className="text-[12px] text-muted">Win Rate</div>
-              <div className="tabular font-medium text-ink">{overview.bidderComposition.winRate != null ? `${overview.bidderComposition.winRate.toFixed(1)}%` : "—"}</div>
-            </div>
-            <div>
-              <div className="text-[12px] text-muted">Previous Rate</div>
-              <div className="tabular font-medium text-ink">{overview.bidderComposition.previousWinRate != null ? `${overview.bidderComposition.previousWinRate.toFixed(1)}%` : "—"}</div>
-            </div>
-          </div>
         </button>
 
         <div className="mt-3 text-[13.5px]">
@@ -1464,6 +1454,25 @@ export default function App() {
 
   const [dateRange, setDateRange] =
     useState(defaultDateRange);
+
+  // Bidder/Vendor Analytics default to Year to Date — a Week-to-Date
+  // window (the app's own global default, still correct for Overview)
+  // is close to useless for these two tabs specifically (registration
+  // dates, months-active, period-over-period vendor/bidder trends all
+  // need real history). Only fires while the user hasn't yet touched the
+  // Store/Date/Category picker for real (still exactly the untouched
+  // "wtd" default) — flips it to "ytd" once per visit to either tab, then
+  // gets out of the way: switching date range again, or navigating to any
+  // other tab, is never overridden.
+  useEffect(() => {
+    if ((tab === "Bidder Analytics" || tab === "Vendor Analytics") && dateRange === "wtd") {
+      setDateRange("ytd");
+    }
+    // Deliberately keyed on `tab` alone — this should re-check on every
+    // tab switch, never re-fire just because dateRange itself changed
+    // (that would fight a user who explicitly picks "wtd" back again).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const [overviewCategory, setOverviewCategory] =
     useState("");

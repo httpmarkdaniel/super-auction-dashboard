@@ -110,7 +110,11 @@ export default function BidTrendDetailModal({ bucket, onClose, bucketLabel, data
                 <tr className="text-ink text-[12.5px] uppercase tracking-wide">
                   <th className="text-left font-medium pb-2 pr-4">Branch</th>
                   <th className="text-right font-medium pb-2 pr-4">Auction Events</th>
-                  <th className="text-right font-medium pb-2">Bid Amount</th>
+                  <th className="text-right font-medium pb-2 pr-4">Lots Sold</th>
+                  <th className="text-right font-medium pb-2 pr-4">Bid Amount</th>
+                  <th className="text-right font-medium pb-2 pr-4">Buyer's Premium</th>
+                  <th className="text-right font-medium pb-2 pr-4">Service Fee</th>
+                  <th className="text-right font-medium pb-2">Service Income</th>
                 </tr>
               </thead>
               <tbody>
@@ -118,7 +122,11 @@ export default function BidTrendDetailModal({ bucket, onClose, bucketLabel, data
                   <tr key={b.branch} className="border-t border-gridline">
                     <td className="py-2 pr-4 text-ink">{b.branch}</td>
                     <td className="py-2 pr-4 text-right tabular text-ink">{b.auctionEvents}</td>
-                    <td className="py-2 text-right tabular text-series1 font-semibold">{formatPeso(b.bidAmount)}</td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">{b.lotsSold}</td>
+                    <td className="py-2 pr-4 text-right tabular text-series1 font-semibold">{formatPeso(b.bidAmount)}</td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">{formatCompactPeso(b.buyersPremium)}</td>
+                    <td className="py-2 pr-4 text-right tabular text-ink">{formatCompactPeso(b.commission)}</td>
+                    <td className="py-2 text-right tabular text-ink">{formatCompactPeso(b.serviceIncome)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -126,7 +134,7 @@ export default function BidTrendDetailModal({ bucket, onClose, bucketLabel, data
           </div>
         )}
         <div className="text-[11.5px] text-muted mt-2">
-          No category breakdown here — an auction can span multiple categories, so there is no cheap per-bucket category split at this grain.
+          No per-branch Participating/Winning Bidders or category breakdown here — summing bidder counts across auctions in the same branch would double-count a bidder active in more than one of them, and an auction can span multiple categories, so neither has a cheap, correct per-bucket split at this grain.
         </div>
       </div>
     </Modal>

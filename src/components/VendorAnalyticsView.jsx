@@ -5,21 +5,24 @@ import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import { formatPeso, formatCompactPeso } from "../utils/format";
 
-const STUCK_INVENTORY_MIN_LOTS = 20;
-
 // Compact hover profile for a Top 10 Vendor row (PART REORG task) — zero
 // network requests, every field already present on the enriched
 // vendor_analytics.all_lots row (see api/leaderboards.js's vendorAllLotsQuery
 // comment). "Date Registered" has no genuine source field on any vendor
 // mart this dashboard queries — only `first_seen` (min date_created, an
 // activity proxy) exists, so it's labeled "First Seen" rather than
-// misrepresented as a real registration date (per this task's own rule).
-// "Assigned Account Executive" has no corresponding field/join anywhere in
-// this codebase — shown as "Not Available", never inferred.
+// misrepresented as a real registration date. Account Executive comes
+// straight off xv3.mart_auction_vendor_analysis.account_executive, keyed
+// by the exact `vendor` this row is already grouped by (see
+// vendorAccountExecutiveResult) — never inferred/derived. A vendor with
+// more than one distinct AE on file shows "(N assigned)" rather than
+// silently picking one.
 function VendorHoverCard({ v }) {
   const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
+  const branchNames = v.branch_names || [];
+  const allAEs = v.all_account_executives || [];
   return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[290px]">
+    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[300px] max-h-[70vh] overflow-y-auto">
       <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide break-words">{v.vendor}</div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
         <div>
@@ -28,11 +31,17 @@ function VendorHoverCard({ v }) {
         </div>
         <div>
           <div className="text-muted text-[12px]">Assigned Account Executive</div>
-          <div className="tabular font-medium text-muted">Not Available</div>
+          <div className="tabular font-medium">
+            {v.account_executive || "Not Available"}
+            {allAEs.length > 1 && <span className="text-muted font-normal"> ({allAEs.length} assigned)</span>}
+          </div>
         </div>
         <div className="col-span-2">
-          <div className="text-muted text-[12px]">Branches Supplied</div>
-          <div className="tabular font-medium">{v.branches} <span className="text-muted font-normal">(this period)</span></div>
+          <div className="text-muted text-[12px]">Branches Supplied <span className="font-normal">(this period)</span></div>
+          <div className="tabular font-medium">
+            {branchNames.length > 0 ? branchNames.slice(0, 4).join(" · ") : "—"}
+            {branchNames.length > 4 && <span className="text-muted"> +{branchNames.length - 4} more</span>}
+          </div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
@@ -51,6 +60,14 @@ function VendorHoverCard({ v }) {
         <div>
           <div className="text-muted text-[12px]">Sold Bid Value</div>
           <div className="tabular font-medium">{formatPeso(v.settled_bid_amount)}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Buyer's Premium</div>
+          <div className="tabular font-medium">{formatPeso(v.buyers_premium_income || 0)}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Service Fee</div>
+          <div className="tabular font-medium">{formatPeso(v.commission_income || 0)}</div>
         </div>
         <div className="col-span-2">
           <div className="text-muted text-[12px]">Service Income</div>
@@ -82,15 +99,6 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
 
   const top10ByBidAmount = [...allLots].sort((a, b) => b.settled_bid_amount - a.settled_bid_amount).slice(0, 10);
   const top5 = top10ByBidAmount.slice(0, 5);
-
-  // Stuck Inventory — meaningful inventory volume only (>= 20 lots
-  // listed), lowest sell-through first, so a vendor with 1-2 lots and a
-  // 0% sell-through doesn't dominate the ranking.
-  const stuckInventory = allLots
-    .filter((v) => v.lots_listed >= STUCK_INVENTORY_MIN_LOTS)
-    .map((v) => ({ ...v, sellThroughPct: v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : 0 }))
-    .sort((a, b) => a.sellThroughPct - b.sellThroughPct)
-    .slice(0, 10);
 
   // TOP 10 VENDORS — two ranking modes (PART REORG task), both derived
   // client-side from the SAME already-loaded, now-enriched allLots array
@@ -159,18 +167,6 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
         />
       </StorySection>
 
-      <StorySection title="Stuck Inventory — Lowest Sell-Through" insight={`Vendors with ${STUCK_INVENTORY_MIN_LOTS}+ lots listed, worst sell-through first.`}>
-        <RankedMetricBar
-          rows={stuckInventory.map((v) => ({ ...v, sellThroughPctRounded: Number(v.sellThroughPct.toFixed(1)) }))}
-          labelKey="vendor"
-          valueKey="sellThroughPctRounded"
-          max={100}
-          formatValue={(r) => `${r.sellThroughPctRounded}%`}
-          subLabel={(r) => `${r.lots_sold} / ${r.lots_listed} lots`}
-          emptyMessage={`No vendor with ${STUCK_INVENTORY_MIN_LOTS}+ lots listed in this scope.`}
-        />
-      </StorySection>
-
       <StorySection
         title={`Top 10 Vendors — ${rangeLabel}`}
         insight="Hover a vendor for their profile. Switch ranking mode to see the same 10-row limit ranked a different way."
@@ -219,14 +215,14 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
               )}
             </thead>
             <tbody>
-              {topVendors.map((v) => {
+              {topVendors.map((v, i) => {
                 const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
                 const serviceIncome = (v.buyers_premium_income || 0) + (v.commission_income || 0);
                 return (
                   <tr key={v.vendor} className="border-t border-gridline hover:bg-plane/60 transition-colors">
-                    <td className="relative py-2 px-3 text-ink group/tip">
-                      {v.vendor}
-                      <div className="pointer-events-none absolute left-0 top-full mt-1 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]">
+                    <td className="relative py-2 px-3 text-ink group/tip max-w-[220px]">
+                      <span className="block truncate" title={v.vendor}>{v.vendor}</span>
+                      <div className={`pointer-events-none absolute left-0 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60] ${i >= topVendors.length - 3 ? "bottom-full mb-1" : "top-full mt-1"}`}>
                         <VendorHoverCard v={v} />
                       </div>
                     </td>

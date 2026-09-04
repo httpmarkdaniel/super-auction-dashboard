@@ -2,23 +2,34 @@ import { useState } from "react";
 import { useBidderAnalytics } from "../useBidderAnalytics";
 import StorySection from "./primitives/StorySection";
 import StatTile from "./primitives/StatTile";
-import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import BiddingPaceView from "./BiddingPaceView";
 import { formatPeso } from "../utils/format";
+import { formatManila } from "../utils/manilaTime";
+
+function HoverField({ label, value }) {
+  return (
+    <div>
+      <div className="text-muted text-[12px]">{label}</div>
+      <div className="tabular font-medium">{value ?? "—"}</div>
+    </div>
+  );
+}
 
 // Compact hover profile for a Top 10 Bidder row (PART REORG task) — zero
-// network requests, every field is already present on the row passed in
-// (either a leaderboards.bidders row, "By Winning Bid Amount" mode, or an
-// overview.bidder_engagement row, "By Bid Activity" mode — see
-// BY_ACTIVITY_MODE below for exactly which fields each shape has).
-// "Date Registered" and "Most Frequent Store" are not available from any
-// endpoint this dashboard currently queries for an individual bidder (only
-// vendors have a first-seen proxy) — shown as "Not Available" rather than
-// fabricated, per this task's own explicit rule.
-function BidderHoverCard({ row, mode }) {
+// network requests. Registered/Most Frequent Store/Months Active/Last
+// Active come from api/overview.js's enriched bidder_engagement (real
+// cms.mart_cms_bidder_registrations.bidder_registered_at + real bid-history
+// store activity, joined by canonical email — see that file's comments);
+// for "By Winning Bid Amount" mode rows, BidderAnalyticsView.jsx
+// cross-references the SAME already-fetched dataset by the shared
+// bidder_email/bidder_key canonical identity, never by name matching.
+// Winning Auctions/Lots/Amount/Max Bid Usage % are null (shown as "—") in
+// "By Bid Activity" mode — that dataset is bid-activity-only and cannot be
+// reliably joined to the separate settled-bidder identity bridge.
+function BidderHoverCard({ row }) {
   return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[280px]">
+    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[290px] max-h-[70vh] overflow-y-auto">
       <div className="flex items-center gap-2 mb-2">
         <span className="font-semibold text-[14px] uppercase tracking-wide break-words">{row.name}</span>
         {row.isNew != null && (
@@ -27,57 +38,29 @@ function BidderHoverCard({ row, mode }) {
           </span>
         )}
       </div>
+
+      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Profile</div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
-        <div>
-          <div className="text-muted text-[12px]">Date Registered</div>
-          <div className="tabular font-medium text-muted">Not Available</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Most Frequent Store</div>
-          <div className="tabular font-medium text-muted">Not Available</div>
-        </div>
+        <HoverField label="Date Registered" value={row.registeredAt ? formatManila(row.registeredAt, { withYear: true }) : "Not Available"} />
+        <HoverField label="Most Frequent Store" value={row.mostFrequentStore || "Not Available"} />
       </div>
+
+      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Activity</div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
-        <div>
-          <div className="text-muted text-[12px]">Auctions Participated</div>
-          <div className="tabular font-medium">{row.auctionsParticipated ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Distinct Lots Bid On</div>
-          <div className="tabular font-medium">{row.distinctLotsBidOn ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Total Bid Actions</div>
-          <div className="tabular font-medium">{row.totalBidActions ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Avg Bid Actions / Lot</div>
-          <div className="tabular font-medium text-series1">{row.avgBidActionsPerLot != null ? row.avgBidActionsPerLot.toFixed(2) : "—"}</div>
-        </div>
+        <HoverField label="Auctions Participated" value={row.auctionsParticipated} />
+        <HoverField label="Distinct Lots Bid On" value={row.distinctLotsBidOn} />
+        <HoverField label="Total Bid Actions" value={row.totalBidActions} />
+        <HoverField label="Avg Bid Actions / Lot" value={row.avgBidActionsPerLot != null ? row.avgBidActionsPerLot.toFixed(2) : null} />
+        <HoverField label="Months Active" value={row.monthsActive} />
+        <HoverField label="Last Active" value={row.lastActiveAt ? formatManila(row.lastActiveAt, { withYear: true }) : null} />
       </div>
+
+      <div className="text-[10.5px] uppercase tracking-wide text-muted font-semibold mb-1">Winning</div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-        <div>
-          <div className="text-muted text-[12px]">Winning Auctions</div>
-          <div className="tabular font-medium">{row.winningAuctions ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Winning Lots</div>
-          <div className="tabular font-medium">{row.winningLots ?? "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Winning Bid Amount</div>
-          <div className="tabular font-medium">{row.winningBidAmount != null ? formatPeso(row.winningBidAmount) : "—"}</div>
-        </div>
-        <div>
-          <div className="text-muted text-[12px]">Win Rate</div>
-          <div className="tabular font-medium">{row.winRatePct != null ? `${row.winRatePct.toFixed(1)}%` : "—"}</div>
-        </div>
-        {mode === "amount" && (
-          <div className="col-span-2">
-            <div className="text-muted text-[12px]">Max Bid Usage %</div>
-            <div className="tabular font-medium">{row.maxBidUsagePct != null ? `${row.maxBidUsagePct.toFixed(1)}%` : "—"}</div>
-          </div>
-        )}
+        <HoverField label="Winning Auctions" value={row.winningAuctions} />
+        <HoverField label="Winning Lots" value={row.winningLots} />
+        <HoverField label="Winning Bid Amount" value={row.winningBidAmount != null ? formatPeso(row.winningBidAmount) : null} />
+        <HoverField label="Max Bid Usage %" value={row.maxBidUsagePct != null ? `${row.maxBidUsagePct.toFixed(1)}%` : null} />
       </div>
     </div>
   );
@@ -130,17 +113,6 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
   const alwaysActive = bidderAnalytics.always_active;
   const wentQuiet = bidderAnalytics.went_quiet;
 
-  const mostActiveBidder = (overview.bidder_engagement || [])[0] || null;
-
-  const categoryRows = (overview.categories || [])
-    .filter((c) => c.category && Number(c.participating_new ?? 0) + Number(c.participating_returning ?? 0) > 0)
-    .map((c) => ({
-      category: c.category,
-      participating: (Number(c.participating_new) || 0) + (Number(c.participating_returning) || 0),
-    }))
-    .sort((a, b) => b.participating - a.participating);
-  const totalCategoryParticipating = participatingTotal || 1;
-
   // TOP 10 BIDDERS — two ranking modes (PART REORG task), both zero-new-
   // request: "By Winning Bid Amount" reuses leaderboards.bidders as-is
   // (already top-10, already sorted). "By Bid Activity" sorts/slices the
@@ -158,10 +130,23 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
     .slice(0, 10);
   const topBidders = bidderRankMode === "amount" ? topBiddersByAmount : topBiddersByActivity;
 
+  // Deterministic cross-reference (PART REORG follow-up), NOT a name match:
+  // both leaderboards.bidders' bidder_email and overview.bidder_engagement's
+  // bidder_key are the SAME lowerUTF8(trim(email)) canonical identity. Lets
+  // "By Winning Bid Amount" mode show the SAME real registration/most-
+  // frequent-store/months-active profile fields "By Bid Activity" already
+  // has, using data already fetched by this SAME tab — no new request.
+  const engagementByEmail = new Map((overview.bidder_engagement || []).map((e) => [e.bidder_key, e]));
+
   function toHoverRow(b) {
     if (bidderRankMode === "amount") {
+      const enrichment = b.bidder_email ? engagementByEmail.get(b.bidder_email) : null;
       return {
         name: b.bidder_name,
+        registeredAt: enrichment?.registered_at ?? null,
+        mostFrequentStore: enrichment?.most_frequent_store ?? null,
+        monthsActive: enrichment?.months_active ?? null,
+        lastActiveAt: enrichment?.last_active_at ?? null,
         isNew: b.new_or_returning === "new",
         auctionsParticipated: b.auctions_participated,
         distinctLotsBidOn: b.distinct_lots_bid_on,
@@ -175,17 +160,24 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
       };
     }
     return {
-      name: b.display_name,
+      name: b.bidder_name || b.bidder,
+      registeredAt: b.registered_at,
+      mostFrequentStore: b.most_frequent_store,
+      monthsActive: b.months_active,
+      lastActiveAt: b.last_active_at,
       isNew: b.is_new,
       auctionsParticipated: b.auctions_participated,
       distinctLotsBidOn: b.distinct_lots,
       totalBidActions: b.bid_events,
       avgBidActionsPerLot: b.distinct_lots > 0 ? b.bid_events / b.distinct_lots : null,
       winningAuctions: null,
-      winningLots: null,
-      winningBidAmount: null,
+      // This dataset is bid-activity only — winning figures require the
+      // separate settled-bidder identity bridge and can't be reliably
+      // joined here (see api/overview.js's bidderEngagement comment).
+      winningLots: b.winning_lots,
+      winningBidAmount: b.winning_bid_amount,
       winRatePct: null,
-      maxBidUsagePct: null,
+      maxBidUsagePct: b.max_bid_usage_pct,
     };
   }
 
@@ -243,42 +235,6 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
         <PeriodStackedBar rows={bidderAnalytics.by_period} bucketLabel={bidderAnalytics.bucket_label} />
       </StorySection>
 
-      <StorySection title="Most Active Bidder" insight={`Highest real bid-event count for ${rangeLabel}.`}>
-        {mostActiveBidder ? (
-          <div className="bg-surface1 border border-gridline rounded-lg px-5 py-4 max-w-md">
-            <div className="text-[19px] text-ink font-medium mb-2">{mostActiveBidder.bidder}</div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <div className="kpi-label mb-1">Total Bids</div>
-                <div className="font-display text-[24px] leading-none text-ink">{mostActiveBidder.bid_events}</div>
-              </div>
-              <div>
-                <div className="kpi-label mb-1">Distinct Lots</div>
-                <div className="font-display text-[24px] leading-none text-ink">{mostActiveBidder.distinct_lots}</div>
-              </div>
-              <div>
-                <div className="kpi-label mb-1">Avg Bids / Lot</div>
-                <div className="font-display text-[24px] leading-none text-series1">
-                  {mostActiveBidder.avg_bids_per_lot != null ? mostActiveBidder.avg_bids_per_lot.toFixed(2) : "—"}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-center text-muted text-[15px] py-6">No bidder activity in this scope.</div>
-        )}
-      </StorySection>
-
-      <StorySection title="Bidders by Category" insight="A bidder may appear in multiple categories, so shares do not need to sum to 100%.">
-        <RankedMetricBar
-          rows={categoryRows}
-          labelKey="category"
-          valueKey="participating"
-          formatValue={(r) => `${r.participating} (${((r.participating / totalCategoryParticipating) * 100).toFixed(1)}%)`}
-          emptyMessage="No category-level bidder activity in this scope."
-        />
-      </StorySection>
-
       <StorySection
         title={`Top 10 Bidders — ${rangeLabel}`}
         insight="Hover a bidder for their profile. Switch ranking mode to see the same 10-row limit ranked a different way — the two modes can surface different bidders."
@@ -306,20 +262,22 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
             <thead>
               {bidderRankMode === "amount" ? (
                 <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
-                  <th className="text-left font-medium py-2 px-3">Bidder</th>
+                  <th className="text-left font-medium py-2 px-3 min-w-[160px]">Bidder</th>
                   <th className="text-right font-medium py-2 px-3">Winning Lots</th>
                   <th className="text-right font-medium py-2 px-3">Winning Bid Amount</th>
                   <th className="text-right font-medium py-2 px-3">Auctions Won</th>
                   <th className="text-right font-medium py-2 px-3">Branches</th>
                   <th className="text-right font-medium py-2 px-3">Max Bid Usage %</th>
+                  <th className="text-right font-medium py-2 px-3">Months Active</th>
                 </tr>
               ) : (
                 <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
-                  <th className="text-left font-medium py-2 px-3">Bidder</th>
+                  <th className="text-left font-medium py-2 px-3 min-w-[160px]">Bidder</th>
                   <th className="text-right font-medium py-2 px-3">Total Bid Actions</th>
                   <th className="text-right font-medium py-2 px-3">Distinct Lots Bid On</th>
                   <th className="text-right font-medium py-2 px-3">Avg Bid Actions / Lot</th>
                   <th className="text-right font-medium py-2 px-3">Auctions Participated</th>
+                  <th className="text-right font-medium py-2 px-3">Months Active</th>
                   <th className="text-right font-medium py-2 px-3">Winning Lots</th>
                   <th className="text-right font-medium py-2 px-3">Winning Bid Amount</th>
                 </tr>
@@ -327,13 +285,19 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
             </thead>
             <tbody>
               {topBidders.map((b, i) => {
-                const key = bidderRankMode === "amount" ? b.bidder_name : b.bidder_key;
-                const name = bidderRankMode === "amount" ? b.bidder_name : b.display_name;
+                // PART REORG follow-up fix: the "By Bid Activity" name bug
+                // was this reading `b.display_name`, a field that was
+                // never actually exposed on bidder_engagement rows (the
+                // real field is `bidder`/`bidder_name` — see
+                // api/overview.js's bidderEngagement mapping).
+                const hoverRow = toHoverRow(b);
+                const key = bidderRankMode === "amount" ? b.bidder_email || b.bidder_name : b.bidder_key;
+                const name = bidderRankMode === "amount" ? b.bidder_name : b.bidder_name || b.bidder;
                 const nameCell = (
-                  <td className="relative py-2 px-3 text-ink group/tip">
-                    {name}
-                    <div className="pointer-events-none absolute left-0 top-full mt-1 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]">
-                      <BidderHoverCard row={toHoverRow(b)} mode={bidderRankMode} />
+                  <td className="relative py-2 px-3 text-ink group/tip max-w-[220px]">
+                    <span className="block truncate" title={name}>{name}</span>
+                    <div className={`pointer-events-none absolute left-0 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60] ${i >= topBidders.length - 3 ? "bottom-full mb-1" : "top-full mt-1"}`}>
+                      <BidderHoverCard row={hoverRow} />
                     </div>
                   </td>
                 );
@@ -347,6 +311,7 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
                         <td className="py-2 px-3 text-right tabular text-ink">{b.winning_auctions}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.branches}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.max_bid_usage_pct != null ? `${b.max_bid_usage_pct.toFixed(1)}%` : "—"}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{hoverRow.monthsActive ?? "—"}</td>
                       </>
                     ) : (
                       <>
@@ -355,6 +320,7 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
                         <td className="py-2 px-3 text-right tabular text-ink">{b.distinct_lots}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.distinct_lots > 0 ? (b.bid_events / b.distinct_lots).toFixed(2) : "—"}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{b.auctions_participated}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{b.months_active ?? "—"}</td>
                         <td className="py-2 px-3 text-right tabular text-muted">—</td>
                         <td className="py-2 px-3 text-right tabular text-muted">—</td>
                       </>
@@ -364,7 +330,7 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
               })}
               {topBidders.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted text-[14.5px]">
+                  <td colSpan={8} className="py-6 text-center text-muted text-[14.5px]">
                     {bidderRankMode === "amount" ? "No settled winning bidders in this scope." : "No bidder activity in this scope."}
                   </td>
                 </tr>

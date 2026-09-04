@@ -2541,6 +2541,8 @@ export default async function handler(req, res) {
             -- a safe dedup here (never a fabricated name — this is the
             -- authoritative stored customer name, not derived from email).
             any(b.customer_name) AS display_name,
+            any(b.customer_firstname) AS firstname,
+            any(b.customer_lastname) AS lastname,
             count() AS bid_events,
             uniqExact(b.auction_number) AS auctions_participated,
             -- Lot identity for the Avg Bids / Unique Bidder ratio is
@@ -2549,7 +2551,14 @@ export default async function handler(req, res) {
             -- otherwise silently under-count a bidder's real distinct-lot
             -- denominator. uniqExact(a, b) counts distinct (a, b) pairs.
             uniqExact(b.auction_number, b.lot_number) AS distinct_lots,
-            sum(b.bid_amount) AS bid_activity_amount
+            sum(b.bid_amount) AS bid_activity_amount,
+            -- MONTHS ACTIVE / LAST ACTIVE — bounded to the SAME selected
+            -- cohort as everything else here (this period's ending_time
+            -- auctions), never an unscoped all-time scan. "Months Active"
+            -- = distinct calendar months (Asia/Manila) in which this
+            -- bidder placed a real bid WITHIN the selected scope.
+            uniqExact(toStartOfMonth(b.bid_created_at, 'Asia/Manila')) AS months_active,
+            max(b.bid_created_at) AS last_active_at
 
           FROM cms.mart_cms_bid_history_report b
 
@@ -2570,15 +2579,68 @@ export default async function handler(req, res) {
             AND ({category:String} = '' OR lc.lot_category = {category:String})
 
           GROUP BY bidder_key
+        ),
+
+        -- MOST FREQUENT STORE — store/branch with the highest number of
+        -- DISTINCT AUCTIONS this bidder participated in within the
+        -- selected cohort (never customer address, never inferred from
+        -- winning-only activity). Tie-break 1: more real bid events at
+        -- that store. A bidder still fully tied on both measures resolves
+        -- to ClickHouse's own deterministic (but not alphabetically
+        -- ordered) argMax row choice — a documented, rare-case limitation,
+        -- not a fabricated value.
+        bidder_store_activity AS (
+          SELECT
+            lowerUTF8(trim(b.email)) AS bidder_key,
+            s.store_name AS store_name,
+            uniqExact(b.auction_number) AS store_auctions,
+            count() AS store_bid_events
+          FROM cms.mart_cms_bid_history_report b
+          INNER JOIN selected_auctions s ON b.auction_number = s.auction_number
+          WHERE b.email IS NOT NULL AND trim(b.email) != ''
+          GROUP BY bidder_key, s.store_name
+        ),
+        bidder_top_store AS (
+          SELECT
+            bidder_key,
+            argMax(store_name, (store_auctions, store_bid_events)) AS most_frequent_store
+          FROM bidder_store_activity
+          GROUP BY bidder_key
+        ),
+
+        -- DATE REGISTERED — earliest bidder_registered_at (see
+        -- cms.mart_cms_bidder_registrations, one row per auction a
+        -- customer registered for) for this canonical email, unscoped by
+        -- date/store/category (a bidder's registration predates any one
+        -- period's activity by definition). Joined by normalized email —
+        -- the SAME canonical identity bidder_key already uses throughout
+        -- this query, since bidder_registrations carries email directly
+        -- (no customer_id hop needed here, unlike the settled-lot identity
+        -- bridge in _bidderIdentity.js, which starts from a different
+        -- population). NULL when this bidder genuinely has no registration
+        -- row on file — never fabricated.
+        bidder_registration AS (
+          SELECT
+            lowerUTF8(trim(email)) AS bidder_key,
+            min(bidder_registered_at) AS registered_at
+          FROM cms.mart_cms_bidder_registrations
+          WHERE email IS NOT NULL AND trim(email) != '' AND bidder_registered_at IS NOT NULL
+          GROUP BY bidder_key
         )
 
         SELECT
           ba.bidder_key AS bidder_key,
           ba.display_name AS display_name,
+          ba.firstname AS firstname,
+          ba.lastname AS lastname,
           ba.bid_events AS bid_events,
           ba.auctions_participated AS auctions_participated,
           ba.distinct_lots AS distinct_lots,
           ba.bid_activity_amount AS bid_activity_amount,
+          ba.months_active AS months_active,
+          ba.last_active_at AS last_active_at,
+          ts.most_frequent_store AS most_frequent_store,
+          r.registered_at AS registered_at,
           -- Same New/Returning boundary as every other Participating query
           -- in this file (first-ever bid at/after this period's start) —
           -- computed in SQL, never re-derived from a parsed timestamp in
@@ -2589,6 +2651,12 @@ export default async function handler(req, res) {
 
         INNER JOIN bidder_first_bid f
           ON ba.bidder_key = f.bidder_key
+
+        LEFT JOIN bidder_top_store ts
+          ON ba.bidder_key = ts.bidder_key
+
+        LEFT JOIN bidder_registration r
+          ON ba.bidder_key = r.bidder_key
 
         ORDER BY bid_events DESC
       `,
@@ -2654,12 +2722,18 @@ export default async function handler(req, res) {
       const auctionsParticipated = Number(row.auctions_participated ?? 0);
       const distinctLots = Number(row.distinct_lots ?? 0);
       const displayName = row.display_name != null ? String(row.display_name).trim() : "";
+      // Name fallback chain (PART REORG follow-up task) — customer_name
+      // first (the authoritative stored name), then firstname+lastname,
+      // and ONLY as a last resort a masked bidder_key-derived label —
+      // never the raw email as the normal visible name.
+      const firstLast = [row.firstname, row.lastname].filter((v) => v != null && String(v).trim() !== "").join(" ").trim();
+      const bidderName = displayName || firstLast || "Unknown Bidder";
       return {
-        // Real customer name only — never the bidder's email, not even as
-        // a fallback (see AVG BIDS / UNIQUE BIDDER query comment above).
-        // "Unknown Bidder" only triggers if the warehouse genuinely has no
-        // name on file — verified 0% occurrence in production today.
-        bidder: displayName || "Unknown Bidder",
+        // Kept for backward compatibility with existing UI reading
+        // `.bidder` (Most Active Bidder / hover, etc.).
+        bidder: bidderName,
+        bidder_name: bidderName,
+        bidder_key: row.bidder_key,
         is_new: Boolean(Number(row.is_new)),
         bid_events: bidEvents,
         distinct_lots: distinctLots,
@@ -2670,6 +2744,27 @@ export default async function handler(req, res) {
         auctions_participated: auctionsParticipated,
         avg_bids_per_auction_participated: auctionsParticipated > 0 ? bidEvents / auctionsParticipated : null,
         bid_activity_amount: Number(row.bid_activity_amount ?? 0),
+        // PART REORG follow-up (Top 10 Bidders — By Bid Activity profile
+        // fields): registered_at is null when this bidder genuinely has no
+        // cms.mart_cms_bidder_registrations row — surfaced as-is, never
+        // fabricated. months_active/last_active_at are bounded to the
+        // SAME selected date/store/category scope as every other figure
+        // here (not an all-time count). most_frequent_store is null only
+        // if this bidder somehow has zero resolvable store activity
+        // (should not happen for anyone with bid_events > 0).
+        registered_at: row.registered_at ?? null,
+        most_frequent_store: row.most_frequent_store ?? null,
+        months_active: Number(row.months_active ?? 0),
+        last_active_at: row.last_active_at ?? null,
+        // This dataset is bid-ACTIVITY only (real bid_history events), not
+        // settlement — winning lots/amount/max-bid-usage require the
+        // separate settled-bidder identity bridge (api/leaderboards.js's
+        // settledBiddersQuery) and cannot be reliably joined here by name.
+        // Always null, never guessed — see BidderAnalyticsView.jsx for how
+        // the UI renders this as "—".
+        winning_lots: null,
+        winning_bid_amount: null,
+        max_bid_usage_pct: null,
       };
     });
 

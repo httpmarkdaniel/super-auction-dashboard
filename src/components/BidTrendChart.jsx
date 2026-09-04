@@ -166,9 +166,9 @@ function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
   const financials = computeBucketFinancials(auctionSummary, d.bucket, bucketLabel);
 
   return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[280px] max-w-[340px]">
+    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[300px] max-w-[360px] max-h-[75vh] overflow-y-auto">
+      {/* 1. PERIOD + 2. TOTAL BID AMOUNT */}
       <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatTooltipLabel(d.bucket, bucketLabel)}</div>
-
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2.5 pb-2.5 border-b border-gridline">
         <div>
           <div className="text-muted text-[11.5px]">Total Bid Amount</div>
@@ -184,6 +184,28 @@ function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
         </div>
       </div>
 
+      {/* 3. AUCTION EVENTS BY BRANCH — moved right after Total Bid Amount
+          (was previously last/buried at the bottom of this hover). */}
+      <div className="mb-2.5 pb-2.5 border-b border-gridline">
+        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Auction Events by Branch</div>
+        {financials.branches.length === 0 ? (
+          <div className="text-[12px] text-muted">No settled auction activity.</div>
+        ) : (
+          <div className="space-y-0.5">
+            {financials.branches.slice(0, 4).map((b) => (
+              <div key={b.branch} className="flex items-center justify-between gap-2 text-[12px]">
+                <span className="text-ink truncate">{b.branch}</span>
+                <span className="tabular text-muted shrink-0">{b.auctionEvents} Auction{b.auctionEvents === 1 ? "" : "s"} · {formatCompactPeso(b.bidAmount)}</span>
+              </div>
+            ))}
+            {financials.branches.length > 4 && (
+              <div className="text-[11px] text-muted">+{financials.branches.length - 4} more — click for the full breakdown</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 4. PARTICIPATING / WINNING */}
       <div className="mb-2.5 pb-2.5 border-b border-gridline">
         <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-0.5">
           Participating Bidders — {p.new + p.returning}
@@ -204,7 +226,8 @@ function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
         </div>
       </div>
 
-      <div className="mb-2.5 pb-2.5 border-b border-gridline">
+      {/* 5. SERVICE INCOME BREAKDOWN */}
+      <div>
         <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Service Income</div>
         <div className="grid grid-cols-3 gap-2">
           <div>
@@ -220,25 +243,6 @@ function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
             <div className="tabular font-medium text-series1">{formatCompactPeso(financials.serviceIncome)}</div>
           </div>
         </div>
-      </div>
-
-      <div>
-        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Auction Events by Branch</div>
-        {financials.branches.length === 0 ? (
-          <div className="text-[12px] text-muted">No settled auction activity.</div>
-        ) : (
-          <div className="space-y-0.5">
-            {financials.branches.slice(0, 4).map((b) => (
-              <div key={b.branch} className="flex items-center justify-between gap-2 text-[12px]">
-                <span className="text-ink truncate">{b.branch}</span>
-                <span className="tabular text-muted shrink-0">{b.auctionEvents} · {formatCompactPeso(b.bidAmount)}</span>
-              </div>
-            ))}
-            {financials.branches.length > 4 && (
-              <div className="text-[11px] text-muted">+{financials.branches.length - 4} more — click for the full breakdown</div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -355,6 +359,14 @@ export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, a
               <Tooltip
                 content={<DailyTooltip bucketLabel={bucketLabel} auctionSummary={auctionSummary} />}
                 cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }}
+                // The hover content grew substantially richer (Auction
+                // Events by Branch + Service Income breakdown) — letting it
+                // escape the chart's own SVG viewBox (both axes) stops it
+                // from being squeezed/clipped against the chart's own
+                // bounding box near the left/right/top edges. wrapperStyle's
+                // zIndex keeps it above sibling cards regardless of DOM order.
+                allowEscapeViewBox={{ x: true, y: true }}
+                wrapperStyle={{ zIndex: 60 }}
               />
               <Area
                 type="linear"

@@ -187,6 +187,17 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
               bid_trend: liveOverview.bid_trend ?? [],
               bid_trend_bucket_label: liveOverview.bid_trend_bucket_label ?? "day",
 
+              // CATEGORY PERFORMANCE's Lots Listed/Sold (broader Sold
+              // definition, matching Branch Performance) — see
+              // api/overview.js's categoryLotStatusResultPromise. Root
+              // cause of the "always 0" bug: this field was present on the
+              // raw API response all along (verified directly against the
+              // backend) but was never copied into this whitelisted state
+              // object, so App.jsx's buildLiveOverview always read
+              // kpis.category_lot_status as undefined. Not a query/join/
+              // category-mapping bug.
+              category_lot_status: liveOverview.category_lot_status ?? [],
+
               // Registration -> Bidder Conversion — see api/overview.js's
               // REGISTRATION -> BIDDER CONVERSION query comment.
               registered_customers: liveOverview.registered_customers ?? 0,
