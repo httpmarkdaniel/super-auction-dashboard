@@ -95,6 +95,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
 
         <NavGroup label="Reports">
           <NavItem label="Export" active={active === "Export"} onClick={() => go("Export")} />
+          <NavItem label="Auction Result" active={active === "Auction Result"} onClick={() => go("Auction Result")} />
         </NavGroup>
 
         {/* Deliberately separated from the analytics/reports groups above —

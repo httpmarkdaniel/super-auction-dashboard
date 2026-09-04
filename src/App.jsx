@@ -23,6 +23,7 @@ import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import BidderAnalyticsView from "./components/BidderAnalyticsView";
 import VendorAnalyticsView from "./components/VendorAnalyticsView";
 import OperationalFlagsView from "./components/OperationalFlagsView";
+import AuctionResultView from "./components/AuctionResultView";
 import BranchPerformanceTable from "./components/BranchPerformanceTable";
 import CategoryPerformanceTable from "./components/CategoryPerformanceTable";
 import AuctionMixPanel from "./components/AuctionMixPanel";
@@ -1443,6 +1444,7 @@ const TITLES = {
   "Revenue Breakdown": "Revenue Breakdown",
   "Bidder Analytics": "Bidder Analytics",
   "Vendor Analytics": "Vendor Analytics",
+  "Auction Result": "Auction Result",
   Export: "Export Report",
 };
 
@@ -1471,6 +1473,10 @@ export default function App() {
   // currently active tab.
   const [bidderAnalyticsDateRange, setBidderAnalyticsDateRange] = useState("ytd");
   const [vendorAnalyticsDateRange, setVendorAnalyticsDateRange] = useState("ytd");
+  // Auction Result — same independent tab-scoped state pattern as the two
+  // above, also defaulting to YTD, so it can never leak its date range
+  // into (or inherit one from) Overview or any other tab.
+  const [auctionResultDateRange, setAuctionResultDateRange] = useState("ytd");
 
   const [overviewCategory, setOverviewCategory] =
     useState("");
@@ -1572,17 +1578,31 @@ export default function App() {
 
   const bidderAnalyticsRangeLabel = resolveDateRange(bidderAnalyticsDateRange).label;
   const vendorAnalyticsRangeLabel = resolveDateRange(vendorAnalyticsDateRange).label;
+  const auctionResultRangeLabel = resolveDateRange(auctionResultDateRange).label;
 
   // ONE Topbar date control shared by every tab — while Bidder/Vendor
-  // Analytics is active it reads/writes THAT tab's own independent date
-  // state instead of Overview's global `dateRange`/`setDateRange`, so the
-  // familiar picker still works exactly the same way (WTD/MTD/YTD/Custom,
-  // switchable any time — see effectiveSetDateRange) without either tab's
-  // selection ever touching the other's or Overview's.
+  // Analytics or Auction Result is active it reads/writes THAT tab's own
+  // independent date state instead of Overview's global `dateRange`/
+  // `setDateRange`, so the familiar picker still works exactly the same
+  // way (WTD/MTD/YTD/Custom, switchable any time — see
+  // effectiveSetDateRange) without any tab's selection ever touching
+  // another's or Overview's.
   const effectiveDateRange =
-    tab === "Bidder Analytics" ? bidderAnalyticsDateRange : tab === "Vendor Analytics" ? vendorAnalyticsDateRange : dateRange;
+    tab === "Bidder Analytics"
+      ? bidderAnalyticsDateRange
+      : tab === "Vendor Analytics"
+        ? vendorAnalyticsDateRange
+        : tab === "Auction Result"
+          ? auctionResultDateRange
+          : dateRange;
   const effectiveSetDateRange =
-    tab === "Bidder Analytics" ? setBidderAnalyticsDateRange : tab === "Vendor Analytics" ? setVendorAnalyticsDateRange : setDateRange;
+    tab === "Bidder Analytics"
+      ? setBidderAnalyticsDateRange
+      : tab === "Vendor Analytics"
+        ? setVendorAnalyticsDateRange
+        : tab === "Auction Result"
+          ? setAuctionResultDateRange
+          : setDateRange;
 
   // DISABLED (Vercel P0 usage fix): useLiveOverview never populates a real
   // `overview.auctions` array — it only inherits MOCK_OVERVIEW's 10 fake
@@ -1783,6 +1803,16 @@ export default function App() {
               store={store === ALL_STORES ? undefined : store}
               category={overviewCategory}
               rangeLabel={vendorAnalyticsRangeLabel}
+              refreshNonce={manualRefreshNonce}
+            />
+          )}
+
+          {tab === "Auction Result" && (
+            <AuctionResultView
+              dateRange={auctionResultDateRange}
+              store={store === ALL_STORES ? undefined : store}
+              category={overviewCategory}
+              rangeLabel={auctionResultRangeLabel}
               refreshNonce={manualRefreshNonce}
             />
           )}
