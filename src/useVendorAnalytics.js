@@ -32,7 +32,14 @@ export function useVendorAnalytics(dateRangeKey, store, category, refreshNonce =
         const params = { from, to, store, category };
         const preset = typeof dateRangeKey === "string" ? dateRangeKey : "custom";
         const [leaderboards, vendorAnalytics] = await Promise.all([
-          fetchJson("/api/leaderboards", params),
+          // P1 request architecture cleanup: Vendor Analytics only reads
+          // `leaderboards.vendor_analytics` (see VendorAnalyticsView.jsx) —
+          // type=vendor-summary runs ONLY the vendor-scoped queries,
+          // skipping the entire heavy bidder-identity-bridge chain the
+          // default (no-type) response computes for other consumers
+          // (Overview/CategoryView/Bidder Analytics) that this tab never
+          // uses. Same params/shape otherwise.
+          fetchJson("/api/leaderboards", { ...params, type: "vendor-summary" }),
           fetchJson("/api/leaderboards", { ...params, type: "vendor-time-series", preset }),
         ]);
         if (cancelled) return;

@@ -106,6 +106,119 @@ export default async function handler(req, res) {
       category,
     };
 
+    // =========================================================
+    // VENDOR ANALYTICS SUMMARY (type=vendor-summary) — P1 request
+    // architecture cleanup: Vendor Analytics only ever reads this
+    // response's `vendor_analytics` field (see VendorAnalyticsView.jsx /
+    // useVendorAnalytics.js), yet the DEFAULT (no-type) response below
+    // also runs 5+ SERIALIZED heavy queries through BIDDER_IDENTITY_CTES
+    // (composition/settledBidders/perAuctionParticipatingUnion/etc — the
+    // settledBiddersQuery alone reads ~19M rows, see its own comment)
+    // purely for fields Vendor Analytics never uses. This branch runs
+    // ONLY the two genuinely vendor-scoped queries — no identity bridge,
+    // no bidder-side computation at all — for a real ClickHouse cost
+    // reduction on every Vendor Analytics tab load/filter change.
+    // Deliberately a small amount of duplicated SQL against the default
+    // path's own vendor block below (same query, same definitions) rather
+    // than a shared refactor — an early-return branch here cannot regress
+    // the already-validated default path for Overview/CategoryView/Bidder
+    // Analytics, which still need the full response.
+    // =========================================================
+    if (type === "vendor-summary") {
+      const vendorAllLotsResult = await client.query({
+        query: `
+          WITH selected_auctions AS (
+            SELECT DISTINCT auction_number, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              AND ({store:String} = '' OR store_name = {store:String})
+          ),
+          lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(a.store_name) AS store_name,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              any(ifNull(v.bid_amount, 0)) AS bid_amount,
+              any(ifNull(v.sold_price, 0)) AS sold_price,
+              any(ifNull(v.commission, 0)) AS commission_pct,
+              any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            INNER JOIN selected_auctions a ON v.auction_number = a.auction_number
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
+          )
+          SELECT
+            vendor,
+            count() AS lots_listed,
+            countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
+            sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
+            sumIf(ifNull(sold_price, 0) - ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS buyers_premium_income,
+            sumIf(ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100, status IN ('Paid', 'Released')) AS commission_income,
+            uniqExact(auction_number) AS auction_events,
+            uniqExact(store_name) AS branches
+          FROM lots
+          GROUP BY vendor
+          ORDER BY settled_bid_amount DESC
+        `,
+        query_params: queryParams,
+        format: "JSONEachRow",
+      });
+
+      const vendorFirstSeenResult = await client.query({
+        query: `
+          SELECT
+            ifNull(vendor, 'Unknown Vendor') AS vendor,
+            min(date_created) AS first_seen
+          FROM xv3.mart_auction_vendor_analysis
+          WHERE vendor IS NOT NULL
+          GROUP BY vendor
+        `,
+        query_params: {},
+        format: "JSONEachRow",
+      });
+
+      const vendorAllLotsRows = await vendorAllLotsResult.json();
+      const vendorFirstSeenRows = await vendorFirstSeenResult.json();
+
+      const vendorFirstSeenMap = new Map(vendorFirstSeenRows.map((r) => [r.vendor, r.first_seen]));
+      const activeVendorsCount = vendorAllLotsRows.length;
+      const totalVendorBidAmount = vendorAllLotsRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
+      const top5VendorRows = vendorAllLotsRows.slice(0, 5);
+      const top5BidAmount = top5VendorRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
+      const newVendorsCount = vendorAllLotsRows.filter((r) => {
+        const firstSeen = vendorFirstSeenMap.get(r.vendor);
+        return firstSeen && firstSeen >= `${from} 00:00:00` && firstSeen < `${to} 23:59:59.999`;
+      }).length;
+
+      // Same cache semantics as the default response below — settled/
+      // historical, no live "right now" concept, no per-user data.
+      res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
+      return res.status(200).json({
+        vendor_analytics: {
+          active_vendors: activeVendorsCount,
+          new_vendors: newVendorsCount,
+          total_vendor_bid_amount: totalVendorBidAmount,
+          top5_vendor_bid_amount: top5BidAmount,
+          top5_vendor_concentration_pct: totalVendorBidAmount > 0 ? (top5BidAmount / totalVendorBidAmount) * 100 : null,
+          all_lots: vendorAllLotsRows.map((row) => ({
+            vendor: row.vendor,
+            lots_listed: Number(row.lots_listed ?? 0),
+            lots_sold: Number(row.lots_sold ?? 0),
+            settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+            buyers_premium_income: Number(row.buyers_premium_income ?? 0),
+            commission_income: Number(row.commission_income ?? 0),
+            auction_events: Number(row.auction_events ?? 0),
+            branches: Number(row.branches ?? 0),
+            first_seen: vendorFirstSeenMap.get(row.vendor) ?? null,
+          })),
+        },
+      });
+    }
+
     // ---------------------------------------------------------
     // PERFORMANCE NOTE (Architecture Phase 2A): these 7 queries are
     // independent of each other's results — none reads a value computed by

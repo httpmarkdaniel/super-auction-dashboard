@@ -144,8 +144,6 @@ const EMPTY_OVERVIEW = {
   bidderEngagement: [],
   comparison: null,
 
-  topVendors: [],
-  topBidders: [],
 
   reservePerformance: {
     belowReserve: { count: 0, value: 0, pct: 0 },
@@ -569,34 +567,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
   // network requests. Fields not cheaply available (Lots Listed/Sell-
   // through/Unsold, per-vendor bidder engagement) are intentionally
   // deferred — see api/leaderboards.js's own comment and the final report.
-  const topVendors = (leaderboards.vendors || []).map((v) => ({
-    vendor: v.vendor,
-    bidAmount: Number(v.settled_bid_amount) || 0,
-    lots: Number(v.settled_lots) || 0,
-    auctionEvents: Number(v.auction_events) || 0,
-    serviceIncome: Number(v.service_income) || 0,
-    avgBidPerAuction: v.avg_bid_per_auction != null ? Number(v.avg_bid_per_auction) : null,
-    avgBidPerSoldLot: v.avg_bid_per_sold_lot != null ? Number(v.avg_bid_per_sold_lot) : null,
-  }));
-
-  const topBidders = (leaderboards.bidders || []).map((b) => ({
-    bidder: b.bidder_name,
-    bidAmount: Number(b.settled_bid_amount) || 0,
-    wins: Number(b.settled_wins) || 0,
-    // Canonical New/Returning classification reused from the backend
-    // (api/leaderboards.js's settledBiddersResult) — never inferred on
-    // the frontend from name/email. Rendered as its own badge chip (see
-    // RankedBar's badgeKey), not appended into the name string, so it's
-    // never lost to name truncation.
-    new_or_returning: b.new_or_returning || "returning",
-    winningAuctions: Number(b.winning_auctions) || 0,
-    auctionsParticipated: Number(b.auctions_participated) || 0,
-    distinctLotsBidOn: Number(b.distinct_lots_bid_on) || 0,
-    totalBids: Number(b.total_bids) || 0,
-    avgBidsPerLot: b.avg_bids_per_lot != null ? Number(b.avg_bids_per_lot) : null,
-    maxBidUsagePct: b.max_bid_usage_pct != null ? Number(b.max_bid_usage_pct) : null,
-    winningViaMaxBid: Number(b.winning_via_max_bid) || 0,
-  }));
+  // topVendors/topBidders (from leaderboards.vendors/leaderboards.bidders)
+  // were removed here (P1 request architecture cleanup) — Overview no
+  // longer renders a Top Vendors/Bidders section (moved to Vendor/Bidder
+  // Analytics, each with their own independent fetch), so this mapping had
+  // been dead client-side work since that move. leaderboards.vendors/
+  // .bidders themselves are untouched on the backend — CategoryView.jsx
+  // still consumes them via its own useCategoryOverview.js fetch.
 
   const rp = reservePerformance;
 
@@ -1080,10 +1057,6 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     // Dynamic period-over-period comparison — see api/overview.js's
     // DYNAMIC COMPARISON PERIOD query comment. null when not computed.
     comparison: kpis.comparison || null,
-
-    topVendors,
-
-    topBidders,
 
     // WINNING BIDS VIA MAX BID — see api/overview.js's winningMaxBidQuery
     // comment for the exact winning-bid reconciliation and why unresolved
