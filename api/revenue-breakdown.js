@@ -191,6 +191,15 @@ export default async function handler(req, res) {
       commission_income: Number(row.commission_income ?? 0),
     }));
 
+    // Vercel P0 usage fix (round 2): Revenue Breakdown is historical/
+    // filter-driven (see useRevenueBreakdown.js — no automatic timer calls
+    // this any more, only mount/store/date-range change/manual refresh),
+    // and the response is a shared, unauthenticated warehouse aggregate —
+    // safe to cache at the CDN. This endpoint's own documented cost risk
+    // (an unbounded scan when a very wide range is requested) is a query
+    // concern, untouched here; caching just prevents back-to-back
+    // repeat requests for the SAME range/store from re-running it.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
     return res.status(200).json({ rows: mappedRows });
   } catch (err) {
     console.error("Revenue breakdown API error:", err);

@@ -37,7 +37,7 @@ export default function BiddingPaceView({ store, dateRange, rangeLabel, refreshN
 
       <div className="mb-8">
         <StoryHeader
-          eyebrow={`${store} · ${rangeLabel} · Live`}
+          eyebrow={`${store} · ${rangeLabel}`}
           headline="How bidding activity is spread across the hours of the day — hover an hour for its Participating and Winning bidder breakdown."
         />
       </div>

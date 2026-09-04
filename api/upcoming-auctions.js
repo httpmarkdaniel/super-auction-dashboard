@@ -55,6 +55,13 @@ export default async function handler(req, res) {
 
     const rows = await result.json();
 
+    // Vercel P0 usage fix (round 2): Upcoming Auctions is historical/
+    // filter-driven (see useUpcomingAuctions.js — no automatic timer calls
+    // this any more, only mount/store change/manual refresh; the "Starts
+    // in …" countdown itself now advances client-side, see
+    // UpcomingAuctionsView.jsx), and the response is a shared,
+    // unauthenticated warehouse aggregate — safe to cache at the CDN.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
     return res.status(200).json({
       auctions: rows.map((row) => ({
         auction_number: row.auction_number,

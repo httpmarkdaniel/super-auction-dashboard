@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { resolveDateRange, resolveComparisonRange } from "./utils/dateRange";
-import { onTabVisible } from "./utils/visibility";
 import {
   MOCK_OVERVIEW,
   MOCK_LEADERBOARDS,
@@ -29,13 +28,23 @@ function fetchJson(path, params = {}) {
   });
 }
 
-// active: false pauses fetching AND the 30s poll entirely (no HTTP calls),
-// leaving the last-fetched data in place — for callers whose current page
-// doesn't need this data (see src/App.jsx: Overview/Auction Types/Export
-// are the only consumers of the returned `overview`/`categories`/`lots`
-// data; the Topbar search bar reads `operationsDetail`, itself derived
-// from `lots`, on every page). Flipping back to true re-fetches
-// immediately and resumes the interval — never a silent permanent stall.
+// Vercel P0 usage fix (round 2): this used to also run its own internal
+// 30s setInterval, on top of App.jsx's global auto-refresh nonce — Overview
+// was the single biggest source of unnecessary Vercel traffic (4 parallel
+// requests every 30s, indefinitely, regardless of whether anyone was
+// looking at real changes). There is no longer any timer here at all:
+// this hook only fetches when one of its own inputs changes — a real
+// store/category/date-range change, or `refreshNonce` ticking (now driven
+// solely by the Topbar's manual Refresh button, see App.jsx's
+// manualRefreshNonce) — never on a clock.
+//
+// active: false pauses fetching entirely (no HTTP calls), leaving the
+// last-fetched data in place — for callers whose current page doesn't need
+// this data (see src/App.jsx: Overview/Auction Types/Export are the only
+// consumers of the returned `overview`/`categories`/`lots` data; the
+// Topbar search bar reads `operationsDetail`, itself derived from `lots`,
+// on every page). Flipping back to true re-fetches immediately — never a
+// silent permanent stall.
 export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce = 0, active = true) {
   const [state, setState] = useState({
     data: {
@@ -345,21 +354,8 @@ export function useLiveOverview(dateRangeKey, store, category = "", refreshNonce
 
     load();
 
-    // Vercel P0 usage fix: skip the recurring fetch entirely while this
-    // browser tab is backgrounded/minimized (the interval keeps its own
-    // single clock running — nothing new to schedule), and catch up with
-    // exactly one immediate load() the moment it's foregrounded again.
-    const interval = setInterval(() => {
-      if (document.hidden) return;
-      load();
-    }, 30_000);
-
-    const unsubscribe = onTabVisible(load);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
-      unsubscribe();
     };
   }, [dateRangeKey, store, category, refreshNonce, active]);
 

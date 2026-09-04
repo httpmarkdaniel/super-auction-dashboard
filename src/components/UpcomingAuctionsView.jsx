@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { scopeAdverb } from "../insights";
 import { useUpcomingAuctions } from "../useUpcomingAuctions";
 import { formatManila, manilaToEpochMs } from "../utils/manilaTime";
@@ -68,6 +69,19 @@ function AuctionCard({ a }) {
 // see api/upcoming-auctions.js.
 export default function UpcomingAuctionsView({ store, refreshNonce }) {
   const { data: auctions, loading, error } = useUpcomingAuctions(store, refreshNonce);
+
+  // "Starts in …" / "Starting Now" are computed client-side from each
+  // auction's already-loaded starting_time (see startsInLabel/isStartingNow
+  // above) — no backend data changes as the countdown advances, so this
+  // just forces a re-render every 30s to recompute those labels from the
+  // current clock. Purely local: no fetch, no dependency on `auctions`, and
+  // no interaction with the real data fetch above (initial load/store
+  // change/manual refresh only, per the Vercel P0 usage fix).
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => forceTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   if (error) {
     return (

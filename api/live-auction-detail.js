@@ -366,7 +366,7 @@ export default async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({
+    const payload = {
       auction: {
         auction_number: meta.auction_number,
         name: meta.auction_name,
@@ -383,7 +383,17 @@ export default async function handler(req, res) {
         current_bid_source: anyLive && anyFallback ? "mixed" : anyLive ? "live" : "warehouse_fallback",
       },
       lots,
-    });
+    };
+
+    // Vercel P0 usage fix (round 2): genuinely live (polled every 20s
+    // while a lot card is expanded, see useOnlineBidding.js's
+    // useAuctionLotDetail) — same short TTL reasoning as live-auctions.js:
+    // just enough to collapse near-simultaneous polls of the SAME
+    // auction_number from multiple viewers, without making current_bid
+    // noticeably stale. Response is a shared, unauthenticated
+    // warehouse+cms.hmr.ph aggregate, never per-viewer.
+    res.setHeader("Cache-Control", "public, s-maxage=5, stale-while-revalidate=5");
+    return res.status(200).json(payload);
   } catch (err) {
     console.error("live-auction-detail API error:", err);
     return res.status(500).json({

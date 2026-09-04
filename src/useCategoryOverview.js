@@ -29,13 +29,14 @@ export function useCategoryOverview(category, store, dateRangeKey, refreshNonce 
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
   // Tracks the user's actual selection so a background refresh (refreshNonce
-  // alone ticking, from the auto-refresh timer or the manual Refresh
-  // button — see App.jsx's triggerRefresh) can be told apart from a real
-  // category/store/date-range change. Only a real change (or the very
-  // first load, when there's no data yet) should blank the view into the
-  // "Loading…" state; a same-selection background refresh should keep the
-  // current content visible and swap in fresh data once it arrives — the
-  // same pattern useLiveOverview.js already uses for the main Overview tab.
+  // alone ticking, from the Topbar's manual Refresh button — see App.jsx's
+  // handleManualRefresh; there is no automatic timer) can be told apart
+  // from a real category/store/date-range change. Only a real change (or
+  // the very first load, when there's no data yet) should blank the view
+  // into the "Loading…" state; a same-selection background refresh should
+  // keep the current content visible and swap in fresh data once it
+  // arrives — the same pattern useLiveOverview.js already uses for the
+  // main Overview tab.
   const inputsRef = useRef({ category, store, dateRangeKey });
 
   useEffect(() => {

@@ -284,6 +284,12 @@ export default async function handler(req, res) {
       };
     });
 
+    // Vercel P0 usage fix (round 2): Bidding Pace no longer auto-refreshes
+    // every 30s (see BidderAnalyticsView.jsx/BiddingPaceView.jsx — it's
+    // now mount/filter/manual-refresh-driven, same as every other
+    // historical analytics tab), and the response is a shared,
+    // unauthenticated warehouse aggregate — safe to cache at the CDN.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=60");
     return res.status(200).json({
       hourly,
       // Settled winning lots that couldn't be tied to a bid-event hour

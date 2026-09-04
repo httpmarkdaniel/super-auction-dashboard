@@ -300,6 +300,13 @@ export default async function handler(req, res) {
       };
     });
 
+    // Vercel P0 usage fix (round 2): Full Auction Detail is historical/
+    // filter-driven (see useFullAuctionDetail.js — no automatic timer
+    // calls this any more, only mount/store/date-range change/manual
+    // refresh), and the response is a shared, unauthenticated warehouse
+    // aggregate (identical for every viewer of the same store+date-range)
+    // — safe to cache at the CDN.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
     return res.status(200).json({ rows: mappedRows });
   } catch (err) {
     console.error("Auction detail API error:", err);

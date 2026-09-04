@@ -412,6 +412,14 @@ export default async function handler(req, res) {
       };
     });
 
+    // Vercel P0 usage fix (round 2): this is genuinely live (polled every
+    // 20s by every open Online Bidding tab, see useOnlineBidding.js) so
+    // this TTL is deliberately much shorter than every other endpoint's —
+    // just enough to collapse near-simultaneous polls from multiple
+    // concurrent viewers of the same store onto one origin hit, without
+    // making the auction list noticeably stale. Response is a shared,
+    // unauthenticated warehouse+cms.hmr.ph aggregate, never per-viewer.
+    res.setHeader("Cache-Control", "public, s-maxage=5, stale-while-revalidate=5");
     return res.status(200).json({ auctions });
   } catch (err) {
     console.error("live-auctions API error:", err);

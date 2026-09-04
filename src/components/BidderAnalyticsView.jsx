@@ -15,15 +15,17 @@ import { formatPeso } from "../utils/format";
 // Bidding Pace lives at the top of this tab (relocated from its own
 // former standalone sidebar destination — see Sidebar.jsx) as the FIRST
 // section, using the SAME dateRange/rangeLabel this view already
-// receives — no separate filter controls, no second fetch path. It keeps
-// its own pre-existing live auto-refresh via `biddingPaceRefreshNonce`
-// (App.jsx's automatic-refresh nonce, unchanged), deliberately NOT the
-// `refreshNonce` this view's own historical analytics use below (App.jsx's
-// analytics-only nonce, which bumps on an explicit user refresh click,
-// never on a timer — see App.jsx's handleManualRefresh comment for why:
-// this tab must only refetch on activation, a real filter change, or an
-// explicit refresh, not the automatic 30s tick that legitimately still
-// drives Bidding Pace's own "Live" behavior).
+// receives — no separate filter controls, no second fetch path.
+//
+// Vercel P0 usage fix (round 2): Bidding Pace used to auto-refresh every
+// 30s on its own timer, unconditionally, whenever this tab was open — an
+// analytical/historical hourly breakdown, not a mission-critical live
+// auction surface, so that recurring background cost wasn't justified.
+// `biddingPaceRefreshNonce` is now the SAME `manualRefreshNonce` this
+// view's own analytics already use below — Bidding Pace refetches on tab
+// activation, a real filter change, or an explicit Refresh click, never a
+// timer. See BiddingPaceView.jsx for the corresponding label change (the
+// "Live" eyebrow was dropped since it's no longer accurate).
 // `biddingPaceStore` is the raw (pre-ALL_STORES-normalized) store value:
 // useBiddingPace/BiddingPaceView already do their own ALL_STORES
 // normalization internally and use the raw value for display text, so

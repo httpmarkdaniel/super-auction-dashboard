@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
 import Topbar from "./components/Topbar";
@@ -35,11 +35,8 @@ import { useLiveOverview } from "./useLiveOverview";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange, comparisonLabel } from "./utils/dateRange";
 import { formatPeso } from "./utils/format";
-import { onTabVisible } from "./utils/visibility";
 
 const AGING_STATUS = ["good", "warning", "critical"];
-
-const AUTO_REFRESH_MS = 30000;
 
 function formatUpdatedAt(date) {
   return date.toLocaleTimeString("en-PH", {
@@ -1517,56 +1514,31 @@ export default function App() {
     setTab("Full Auction Detail");
   }
 
-  const [refreshNonce, setRefreshNonce] =
-    useState(0);
-
-  // Bidder/Vendor Analytics are historical, filter-driven reports, not
-  // live data — they must NOT refetch on the automatic 30s tick below
-  // (that's what was causing them to visibly reload periodically with no
-  // filter change). This nonce only bumps on an explicit user refresh
-  // click (see handleManualRefresh), never on the auto-refresh timer or
-  // tab-visibility catch-up, so those two views only refetch on tab
-  // activation, a real filter change, or this explicit action.
+  // Vercel P0 usage fix (round 2): every dashboard surface is now
+  // mount/filter/manual-refresh-driven only — there is no automatic
+  // background-refresh timer anywhere in the app any more (there used to
+  // be a global 30s tick here that silently re-fetched whichever tab
+  // happened to be open, indefinitely, which was the single largest
+  // source of unnecessary Vercel traffic). `manualRefreshNonce` only
+  // bumps when the user explicitly presses the Topbar's Refresh button;
+  // every historical/analytics view (Overview, every Category tab, Full
+  // Auction Detail, Revenue Breakdown, Vendor Payables, Upcoming
+  // Auctions, Bidder/Vendor Analytics, Operational Flags, Bidding Pace)
+  // is wired to this SAME nonce, so one Refresh click legitimately
+  // refreshes whichever of those is currently mounted — never a timer.
+  // Online Bidding's live poll (useOnlineBidding.js) is intentionally
+  // independent of this nonce entirely; it keeps its own 20s clock since
+  // that's the one genuinely "live" operational surface in the app.
   const [manualRefreshNonce, setManualRefreshNonce] =
     useState(0);
 
   const [lastUpdated, setLastUpdated] =
     useState(() => new Date());
 
-  const triggerRefresh = useCallback(() => {
-    setRefreshNonce((n) => n + 1);
+  const handleManualRefresh = useCallback(() => {
+    setManualRefreshNonce((n) => n + 1);
     setLastUpdated(new Date());
   }, []);
-
-  // Topbar's manual refresh button — bumps both the automatic-refresh
-  // nonce (unchanged behavior for every existing live/refreshNonce-driven
-  // view) and the analytics-only nonce above, so an explicit refresh
-  // still legitimately refreshes Bidder/Vendor Analytics on demand even
-  // though the automatic timer no longer does.
-  const handleManualRefresh = useCallback(() => {
-    triggerRefresh();
-    setManualRefreshNonce((n) => n + 1);
-  }, [triggerRefresh]);
-
-  // Vercel P0 usage fix: a backgrounded/minimized browser tab must not
-  // keep generating server load every 30s forever. The interval itself
-  // keeps running on its own clock (nothing to recreate), but the tick
-  // skips triggerRefresh entirely while document.hidden; onTabVisible
-  // fires exactly one immediate refresh the moment the tab is
-  // foregrounded again, then the normal 30s cadence resumes.
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.hidden) return;
-      triggerRefresh();
-    }, AUTO_REFRESH_MS);
-
-    const unsubscribe = onTabVisible(triggerRefresh);
-
-    return () => {
-      clearInterval(id);
-      unsubscribe();
-    };
-  }, [triggerRefresh]);
 
   const realStores = useStoreList();
 
@@ -1575,17 +1547,18 @@ export default function App() {
     : STORE_OPTIONS;
 
   // The historical/settled Overview fetch (useLiveOverview) is expensive —
-  // ~4 HTTP requests rebuilding the settled-lot population on every 30s
-  // tick — and was previously running unconditionally regardless of the
-  // active tab (see the Architecture Audit's P0 finding). It's paused
-  // whenever the active tab needs none of its output: Overview itself,
-  // Auction Types (reads overview.channelBreakdown), and Export (reads the
-  // whole overview object) are the only tabs that do. Every other tab
-  // fetches its own data independently and never touched this hook. The
-  // Topbar search bar also reads operationsDetail (derived from this same
-  // data) on every tab — while paused it shows the last-fetched snapshot
-  // rather than going stale-empty, and catches up the moment the user
-  // returns to a tab that needs it (see useLiveOverview.js's `active` param).
+  // ~4 HTTP requests rebuilding the settled-lot population per fetch — so
+  // it's paused whenever the active tab needs none of its output: Overview
+  // itself, Auction Types (reads overview.channelBreakdown), and Export
+  // (reads the whole overview object) are the only tabs that do. Every
+  // other tab fetches its own data independently and never touched this
+  // hook. The Topbar search bar also reads operationsDetail (derived from
+  // this same data) on every tab — while paused it shows the last-fetched
+  // snapshot rather than going stale-empty, and catches up the moment the
+  // user returns to a tab that needs it (see useLiveOverview.js's `active`
+  // param). No automatic timer drives this any more — only a real
+  // store/category/date-range change or the manual Refresh button
+  // (manualRefreshNonce) triggers a re-fetch.
   const needsOverviewData =
     tab === "Overview" || tab === "Auction Types" || tab === "Export";
 
@@ -1599,7 +1572,7 @@ export default function App() {
       ? undefined
       : store,
     overviewCategory,
-    refreshNonce,
+    manualRefreshNonce,
     needsOverviewData,
   );
 
@@ -1712,7 +1685,7 @@ export default function App() {
               store={store}
               dateRange={dateRange}
               rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
@@ -1725,14 +1698,14 @@ export default function App() {
           {tab === "Upcoming Auctions" && (
             <UpcomingAuctionsView
               store={store}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
           {tab === "Trends" && (
             <TrendsView
               store={store}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
@@ -1749,14 +1722,14 @@ export default function App() {
             <StoreView
               store={store}
               dateRange={dateRange}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
           {tab === "Vendor Payables" && (
             <PayablesView
               store={store}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
@@ -1765,7 +1738,7 @@ export default function App() {
               store={store}
               dateRange={dateRange}
               rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
               category={fadCategory}
               onClearCategory={() => setFadCategory("")}
             />
@@ -1776,7 +1749,7 @@ export default function App() {
               store={store}
               dateRange={dateRange}
               rangeLabel={rangeLabel}
-              refreshNonce={refreshNonce}
+              refreshNonce={manualRefreshNonce}
             />
           )}
 
@@ -1798,7 +1771,7 @@ export default function App() {
               category={overviewCategory}
               rangeLabel={rangeLabel}
               refreshNonce={manualRefreshNonce}
-              biddingPaceRefreshNonce={refreshNonce}
+              biddingPaceRefreshNonce={manualRefreshNonce}
             />
           )}
 

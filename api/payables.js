@@ -248,7 +248,7 @@ export default async function handler(req, res) {
       auctionNames = Object.fromEntries(nameRows.map((r) => [r.auction_number, r.name]));
     }
 
-    return res.status(200).json({
+    const payload = {
       total_payables: totalPayables,
       paid_amount: paidAmount,
       outstanding_amount: outstandingAmount,
@@ -295,7 +295,16 @@ export default async function handler(req, res) {
       detail_total_count: sortedRows.length,
       detail_page: pageNum,
       detail_page_size: pageSizeNum,
-    });
+    };
+
+    // Vercel P0 usage fix (round 2): Vendor Payables is historical/
+    // filter-driven (see useVendorPayables.js — no automatic timer calls
+    // this any more, only mount/store-change/search/sort/page/manual-
+    // refresh), and the response contains no per-user/authenticated data
+    // (shared vendor payables ledger, identical for every viewer of the
+    // same store+filter+page combination) — safe to cache at the CDN.
+    res.setHeader("Cache-Control", "public, s-maxage=60, stale-while-revalidate=120");
+    return res.status(200).json(payload);
   } catch (err) {
     console.error("Payables API error:", err);
 
