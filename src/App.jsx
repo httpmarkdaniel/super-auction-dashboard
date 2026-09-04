@@ -5,13 +5,9 @@ import Topbar from "./components/Topbar";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
 import LiveMiniCard from "./components/primitives/LiveMiniCard";
-import CategoryStrip from "./components/CategoryStrip";
-import BranchStrip from "./components/BranchStrip";
-import Leaderboard from "./components/Leaderboard";
 import BidTrendChart from "./components/BidTrendChart";
 import BidderPopulationCard from "./components/BidderPopulationCard";
 import BidderCompositionModal from "./components/primitives/BidderCompositionModal";
-import StatTile from "./components/primitives/StatTile";
 import BidderEngagementModal from "./components/primitives/BidderEngagementModal";
 import WinningMaxBidModal from "./components/primitives/WinningMaxBidModal";
 import CategoryView from "./components/CategoryView";
@@ -28,13 +24,14 @@ import BidderAnalyticsView from "./components/BidderAnalyticsView";
 import VendorAnalyticsView from "./components/VendorAnalyticsView";
 import OperationalFlagsView from "./components/OperationalFlagsView";
 import BranchPerformanceTable from "./components/BranchPerformanceTable";
+import CategoryPerformanceTable from "./components/CategoryPerformanceTable";
 import AuctionMixPanel from "./components/AuctionMixPanel";
 import { buildStoryline } from "./insights";
 import { ALL_STORES, STORE_OPTIONS } from "./mockData";
 import { useLiveOverview } from "./useLiveOverview";
 import { useStoreList } from "./useStoreList";
 import { resolveDateRange, defaultDateRange, comparisonLabel } from "./utils/dateRange";
-import { formatPeso } from "./utils/format";
+import { formatPeso, formatCompactPeso } from "./utils/format";
 
 const AGING_STATUS = ["good", "warning", "critical"];
 
@@ -63,6 +60,8 @@ const EMPTY_OVERVIEW = {
     sellThroughDeltaPct: undefined,
     serviceIncome: 0,
     serviceIncomeDeltaPct: undefined,
+    buyersPremium: 0,
+    serviceFee: 0,
     lotsSold: 0,
     lotsListed: 0,
     pendingApprovalCount: 0,
@@ -111,6 +110,7 @@ const EMPTY_OVERVIEW = {
   branchTally: [],
   categoryTally: [],
   branchPerformance: [],
+  categoryPerformance: [],
   auctionMix: { category: [], site: [], channel: [] },
   auctionNumbersInRange: new Set(),
   channelBreakdown: [],
@@ -763,6 +763,13 @@ function buildLiveOverview(live, bidCorrectionDelta) {
       lotsUnsold: Number(a.lots_unsold) || 0,
       settledBidAmount: Number(a.settled_bid_amount) || 0,
       settledLotCount: Number(a.settled_lot_count) || 0,
+      // Per-auction Buyer's Premium / Service Fee (commission) — see
+      // api/overview.js's AUCTION-LEVEL SUMMARY query comment. Feeds the
+      // Bid Trend hover/click drilldown's Service Income breakdown and
+      // "Auction Events by Branch" table (BidTrendChart.jsx), entirely
+      // client-side from this already-loaded array — no new request.
+      buyersPremiumIncome: Number(a.buyers_premium_income) || 0,
+      commissionIncome: Number(a.commission_income) || 0,
       participating: {
         total: Number(p.total_bidders) || 0,
         newBidders: Number(p.new_bidders) || 0,
@@ -837,6 +844,33 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     })
     .sort((a, b2) => b2.bidAmount - a.bidAmount);
 
+  // CATEGORY PERFORMANCE table (PART REORG task) — same analytical shape
+  // as Branch Performance above, but categories don't map 1:1 to auctions
+  // (one auction can span multiple categories), so "Lots Listed"/"Lots
+  // Sold" can't be derived the same way (grouping auctionSummaryRows by
+  // category). Instead this uses api/overview.js's new category_lot_status
+  // aggregate — the SAME broader Sold/Listed definition Branch Performance
+  // uses, just grouped by category instead of by auction's own branch —
+  // one new bounded query, no per-row/per-hover request. "Auctions" here
+  // is categoryBreakdown's own settled-population auction_count (there is
+  // no broader "every auction touching this category" count available,
+  // since that's not a well-defined 1:1 relationship the way branch is).
+  const categoryLotStatusMap = new Map((kpis.category_lot_status || []).map((c) => [c.category, c]));
+  const categoryPerformance = categoryBreakdown
+    .map((c) => {
+      const ls = categoryLotStatusMap.get(c.category) || { listed_lots: 0, sold_lots: 0 };
+      const lotsListed = Number(ls.listed_lots) || 0;
+      const lotsSold = Number(ls.sold_lots) || 0;
+      return {
+        ...c,
+        auctions: c.auctionCount,
+        lotsListed,
+        lotsSold,
+        sellThroughPct: lotsListed > 0 ? (lotsSold / lotsListed) * 100 : null,
+      };
+    })
+    .sort((a, b2) => b2.bidAmount - a.bidAmount);
+
   // AUCTION MIX (PART 14-17) — Category reuses categoryBreakdown as-is
   // (already computed above, same settled population). Site (At Branch /
   // Onsite — productivity_report's own sub_type field) and Channel
@@ -897,6 +931,15 @@ function buildLiveOverview(live, bidCorrectionDelta) {
         (Number(kpis.service_income_commission) || 0),
 
       serviceIncomeDeltaPct: undefined,
+
+      // Total Bid Amount hero card's supporting breakdown (PART REORG
+      // task) — the SAME two already-fetched components serviceIncome
+      // above sums, just exposed individually. "Service Fee" is this
+      // dashboard's current production label for the commission
+      // component (see api/overview.js's service_fee_amount comment) —
+      // not a separate third financial component.
+      buyersPremium: Number(kpis.service_income_buyers_premium) || 0,
+      serviceFee: Number(kpis.service_income_commission) || 0,
 
       lotsSold: endedLotsSold,
 
@@ -1021,6 +1064,7 @@ function buildLiveOverview(live, bidCorrectionDelta) {
     auctionSummary: auctionSummaryRows,
 
     branchPerformance,
+    categoryPerformance,
     auctionMix,
 
     avgBidCategoryBreakdown,
@@ -1140,7 +1184,6 @@ function OverviewTab({
   categoryOptions,
   selectedCategory,
   onCategoryChange,
-  onSelectBranch,
   onSelectCategory,
   updatedAt,
   onGoLive,
@@ -1195,7 +1238,12 @@ function OverviewTab({
         insight="Daily settled bid performance over the selected range — hover a day for its own numbers."
       >
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_240px] gap-4 items-stretch">
-          <BidTrendChart data={overview.bidTrend} bucketLabel={overview.bidTrendBucketLabel} rangeLabel={rangeLabel} />
+          <BidTrendChart
+            data={overview.bidTrend}
+            bucketLabel={overview.bidTrendBucketLabel}
+            rangeLabel={rangeLabel}
+            auctionSummary={overview.auctionSummary}
+          />
           <div className="flex flex-col gap-3">
             <LiveMiniCard
               label="Today's Bid"
@@ -1241,9 +1289,15 @@ function OverviewTab({
 
       <StorySection
         title="Bidder Composition"
-        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it. Click any card for the Branch/Category breakdown — the central place for historical bidder analytics."
+        insight="Participating = everyone who placed a real bid. Winning = settled Paid/Released winners — a subset of Participating, not a separate pool to add to it. Click a card for the Branch/Category breakdown — the central place for historical bidder analytics."
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* A. PARTICIPATING BIDDERS — B. WON VIA (Max Bid vs Regular Bid).
+            The standalone "Avg Bid Actions / Lot / Bidder" and "Winning
+            Bids via Max Bid" KPI cards that used to live here were removed
+            (PART REORG task) — that same data now lives INSIDE these two
+            cards instead (Participating's own engagement block; Won Via's
+            per-method % share below), never deleted. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           <BidderPopulationCard
             title="Participating Bidders"
             total={overview.participatingComposition.total}
@@ -1255,86 +1309,12 @@ function OverviewTab({
             }}
             onClick={() => setBidderCompositionOpen(true)}
           />
-          <BidderPopulationCard
-            title="Winning Bidders"
-            total={overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
-            newCount={overview.bidderComposition.newBidders}
-            returningCount={overview.bidderComposition.returningBidders}
-            amountLabel="Winning Bid Amount"
-            newAmount={overview.bidderComposition.newBiddersBidAmount}
-            returningAmount={overview.bidderComposition.returningBiddersBidAmount}
-            onClick={() => setBidderCompositionOpen(true)}
-          />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <StatTile
-            accent
-            eyebrow="Avg Bids / Unique Bidder"
-            value={overview.heroKPIs.avgBidsPerUniqueBidder != null ? overview.heroKPIs.avgBidsPerUniqueBidder.toFixed(2) : "—"}
-            sub={
-              overview.heroKPIs.uniqueParticipatingBidders > 0
-                ? `${overview.heroKPIs.totalBidEvents} bids · ${overview.heroKPIs.uniqueParticipatingBidders} bidders`
-                : "No bidder activity"
-            }
-            methodology="The AVERAGE OF EACH BIDDER'S OWN ratio (that bidder's real bid events ÷ that bidder's distinct auction+lot combinations bid on), every bidder weighted equally — NOT Total Bids ÷ Unique Bidders. Click to see the per-bidder breakdown."
-            onClick={() => setAvgBidsOpen(true)}
-          />
-          <StatTile
-            accent
-            eyebrow="Winning Bids via Max Bid"
-            value={overview.winningMaxBid.maxBidWinPct != null ? `${overview.winningMaxBid.maxBidWinPct.toFixed(1)}%` : "—"}
-            sub={`${overview.winningMaxBid.maxBidWins.toLocaleString()} of ${(overview.winningMaxBid.maxBidWins + overview.winningMaxBid.normalBidWins).toLocaleString()} winning bids`}
-            methodology="Of the actual winning/final bid for each settled (Paid/Released) lot, the share placed via Max Bid rather than Normal Bid — matched to the bid-history event whose amount equals the settled winning amount. Click for the Branch/Category breakdown."
+
+          <button
+            type="button"
             onClick={() => setWinningMaxBidOpen(true)}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
-          {/* LEFT: WINNING BIDDERS panel (PART 8) */}
-          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4">
-            <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
-            <div className="flex items-baseline gap-2 mb-2.5">
-              <div className="font-display text-[28px] leading-none text-ink">
-                {overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
-              </div>
-              {overview.bidderComposition.pctChange != null && (
-                <span className={`text-[13px] font-medium ${overview.bidderComposition.pctChange >= 0 ? "text-toneGreenText" : "text-toneRedText"}`}>
-                  {overview.bidderComposition.pctChange >= 0 ? "▲" : "▼"} {Math.abs(overview.bidderComposition.pctChange).toFixed(1)}% vs previous
-                </span>
-              )}
-            </div>
-            {(() => {
-              const bc = overview.bidderComposition;
-              const total = bc.newBidders + bc.returningBidders + bc.unclassifiedBidders || 1;
-              return (
-                <>
-                  <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
-                    <div className="bg-series8 h-full" style={{ width: `${(bc.newBidders / total) * 100}%` }} />
-                    <div className="bg-navy h-full" style={{ width: `${(bc.returningBidders / total) * 100}%` }} />
-                    <div className="bg-muted h-full" style={{ width: `${(bc.unclassifiedBidders / total) * 100}%` }} />
-                  </div>
-                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink mb-3">
-                    <span>New {bc.newBidders}</span>
-                    <span>Returning {bc.returningBidders}</span>
-                    {bc.unclassifiedBidders > 0 && <span className="text-muted">Unmatched {bc.unclassifiedBidders}</span>}
-                  </div>
-                </>
-              );
-            })()}
-            <div className="pt-2.5 border-t border-gridline grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-[12px] text-muted">Win Rate</div>
-                <div className="tabular font-medium text-ink">{overview.bidderComposition.winRate != null ? `${overview.bidderComposition.winRate.toFixed(1)}%` : "—"}</div>
-              </div>
-              <div>
-                <div className="text-[12px] text-muted">Previous Rate</div>
-                <div className="tabular font-medium text-ink">{overview.bidderComposition.previousWinRate != null ? `${overview.bidderComposition.previousWinRate.toFixed(1)}%` : "—"}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT: WON VIA — MAX BID VS. REGULAR BID (PART 9) */}
-          <div className="bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4">
+            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
+          >
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-3">Won Via — Max Bid vs. Regular Bid</div>
             {(() => {
               const wmb = overview.winningMaxBid;
@@ -1343,6 +1323,11 @@ function OverviewTab({
                 { label: "Max Bid", lots: wmb.maxBidWins, amount: wmb.maxBidWinningAmount },
                 { label: "No Electronic Match", lots: wmb.unresolvedWins, amount: wmb.unresolvedWinningAmount },
               ];
+              // Denominator = every classified winning lot (Regular + Max +
+              // No Electronic Match sum to the full winning population, the
+              // same wmb.winningBids total) — "share of total winning
+              // lots", not a narrower "resolved-only" denominator.
+              const totalLots = rows.reduce((s, r) => s + r.lots, 0) || 1;
               const max = Math.max(...rows.map((r) => r.lots), 1);
               return (
                 <div className="space-y-3">
@@ -1350,17 +1335,91 @@ function OverviewTab({
                     <div key={r.label}>
                       <div className="flex items-baseline justify-between gap-3 mb-1">
                         <span className="text-[14px] text-ink">{r.label}</span>
-                        <span className="text-[13.5px] tabular text-ink">{r.lots.toLocaleString()} lots · {formatPeso(r.amount)}</span>
+                        <span className="text-[13.5px] tabular text-ink">
+                          {r.lots.toLocaleString()} lots · {formatPeso(r.amount)}
+                          <span className="text-muted"> · {((r.lots / totalLots) * 100).toFixed(1)}%</span>
+                        </span>
                       </div>
                       <div className="h-2 rounded-full bg-gridline overflow-hidden">
                         <div className={`h-full rounded-full ${r.label === "Max Bid" ? "bg-series8" : r.label === "Regular Bid" ? "bg-series1" : "bg-muted"}`} style={{ width: `${(r.lots / max) * 100}%` }} />
                       </div>
                     </div>
                   ))}
+                  <div className="text-[11.5px] text-muted pt-1">% share of total winning lots ({totalLots.toLocaleString()}). Click for the Branch/Category breakdown.</div>
                 </div>
               );
             })()}
+          </button>
+        </div>
+
+        {/* C. WINNING BIDDERS — merged: the old separate "Winning Bidders"
+            BidderPopulationCard (which had the peso value) and the "Winning
+            Bidders panel" (which had Win Rate/Unmatched) are now ONE
+            full-width card, so nothing that was previously shown is lost. */}
+        <button
+          type="button"
+          onClick={() => setBidderCompositionOpen(true)}
+          className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
+        >
+          <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
+          <div className="flex items-baseline gap-2 mb-3">
+            <div className="font-display text-[28px] leading-none text-ink">
+              {overview.bidderComposition.newBidders + overview.bidderComposition.returningBidders}
+            </div>
+            {overview.bidderComposition.pctChange != null && (
+              <span className={`text-[13px] font-medium ${overview.bidderComposition.pctChange >= 0 ? "text-toneGreenText" : "text-toneRedText"}`}>
+                {overview.bidderComposition.pctChange >= 0 ? "▲" : "▼"} {Math.abs(overview.bidderComposition.pctChange).toFixed(1)}% vs previous
+              </span>
+            )}
           </div>
+          {(() => {
+            const bc = overview.bidderComposition;
+            const countTotal = bc.newBidders + bc.returningBidders + bc.unclassifiedBidders || 1;
+            const amountTotal = bc.newBiddersBidAmount + bc.returningBiddersBidAmount || 1;
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                <div>
+                  <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Bidders</div>
+                  <div className="h-2 rounded-full overflow-hidden flex bg-gridline mb-1.5">
+                    <div className="bg-series8 h-full" style={{ width: `${(bc.newBidders / countTotal) * 100}%` }} />
+                    <div className="bg-navy h-full" style={{ width: `${(bc.returningBidders / countTotal) * 100}%` }} />
+                    <div className="bg-muted h-full" style={{ width: `${(bc.unclassifiedBidders / countTotal) * 100}%` }} />
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink">
+                    <span>New {bc.newBidders}</span>
+                    <span>Returning {bc.returningBidders}</span>
+                    {bc.unclassifiedBidders > 0 && <span className="text-muted">Unmatched {bc.unclassifiedBidders}</span>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1.5">Winning Value · {formatCompactPeso(bc.newBiddersBidAmount + bc.returningBiddersBidAmount)}</div>
+                  <div className="h-2 rounded-full overflow-hidden bg-gridline mb-1.5">
+                    <div className="bg-series1 h-full" style={{ width: `${(bc.newBiddersBidAmount / amountTotal) * 100}%` }} />
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[12.5px] text-ink">
+                    <span>New {formatCompactPeso(bc.newBiddersBidAmount)}</span>
+                    <span>Returning {formatCompactPeso(bc.returningBiddersBidAmount)}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+          <div className="pt-2.5 border-t border-gridline grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[12px] text-muted">Win Rate</div>
+              <div className="tabular font-medium text-ink">{overview.bidderComposition.winRate != null ? `${overview.bidderComposition.winRate.toFixed(1)}%` : "—"}</div>
+            </div>
+            <div>
+              <div className="text-[12px] text-muted">Previous Rate</div>
+              <div className="tabular font-medium text-ink">{overview.bidderComposition.previousWinRate != null ? `${overview.bidderComposition.previousWinRate.toFixed(1)}%` : "—"}</div>
+            </div>
+          </div>
+        </button>
+
+        <div className="mt-3 text-[13.5px]">
+          <button type="button" onClick={() => setAvgBidsOpen(true)} className="font-semibold text-series1 hover:underline">
+            View per-bidder Avg Bid Actions / Lot / Bidder breakdown →
+          </button>
         </div>
       </StorySection>
 
@@ -1368,7 +1427,14 @@ function OverviewTab({
         <BranchPerformanceTable rows={overview.branchPerformance} />
       </StorySection>
 
-      <StorySection title="Auction Mix" insight="How this period's settled Bid Amount splits by category, site, and channel.">
+      <StorySection
+        title="Category Performance"
+        insight={`${rangeLabel} · same analytical structure as Branch Performance${selectedCategory ? `, scoped to ${selectedCategory}` : ""}.`}
+      >
+        <CategoryPerformanceTable rows={overview.categoryPerformance} />
+      </StorySection>
+
+      <StorySection title="Auction Mix" insight="How this period's settled Bid Amount splits by category, site, and channel." last>
         <AuctionMixPanel auctionMix={overview.auctionMix} />
       </StorySection>
 
@@ -1396,56 +1462,6 @@ function OverviewTab({
         categoryBreakdown={overview.winningMaxBidByCategory}
         rangeLabel={rangeLabel}
       />
-
-      <StorySection
-        title="Bid Value by Category & Branch"
-        insight="How this period's bid value splits across item categories and store branches."
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <CategoryStrip
-            data={overview.categoryBreakdown}
-            rangeLabel={rangeLabel}
-            compareLabel={compareLabel}
-            onSelectCategory={onSelectCategory}
-          />
-
-          <BranchStrip
-            data={overview.branchBreakdown}
-            rangeLabel={rangeLabel}
-            compareLabel={compareLabel}
-            onSelectBranch={onSelectBranch}
-          />
-        </div>
-      </StorySection>
-
-      <StorySection
-        title="Top Vendors & Bidders"
-        insight="The vendors bringing in the most consignments and the bidders winning the most lots."
-        last
-      >
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Leaderboard
-            title={`Top Vendors · ${rangeLabel}`}
-            rows={overview.topVendors}
-            nameKey="vendor"
-            metaKey="lots"
-            metaLabel="lots"
-            emptyMessage="No settled auction results yet for this period."
-            hoverKind="vendor"
-          />
-
-          <Leaderboard
-            title={`Top Bidders · ${rangeLabel}`}
-            rows={overview.topBidders}
-            nameKey="bidder"
-            metaKey="wins"
-            metaLabel="wins"
-            emptyMessage="No settled auction results yet for this period."
-            badgeKey="new_or_returning"
-            hoverKind="bidder"
-          />
-        </div>
-      </StorySection>
     </div>
   );
 }
@@ -1499,16 +1515,9 @@ export default function App() {
     }
   }
 
-  // Branch click: reuse the existing global Store filter — Full Auction
-  // Detail already scopes by it. Category click: set Full Auction Detail's
-  // own category scope (exact match, not a free-text search). Both
-  // preserve the currently selected global date range (untouched) and land
-  // on Full Auction Detail, never a duplicate page.
-  function goToFullAuctionDetailForBranch(branch) {
-    setStore(branch);
-    setFadCategory("");
-    setTab("Full Auction Detail");
-  }
+  // Category click: set Full Auction Detail's own category scope (exact
+  // match, not a free-text search), preserving the currently selected
+  // global Store/date range, and land on Full Auction Detail.
   function goToFullAuctionDetailForCategory(category) {
     setFadCategory(category);
     setTab("Full Auction Detail");
@@ -1672,7 +1681,6 @@ export default function App() {
               onCategoryChange={
                 setOverviewCategory
               }
-              onSelectBranch={goToFullAuctionDetailForBranch}
               onSelectCategory={goToFullAuctionDetailForCategory}
               updatedAt={formatUpdatedAt(lastUpdated)}
               onGoLive={() => setTab("Online Bidding")}

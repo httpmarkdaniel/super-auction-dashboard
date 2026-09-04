@@ -43,7 +43,7 @@ export default function BidderEngagementModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Avg Bids / Unique Bidder"
+      title="Avg Bid Actions / Lot / Bidder"
       subtitle={`${rangeLabel} · ${rows.length} participating bidder${rows.length === 1 ? "" : "s"}`}
     >
       <div className="grid grid-cols-3 gap-4 mb-5 pb-4 border-b border-gridline">
@@ -56,7 +56,7 @@ export default function BidderEngagementModal({
           <div className="font-display text-[26px] leading-none text-ink">{uniqueParticipatingBidders.toLocaleString()}</div>
         </div>
         <div>
-          <div className="text-[12px] uppercase tracking-wide text-muted font-semibold mb-1">Avg Bids / Unique Bidder</div>
+          <div className="text-[12px] uppercase tracking-wide text-muted font-semibold mb-1">Avg Bid Actions / Lot / Bidder</div>
           <div className="font-display text-[26px] leading-none text-series1">
             {avgBidsPerUniqueBidder != null ? avgBidsPerUniqueBidder.toFixed(2) : "—"}
           </div>
@@ -71,7 +71,7 @@ export default function BidderEngagementModal({
               <th className="text-left font-medium pb-2 pr-4">Status</th>
               <th className="text-right font-medium pb-2 pr-4">Total Bids</th>
               <th className="text-right font-medium pb-2 pr-4">Distinct Lots Bid On</th>
-              <th className="text-right font-medium pb-2">Avg Bids / Lot</th>
+              <th className="text-right font-medium pb-2">Avg Bid Actions / Lot</th>
             </tr>
           </thead>
           <tbody>

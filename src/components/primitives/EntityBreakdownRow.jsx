@@ -136,7 +136,7 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
                   <span className="text-muted">Total Bids</span> <span className="font-medium">{p.totalBids.toLocaleString()}</span>
                 </div>
                 <div className="tabular text-[12px] text-series1">
-                  Avg Bids / Unique Bidder {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(2) : "—"}
+                  Avg Bid Actions / Lot / Bidder {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(2) : "—"}
                 </div>
               </div>
               <div>
@@ -235,7 +235,7 @@ export default function EntityBreakdownRow({ label, bidAmount, share, max, detai
             <div className="tabular font-medium text-[15px]">{p.totalBids.toLocaleString()}</div>
           </div>
           <div>
-            <div className="text-muted text-[12px]">Avg Bids / Unique Bidder</div>
+            <div className="text-muted text-[12px]">Avg Bid Actions / Lot / Bidder</div>
             <div className="tabular font-medium text-[15px] text-series1">
               {p.avgBidsPerUniqueBidder != null ? p.avgBidsPerUniqueBidder.toFixed(2) : "—"}
             </div>

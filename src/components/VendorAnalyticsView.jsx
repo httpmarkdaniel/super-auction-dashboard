@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useVendorAnalytics } from "../useVendorAnalytics";
 import StorySection from "./primitives/StorySection";
 import RankedMetricBar from "./primitives/RankedMetricBar";
@@ -6,12 +7,67 @@ import { formatPeso, formatCompactPeso } from "../utils/format";
 
 const STUCK_INVENTORY_MIN_LOTS = 20;
 
+// Compact hover profile for a Top 10 Vendor row (PART REORG task) — zero
+// network requests, every field already present on the enriched
+// vendor_analytics.all_lots row (see api/leaderboards.js's vendorAllLotsQuery
+// comment). "Date Registered" has no genuine source field on any vendor
+// mart this dashboard queries — only `first_seen` (min date_created, an
+// activity proxy) exists, so it's labeled "First Seen" rather than
+// misrepresented as a real registration date (per this task's own rule).
+// "Assigned Account Executive" has no corresponding field/join anywhere in
+// this codebase — shown as "Not Available", never inferred.
+function VendorHoverCard({ v }) {
+  const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
+  return (
+    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg text-left min-w-[290px]">
+      <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide break-words">{v.vendor}</div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-2.5 pb-2.5 border-b border-gridline">
+        <div>
+          <div className="text-muted text-[12px]">First Seen</div>
+          <div className="tabular font-medium">{v.first_seen ? String(v.first_seen).slice(0, 10) : "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Assigned Account Executive</div>
+          <div className="tabular font-medium text-muted">Not Available</div>
+        </div>
+        <div className="col-span-2">
+          <div className="text-muted text-[12px]">Branches Supplied</div>
+          <div className="tabular font-medium">{v.branches} <span className="text-muted font-normal">(this period)</span></div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        <div>
+          <div className="text-muted text-[12px]">Lots Listed</div>
+          <div className="tabular font-medium">{v.lots_listed}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Lots Sold</div>
+          <div className="tabular font-medium">{v.lots_sold}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Sell-Through</div>
+          <div className="tabular font-medium">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</div>
+        </div>
+        <div>
+          <div className="text-muted text-[12px]">Sold Bid Value</div>
+          <div className="tabular font-medium">{formatPeso(v.settled_bid_amount)}</div>
+        </div>
+        <div className="col-span-2">
+          <div className="text-muted text-[12px]">Service Income</div>
+          <div className="tabular font-medium text-series1">{formatPeso((v.buyers_premium_income || 0) + (v.commission_income || 0))}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // VENDOR ANALYTICS — fully dynamic to the selected Date/Store/Category
 // filters (see useVendorAnalytics.js). All figures below derive from the
 // SAME bounded all-lots-per-vendor aggregate (api/leaderboards.js's
 // vendor_analytics field) — no per-vendor request.
 export default function VendorAnalyticsView({ dateRange, store, category, rangeLabel, refreshNonce }) {
   const { data, loading, error } = useVendorAnalytics(dateRange, store, category, refreshNonce);
+  const [vendorRankMode, setVendorRankMode] = useState("value");
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load Vendor Analytics: {error}</div>;
@@ -35,6 +91,15 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
     .map((v) => ({ ...v, sellThroughPct: v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : 0 }))
     .sort((a, b) => a.sellThroughPct - b.sellThroughPct)
     .slice(0, 10);
+
+  // TOP 10 VENDORS — two ranking modes (PART REORG task), both derived
+  // client-side from the SAME already-loaded, now-enriched allLots array
+  // (buyers_premium_income/commission_income were added to
+  // vendorAllLotsQuery specifically so Service Income is available
+  // regardless of which 10 vendors end up in view) — zero new requests.
+  const topVendorsByValue = [...allLots].sort((a, b) => b.settled_bid_amount - a.settled_bid_amount).slice(0, 10);
+  const topVendorsByLotsSold = [...allLots].sort((a, b) => b.lots_sold - a.lots_sold).slice(0, 10);
+  const topVendors = vendorRankMode === "value" ? topVendorsByValue : topVendorsByLotsSold;
 
   return (
     <div>
@@ -106,33 +171,90 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
         />
       </StorySection>
 
-      <StorySection title={`Top 10 Vendors — ${rangeLabel}, by Bid Amount`} last>
+      <StorySection
+        title={`Top 10 Vendors — ${rangeLabel}`}
+        insight="Hover a vendor for their profile. Switch ranking mode to see the same 10-row limit ranked a different way."
+        last
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <button
+            type="button"
+            onClick={() => setVendorRankMode("value")}
+            className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "value" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
+          >
+            By Sold Bid Value
+          </button>
+          <button
+            type="button"
+            onClick={() => setVendorRankMode("lots")}
+            className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "lots" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
+          >
+            By Lots Sold
+          </button>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-[14.5px]">
             <thead>
-              <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
-                <th className="text-left font-medium py-2 px-3">Vendor</th>
-                <th className="text-right font-medium py-2 px-3">Lots Listed</th>
-                <th className="text-right font-medium py-2 px-3">Lots Sold</th>
-                <th className="text-right font-medium py-2 px-3">Sell-Through</th>
-                <th className="text-right font-medium py-2 px-3">Bid Amount</th>
-                <th className="text-right font-medium py-2 px-3">Branches</th>
-              </tr>
+              {vendorRankMode === "value" ? (
+                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
+                  <th className="text-left font-medium py-2 px-3">Vendor</th>
+                  <th className="text-right font-medium py-2 px-3">Bid Value</th>
+                  <th className="text-right font-medium py-2 px-3">Lots Listed</th>
+                  <th className="text-right font-medium py-2 px-3">Lots Sold</th>
+                  <th className="text-right font-medium py-2 px-3">Sell-Through</th>
+                  <th className="text-right font-medium py-2 px-3">Service Income</th>
+                  <th className="text-right font-medium py-2 px-3">Branches</th>
+                </tr>
+              ) : (
+                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
+                  <th className="text-left font-medium py-2 px-3">Vendor</th>
+                  <th className="text-right font-medium py-2 px-3">Lots Sold</th>
+                  <th className="text-right font-medium py-2 px-3">Lots Listed</th>
+                  <th className="text-right font-medium py-2 px-3">Sell-Through</th>
+                  <th className="text-right font-medium py-2 px-3">Bid Value</th>
+                  <th className="text-right font-medium py-2 px-3">Service Income</th>
+                  <th className="text-right font-medium py-2 px-3">Branches</th>
+                </tr>
+              )}
             </thead>
             <tbody>
-              {top10ByBidAmount.map((v) => (
-                <tr key={v.vendor} className="border-t border-gridline hover:bg-plane/60 transition-colors">
-                  <td className="py-2 px-3 text-ink">{v.vendor}</td>
-                  <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
-                  <td className="py-2 px-3 text-right tabular text-ink">{v.lots_sold}</td>
-                  <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed > 0 ? `${((v.lots_sold / v.lots_listed) * 100).toFixed(1)}%` : "—"}</td>
-                  <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatPeso(v.settled_bid_amount)}</td>
-                  <td className="py-2 px-3 text-right tabular text-ink">{v.branches}</td>
-                </tr>
-              ))}
-              {top10ByBidAmount.length === 0 && (
+              {topVendors.map((v) => {
+                const sellThroughPct = v.lots_listed > 0 ? (v.lots_sold / v.lots_listed) * 100 : null;
+                const serviceIncome = (v.buyers_premium_income || 0) + (v.commission_income || 0);
+                return (
+                  <tr key={v.vendor} className="border-t border-gridline hover:bg-plane/60 transition-colors">
+                    <td className="relative py-2 px-3 text-ink group/tip">
+                      {v.vendor}
+                      <div className="pointer-events-none absolute left-0 top-full mt-1 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]">
+                        <VendorHoverCard v={v} />
+                      </div>
+                    </td>
+                    {vendorRankMode === "value" ? (
+                      <>
+                        <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatPeso(v.settled_bid_amount)}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{v.lots_sold}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(serviceIncome)}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{v.branches}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{v.lots_sold}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{formatPeso(v.settled_bid_amount)}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(serviceIncome)}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{v.branches}</td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
+              {topVendors.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-muted text-[14.5px]">
+                  <td colSpan={7} className="py-6 text-center text-muted text-[14.5px]">
                     No settled vendor activity in this scope.
                   </td>
                 </tr>

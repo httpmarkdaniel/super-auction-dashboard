@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
-import StatTile from "./primitives/StatTile";
 import AuctionSummaryModal from "./primitives/AuctionSummaryModal";
 import TotalBidAmountModal from "./primitives/TotalBidAmountModal";
 import ServiceIncomeModal from "./primitives/ServiceIncomeModal";
-import { formatPeso } from "../utils/format";
+import { formatPeso, formatCompactPeso } from "../utils/format";
 
 const METHODOLOGY = {
   totalBidAmount:
@@ -32,6 +31,22 @@ function DeltaRow({ pct, label }) {
         {up ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}%
       </span>
       {label && <span className="text-muted ml-1">{label}</span>}
+    </div>
+  );
+}
+
+// Shared hover-methodology popover markup — same `group/tip` pattern as
+// StatTile/HeadlineCard, extracted here since the Total Bid Amount hero
+// card and the Registration→Bidder/Service Income cards below each build
+// their own bespoke markup (rather than the generic HeadlineCard/StatTile
+// shells) but still need the identical tooltip behavior.
+function methodologyTip(text) {
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
+    >
+      <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">{text}</div>
     </div>
   );
 }
@@ -130,40 +145,77 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
 
   return (
     <div className="flex flex-col gap-5">
-      {/* HEADLINE PERFORMANCE — exactly 4 cards: Total Bid Amount (hero,
-          wider), Auctions Concluded, Lots Sold/Listed, Participating
-          Bidders. No hardcoded period text — compareLabel is already the
-          dashboard's own dynamic WTD/MTD/YTD/Custom comparison label. */}
+      {/* HEADLINE PERFORMANCE (PART REORG task) — Total Bid Amount is now
+          the dominant KPI: a 6-column row where it spans 4 (~2/3 width),
+          Auctions Concluded and Lots Sold/Listed each take 1. Participating
+          Bidders moved down to row 2 alongside Registration → Bidder and
+          Service Income (3 balanced cards) — no bidder-engagement/Max Bid
+          scorecards in this area, per this task's explicit sequence. No
+          hardcoded period text — compareLabel is already the dashboard's
+          own dynamic WTD/MTD/YTD/Custom comparison label. */}
       <div>
         <div className="flex items-baseline gap-2 mb-2.5">
           <span className="panel-title">Headline Performance</span>
           {comparison && <span className="text-[12.5px] text-muted font-medium normal-case tracking-normal">— {compareLabel}</span>}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1.7fr_1fr_1fr_1fr] gap-4">
-          <HeadlineCard
-            hero
-            eyebrow={`Total Bid Amount · ${rangeLabel}`}
-            methodology={METHODOLOGY.totalBidAmount}
+
+        {/* ROW 1 */}
+        <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 mb-4">
+          {/* TOTAL BID AMOUNT — the financial headline of the whole
+              dashboard: largest type, strongest elevation/border, its own
+              generous padding, and its own Buyer's Premium/Service Fee/
+              Service Income breakdown underneath (reusing the SAME already-
+              fetched figures Service Income's own card sums — no duplicate
+              calculation). */}
+          <button
+            type="button"
             onClick={() => setDrilldown("totalBidAmount")}
+            className="text-left lg:col-span-4 relative bg-surface1 border border-gridline rounded-xl shadow-lg border-t-4 border-t-series8 px-6 pt-5 pb-5 group/tip hover:border-navy/40 transition-colors"
           >
-            <div className="font-display text-[40px] leading-none text-ink mb-2">{formatPeso(heroKPIs.totalBidAmount)}</div>
-            <DeltaRow pct={comparison?.total_bid_amount_pct} label={compareLabel} />
-            <div className="mt-3 pt-2.5 border-t border-gridline text-[12.5px] text-muted">Settled · Paid &amp; Released</div>
-          </HeadlineCard>
-
-          <HeadlineCard eyebrow="Auctions Concluded" methodology={METHODOLOGY.auctionsConcluded} onClick={() => setDrilldown("auctionsConcluded")}>
-            <div className="font-display text-[36.5px] leading-none text-ink mb-2">{heroKPIs.auctionsConcluded}</div>
-            <DeltaRow pct={comparison?.auctions_concluded_pct} label={compareLabel} />
-          </HeadlineCard>
-
-          <HeadlineCard eyebrow="Lots Sold / Listed" methodology={METHODOLOGY.lotsSoldListed} onClick={() => setDrilldown("lotsSoldListed")}>
-            <div className="font-display text-[36.5px] leading-none text-ink mb-1.5 tabular">
-              {heroKPIs.lotsSold.toLocaleString()} <span className="text-muted text-[22px]">/ {heroKPIs.lotsListed.toLocaleString()}</span>
+            <div className="flex items-center gap-1.5 mb-3">
+              <span className="text-[12px] uppercase tracking-[0.1em] text-muted font-semibold">Total Bid Amount · {rangeLabel}</span>
+              <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10px] font-bold shrink-0 leading-none">i</span>
             </div>
-            <div className="text-[12.5px] text-muted mb-1.5">{sellThroughPct}% sell-through</div>
-            <DeltaRow pct={comparison?.lots_sold_pct} label={compareLabel} />
-          </HeadlineCard>
+            <div className="font-display text-[56px] leading-none text-ink mb-3 tabular">{formatPeso(heroKPIs.totalBidAmount)}</div>
+            <DeltaRow pct={comparison?.total_bid_amount_pct} label={compareLabel} />
+            <div className="mt-4 pt-3.5 border-t border-gridline grid grid-cols-3 gap-4">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">Buyer's Premium</div>
+                <div className="text-[16px] tabular font-medium text-ink">{formatCompactPeso(heroKPIs.buyersPremium)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">Service Fee</div>
+                <div className="text-[16px] tabular font-medium text-ink">{formatCompactPeso(heroKPIs.serviceFee)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-muted font-semibold mb-1">Service Income</div>
+                <div className="text-[16px] tabular font-medium text-series1">{formatCompactPeso(heroKPIs.serviceIncome)}</div>
+              </div>
+            </div>
+            <div className="mt-2 text-[12px] text-muted">Settled · Paid &amp; Released</div>
+            {methodologyTip(METHODOLOGY.totalBidAmount)}
+          </button>
 
+          <div className="lg:col-span-1">
+            <HeadlineCard eyebrow="Auctions Concluded" methodology={METHODOLOGY.auctionsConcluded} onClick={() => setDrilldown("auctionsConcluded")}>
+              <div className="font-display text-[36.5px] leading-none text-ink mb-2">{heroKPIs.auctionsConcluded}</div>
+              <DeltaRow pct={comparison?.auctions_concluded_pct} label={compareLabel} />
+            </HeadlineCard>
+          </div>
+
+          <div className="lg:col-span-1">
+            <HeadlineCard eyebrow="Lots Sold / Listed" methodology={METHODOLOGY.lotsSoldListed} onClick={() => setDrilldown("lotsSoldListed")}>
+              <div className="font-display text-[28px] leading-none text-ink mb-1.5 tabular">
+                {heroKPIs.lotsSold.toLocaleString()} <span className="text-muted text-[17px]">/ {heroKPIs.lotsListed.toLocaleString()}</span>
+              </div>
+              <div className="text-[12.5px] text-muted mb-1.5">{sellThroughPct}% sell-through</div>
+              <DeltaRow pct={comparison?.lots_sold_pct} label={compareLabel} />
+            </HeadlineCard>
+          </div>
+        </div>
+
+        {/* ROW 2 */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <HeadlineCard eyebrow="Participating Bidders" methodology={METHODOLOGY.participatingBidders} onClick={onOpenBidderComposition}>
             <div className="font-display text-[36.5px] leading-none text-ink mb-2 tabular">{participatingTotal}</div>
             <DeltaRow pct={participatingComposition.pctChange} label={compareLabel} />
@@ -183,14 +235,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
               </div>
             </div>
           </HeadlineCard>
-        </div>
-      </div>
 
-      {/* Secondary auction/registration metrics — same cards as before,
-          just no longer competing with Headline Performance's exact
-          4-card row (PART 2). */}
-      <div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip">
             <div className="flex items-center gap-1.5 mb-2.5">
               <span className="kpi-label">Registration → Bidder</span>
@@ -210,22 +255,29 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
                 <span className="text-muted ml-1">{compareLabel}</span>
               </div>
             )}
-            <div
-              role="tooltip"
-              className="pointer-events-none absolute left-3 right-3 top-full mt-2 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150 z-[60]"
-            >
-              <div className="methodology px-3 py-2 text-[14px] leading-snug shadow-lg text-left">{METHODOLOGY.registration}</div>
-            </div>
+            {methodologyTip(METHODOLOGY.registration)}
           </div>
-          <StatTile
-            accent
-            eyebrow="Service Income"
-            value={formatPeso(heroKPIs.serviceIncome)}
-            sub="HMR revenue · Paid & Released"
-            methodology={METHODOLOGY.serviceIncome}
+
+          <button
+            type="button"
             onClick={() => setDrilldown("serviceIncome")}
-            extraDeltas={comparison ? [{ label: compareLabel, pct: comparison.service_income_pct }] : []}
-          />
+            className="text-left relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip hover:border-navy/40 transition-colors"
+          >
+            <div className="flex items-center gap-1.5 mb-2.5">
+              <span className="kpi-label">Service Income</span>
+              <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
+            </div>
+            <div className="font-display text-[36.5px] leading-none text-ink mb-2">{formatPeso(heroKPIs.serviceIncome)}</div>
+            <div className="text-[14.5px] text-ink mb-1.5">HMR revenue · Paid &amp; Released</div>
+            <div className="flex justify-between gap-3 text-[12.5px] text-muted">
+              <span>Buyer's Premium · {formatCompactPeso(heroKPIs.buyersPremium)}</span>
+              <span>Service Fee · {formatCompactPeso(heroKPIs.serviceFee)}</span>
+            </div>
+            {comparison && (
+              <div className="mt-1.5"><DeltaRow pct={comparison.service_income_pct} label={compareLabel} /></div>
+            )}
+            {methodologyTip(METHODOLOGY.serviceIncome)}
+          </button>
         </div>
       </div>
 

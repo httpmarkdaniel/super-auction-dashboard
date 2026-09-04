@@ -12,36 +12,20 @@ function ChangeBadge({ pct, isNew }) {
   );
 }
 
-// Inline expand — channel breakdown (Online Bidding/Negotiated/etc, only
-// channels actually present in the data) + current-period figures for the
-// clicked branch. All from the SAME already-loaded branchPerformance row —
-// no request triggered by expanding (PART 13).
-function BranchDetail({ row }) {
-  const maxChannelBid = Math.max(...row.channels.map((c) => c.bidAmount), 1);
+// Inline expand — current-period figures + previous comparable period for
+// the clicked category. All from the SAME already-loaded categoryPerformance
+// row — no request triggered by expanding, same pattern as
+// BranchPerformanceTable.jsx. No channel/store breakdown here (unlike
+// Branch): an auction can span multiple categories, so there is no 1:1
+// auction→category relationship to derive a channel split from the way
+// Branch Performance does — this is a genuine, documented grain limitation,
+// not an oversight.
+function CategoryDetail({ row }) {
   return (
     <tr className="border-t border-gridline bg-plane">
       <td colSpan={13} className="py-4 px-4">
-        <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">Channel Breakdown — {row.branch}</div>
-        <div className="space-y-2 mb-4 max-w-2xl">
-          {row.channels.map((c) => (
-            <div key={c.channel}>
-              <div className="flex items-baseline justify-between gap-3 mb-1">
-                <span className="text-[14px] text-ink">{c.channel}</span>
-                <span className="text-[13.5px] tabular text-ink">
-                  {c.lotsSold} / {c.lotsListed} lots · {formatPeso(c.bidAmount)}
-                  <span className="text-muted"> · {row.bidAmount > 0 ? ((c.bidAmount / row.bidAmount) * 100).toFixed(1) : "0.0"}% of branch</span>
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-gridline overflow-hidden">
-                <div className="h-full rounded-full bg-series1" style={{ width: `${(c.bidAmount / maxChannelBid) * 100}%` }} />
-              </div>
-            </div>
-          ))}
-          {row.channels.length === 0 && <div className="text-[13.5px] text-muted">No channel data available.</div>}
-        </div>
-
         <div className="text-[12.5px] uppercase tracking-wide text-muted font-semibold mb-2">
-          Current vs Previous Comparable Period
+          Current vs Previous Comparable Period — {row.category}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-2xl">
           <div>
@@ -74,20 +58,20 @@ function BranchDetail({ row }) {
             <div className="tabular font-medium text-ink">{row.winning.total}</div>
           </div>
         </div>
-        <div className="text-[11.5px] text-muted mt-2">
-          Auctions/Participating/Winning comparisons for the previous period aren't cheaply available at branch grain yet — only Bid Amount's comparison is shown.
+        <div className="text-[11.5px] text-muted mt-3">
+          No channel/store breakdown here — an auction can span multiple categories, so there is no per-auction category grain to split by channel the way Branch Performance does.
         </div>
       </td>
     </tr>
   );
 }
 
-// BRANCH PERFORMANCE (PART 10/11/12/13) — every column reuses already-
-// loaded branchBreakdown (settled financial/bidder figures + comparison)
-// merged client-side with auctionSummaryRows (broad Lots Listed/Sold,
-// channel split) — see App.jsx's branchPerformance. Clicking a row expands
-// inline (no navigation, no new request); only one row open at a time.
-export default function BranchPerformanceTable({ rows }) {
+// CATEGORY PERFORMANCE — same analytical shape as Branch Performance
+// (App.jsx's categoryPerformance merges categoryBreakdown's settled
+// financial/bidder figures + comparison with api/overview.js's new
+// category_lot_status aggregate for the broader Lots Listed/Sold — see
+// App.jsx's own comment). Clicking a row expands inline, no new request.
+export default function CategoryPerformanceTable({ rows }) {
   const [expanded, setExpanded] = useState(null);
 
   return (
@@ -95,7 +79,7 @@ export default function BranchPerformanceTable({ rows }) {
       <table className="w-full text-[14px] min-w-[1000px]">
         <thead>
           <tr className="text-white text-[12px] uppercase tracking-wide bg-navy">
-            <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy">Branch</th>
+            <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy">Category</th>
             <th className="text-right font-medium py-2 px-3">Auctions</th>
             <th className="text-right font-medium py-2 px-3">Lots Listed</th>
             <th className="text-right font-medium py-2 px-3">Lots Sold</th>
@@ -112,16 +96,16 @@ export default function BranchPerformanceTable({ rows }) {
         </thead>
         <tbody>
           {rows.map((row) => {
-            const isOpen = expanded === row.branch;
+            const isOpen = expanded === row.category;
             return (
               <>
                 <tr
-                  key={row.branch}
+                  key={row.category}
                   className="border-t border-gridline cursor-pointer hover:bg-plane"
-                  onClick={() => setExpanded(isOpen ? null : row.branch)}
+                  onClick={() => setExpanded(isOpen ? null : row.category)}
                 >
                   <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1">
-                    <span className="inline-block w-3 text-muted">{isOpen ? "▾" : "▸"}</span> {row.branch}
+                    <span className="inline-block w-3 text-muted">{isOpen ? "▾" : "▸"}</span> {row.category}
                   </td>
                   <td className="py-2 px-3 text-right tabular text-ink">{row.auctions}</td>
                   <td className="py-2 px-3 text-right tabular text-ink">{row.lotsListed.toLocaleString()}</td>
@@ -136,14 +120,14 @@ export default function BranchPerformanceTable({ rows }) {
                   <td className="py-2 px-3 text-right tabular text-ink">{row.participating.total}</td>
                   <td className="py-2 px-3 text-right tabular text-ink">{row.winning.total}</td>
                 </tr>
-                {isOpen && <BranchDetail key={`${row.branch}-detail`} row={row} />}
+                {isOpen && <CategoryDetail key={`${row.category}-detail`} row={row} />}
               </>
             );
           })}
           {rows.length === 0 && (
             <tr>
               <td colSpan={13} className="py-6 text-center text-muted text-[14px]">
-                No branch activity in this scope.
+                No category activity in this scope.
               </td>
             </tr>
           )}

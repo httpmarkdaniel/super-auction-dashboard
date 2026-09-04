@@ -36,7 +36,7 @@ export default function BidderPopulationCard({ title, total, newCount, returning
             <div className="text-[20px] tabular text-ink font-semibold">{engagement.totalBids.toLocaleString()}</div>
           </div>
           <div>
-            <div className="text-[13px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">Avg Bids / Unique Bidder</div>
+            <div className="text-[13px] tracking-[0.06em] uppercase text-muted font-semibold mb-1.5">Avg Bid Actions / Lot / Bidder</div>
             <div className="text-[20px] tabular text-series1 font-semibold">
               {engagement.avgBidsPerUniqueBidder != null ? engagement.avgBidsPerUniqueBidder.toFixed(2) : "—"}
             </div>

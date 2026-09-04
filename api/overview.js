@@ -1530,6 +1530,8 @@ export default async function handler(req, res) {
             v.lot_number AS lot_number,
             argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
             any(v.bid_amount) AS bid_amount,
+            any(v.sold_price) AS sold_price,
+            any(v.commission) AS commission_pct,
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
 
           FROM xv3.mart_auction_vendor_analysis v
@@ -1559,7 +1561,19 @@ export default async function handler(req, res) {
           countIf(status = 'Unsold') AS lots_unsold,
 
           sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
-          countIf(status IN ('Paid', 'Released')) AS settled_lot_count
+          countIf(status IN ('Paid', 'Released')) AS settled_lot_count,
+
+          -- Per-auction Buyer's Premium/Service Fee (commission) income —
+          -- same two-component definition as the standalone SERVICE INCOME
+          -- (SETTLED) query below (sold_price - bid_amount / bid_amount *
+          -- commission%), just grouped by auction instead of collapsed to a
+          -- scalar. Added for the Bid Trend hover/click drilldown (PART
+          -- REORG task): every bucket's Service Income breakdown and its
+          -- "Auction Events by Branch" table are derived CLIENT-SIDE from
+          -- this already-loaded per-auction array (filtered by the bucket's
+          -- own ending_time range), never a new request per hover/click.
+          sumIf(ifNull(sold_price, 0) - ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_buyers_premium_income,
+          sumIf(ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100, status IN ('Paid', 'Released')) AS settled_commission_income
 
         FROM lots l
 
@@ -3456,18 +3470,82 @@ export default async function handler(req, res) {
       format: "JSONEachRow",
     });
 
-    // Bounded 5-query batch: hourly activity, current-bid-value by branch/
+    // Category Performance's Lots Listed/Lots Sold/Sell-Through (PART
+    // REORG task) — same shape/definition as lotStatusResultPromise just
+    // above (same STATUS_PRIORITY_SQL "broader Sold" population Branch
+    // Performance already uses), just GROUP BY category instead of
+    // collapsed to a scalar. Bounded to the same selected_auctions/date-
+    // range/store scope, one row per canonical category — not a new
+    // unbounded scan, the same class of query as every other branch/
+    // category breakdown in this file.
+    const categoryLotStatusResultPromise = client.query({
+      query: `
+        WITH selected_auctions AS (
+          SELECT DISTINCT
+            auction_number
+
+          FROM xv3.mart_auction_productivity_report
+
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+
+            AND (
+              {store:String} = ''
+              OR store_name = {store:String}
+            )
+        ),
+
+        lots AS (
+          SELECT
+            v.auction_number,
+            v.lot_number,
+            argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+            any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+
+          FROM xv3.mart_auction_vendor_analysis v
+
+          INNER JOIN selected_auctions a
+            ON v.auction_number = a.auction_number
+
+          WHERE v.auction_number IS NOT NULL
+            AND v.lot_number IS NOT NULL
+
+          GROUP BY
+            v.auction_number,
+            v.lot_number
+
+          HAVING (
+            {category:String} = ''
+            OR lot_category = {category:String}
+          )
+        )
+
+        SELECT
+          lot_category AS category,
+          count() AS listed_lots,
+          countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS sold_lots
+
+        FROM lots
+        GROUP BY lot_category
+      `,
+      query_params: queryParams,
+      format: "JSONEachRow",
+    });
+
+    // Bounded 6-query batch: hourly activity, current-bid-value by branch/
     // category (a different, live-standing population from the settled
-    // queries above), active-auctions-right-now, and lot status are all
-    // independent of each other and of everything already resolved above —
-    // only static queryParams/store — so this only changes wall-clock time.
-    const [hourlyResult, branchResult, categoryResult, activeAuctionResult, lotStatusResult] =
+    // queries above), active-auctions-right-now, lot status, and the new
+    // per-category lot status are all independent of each other and of
+    // everything already resolved above — only static queryParams/store —
+    // so this only changes wall-clock time.
+    const [hourlyResult, branchResult, categoryResult, activeAuctionResult, lotStatusResult, categoryLotStatusResult] =
       await Promise.all([
         hourlyResultPromise,
         branchResultPromise,
         categoryResultPromise,
         activeAuctionResultPromise,
         lotStatusResultPromise,
+        categoryLotStatusResultPromise,
       ]);
 
     const hourlyRows = await hourlyResult.json();
@@ -3478,6 +3556,7 @@ export default async function handler(req, res) {
     const activeAuction = activeAuctionRows[0] ?? {};
 
     const lotStatusRows = await lotStatusResult.json();
+    const categoryLotStatusRows = await categoryLotStatusResult.json();
     const lotStatus = lotStatusRows[0] ?? {};
 
     const listedLots = Number(lotStatus.listed_lots ?? 0);
@@ -4489,6 +4568,17 @@ export default async function handler(req, res) {
         lots_unsold: Number(row.lots_unsold ?? 0),
         settled_bid_amount: Number(row.settled_bid_amount ?? 0),
         settled_lot_count: Number(row.settled_lot_count ?? 0),
+        buyers_premium_income: Number(row.settled_buyers_premium_income ?? 0),
+        commission_income: Number(row.settled_commission_income ?? 0),
+      })),
+
+      // CATEGORY PERFORMANCE's Lots Listed/Lots Sold (broader Sold
+      // definition, matching Branch Performance) — see
+      // categoryLotStatusResultPromise comment above.
+      category_lot_status: categoryLotStatusRows.map((row) => ({
+        category: row.category,
+        listed_lots: Number(row.listed_lots ?? 0),
+        sold_lots: Number(row.sold_lots ?? 0),
       })),
 
       // Bid Trend — bucket grain follows the selected preset (see BID

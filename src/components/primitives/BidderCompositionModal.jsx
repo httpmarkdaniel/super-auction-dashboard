@@ -17,7 +17,7 @@ function EntityTable({ entityLabel, rows, getLabel }) {
             <th className="text-right font-medium pb-2 pr-4">Participating</th>
             <th className="text-right font-medium pb-2 pr-4">New / Returning</th>
             <th className="text-right font-medium pb-2 pr-4">Total Bids</th>
-            <th className="text-right font-medium pb-2 pr-4">Avg Bids / Unique Bidder</th>
+            <th className="text-right font-medium pb-2 pr-4">Avg Bid Actions / Lot / Bidder</th>
             <th className="text-right font-medium pb-2 pr-4">Winning</th>
             <th className="text-right font-medium pb-2">Winning New / Returning</th>
           </tr>

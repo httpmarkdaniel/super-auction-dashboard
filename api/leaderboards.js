@@ -1089,6 +1089,8 @@ export default async function handler(req, res) {
             any(a.store_name) AS store_name,
             argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
             any(ifNull(v.bid_amount, 0)) AS bid_amount,
+            any(ifNull(v.sold_price, 0)) AS sold_price,
+            any(ifNull(v.commission, 0)) AS commission_pct,
             any(ifNull(v.vendor, 'Unknown Vendor')) AS vendor,
             any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
           FROM xv3.mart_auction_vendor_analysis v
@@ -1102,6 +1104,14 @@ export default async function handler(req, res) {
           count() AS lots_listed,
           countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
           sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
+          -- Same Buyer's Premium/Service Fee (commission) definitions as
+          -- settledVendorsQuery above and api/overview.js's SERVICE INCOME
+          -- query — added here (not just there) so the FULL vendor list
+          -- (not just the top 10 by settled_bid_amount) can be ranked
+          -- either "By Sold Bid Value" or "By Lots Sold" while still
+          -- showing Service Income, entirely client-side, no second query.
+          sumIf(ifNull(sold_price, 0) - ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS buyers_premium_income,
+          sumIf(ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100, status IN ('Paid', 'Released')) AS commission_income,
           uniqExact(auction_number) AS auction_events,
           uniqExact(store_name) AS branches
         FROM lots
@@ -1480,6 +1490,13 @@ export default async function handler(req, res) {
           lots_listed: Number(row.lots_listed ?? 0),
           lots_sold: Number(row.lots_sold ?? 0),
           settled_bid_amount: Number(row.settled_bid_amount ?? 0),
+          // Same components as settledVendorsQuery's vendors[] above,
+          // computed for EVERY vendor (not just the top 10 by settled
+          // value) so Vendor Analytics' Top 10 can be ranked either way
+          // (by Sold Bid Value or by Lots Sold) and still show Service
+          // Income for whichever 10 vendors end up in view.
+          buyers_premium_income: Number(row.buyers_premium_income ?? 0),
+          commission_income: Number(row.commission_income ?? 0),
           auction_events: Number(row.auction_events ?? 0),
           branches: Number(row.branches ?? 0),
           first_seen: vendorFirstSeenMap.get(row.vendor) ?? null,

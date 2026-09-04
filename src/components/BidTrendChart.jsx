@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import Card from "./primitives/Card";
 import usePalette from "../usePalette";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import { computeBucketFinancials, formatTooltipLabel } from "../utils/bidTrendBucket";
+import BidTrendDetailModal from "./primitives/BidTrendDetailModal";
 
 function parseBucketDate(bucket) {
   return new Date(`${bucket}T00:00:00`);
@@ -24,25 +27,6 @@ function formatAxisLabel(bucket, bucketLabel, monthCrossesYears) {
       : d.toLocaleDateString("en-PH", { month: "short" });
   }
   return d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
-}
-
-// Full bucket date/range for the tooltip header — day: "Sep 1, 2026";
-// week: the full 7-day span "Aug 3 – Aug 9, 2026"; month: full month name
-// "September 2026". Always unambiguous regardless of the axis tick's more
-// compact form.
-function formatTooltipLabel(bucket, bucketLabel) {
-  const d = parseBucketDate(bucket);
-  if (Number.isNaN(d.getTime())) return bucket;
-  if (bucketLabel === "month") {
-    return d.toLocaleDateString("en-PH", { month: "long", year: "numeric" });
-  }
-  if (bucketLabel === "week") {
-    const end = new Date(d.getTime() + 6 * 86400000);
-    const startLabel = d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
-    const endLabel = end.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
-    return `${startLabel} – ${endLabel}`;
-  }
-  return d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
 }
 
 // Y-POSITION-ONLY transform — never touches the real bid_amount used by the
@@ -163,7 +147,12 @@ function computeDisplayTicks(maxRawValue, targetCount = 6) {
 // Full single-day snapshot — ONLY this day's numbers, never a cumulative/
 // period total (see api/overview.js's BID TREND query comments: each row
 // is genuinely that one calendar day, distinct bidder counts within it).
-function DailyTooltip({ active, payload, bucketLabel }) {
+// Enriched (PART REORG task) with AUCTION EVENTS BY BRANCH and a SERVICE
+// INCOME breakdown for the hovered bucket, both computed client-side from
+// the already-loaded auctionSummary prop (computeBucketFinancials) — zero
+// network requests per hover. The click-through modal (BidTrendDetailModal)
+// shows the deeper version of the same numbers.
+function DailyTooltip({ active, payload, bucketLabel, auctionSummary }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
   const p = d.participating;
@@ -174,9 +163,10 @@ function DailyTooltip({ active, payload, bucketLabel }) {
   const pReturningShare = pTotalAmount > 0 ? (p.returning_amount / pTotalAmount) * 100 : 0;
   const wNewShare = wTotalAmount > 0 ? (w.new_amount / wTotalAmount) * 100 : 0;
   const wReturningShare = wTotalAmount > 0 ? (w.returning_amount / wTotalAmount) * 100 : 0;
+  const financials = computeBucketFinancials(auctionSummary, d.bucket, bucketLabel);
 
   return (
-    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[260px]">
+    <div className="floating px-3.5 py-3 text-[13.5px] leading-snug text-ink shadow-lg min-w-[280px] max-w-[340px]">
       <div className="font-semibold text-[14px] mb-2 uppercase tracking-wide">{formatTooltipLabel(d.bucket, bucketLabel)}</div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 mb-2.5 pb-2.5 border-b border-gridline">
@@ -194,7 +184,7 @@ function DailyTooltip({ active, payload, bucketLabel }) {
         </div>
       </div>
 
-      <div className="mb-2">
+      <div className="mb-2.5 pb-2.5 border-b border-gridline">
         <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-0.5">
           Participating Bidders — {p.new + p.returning}
         </div>
@@ -204,7 +194,7 @@ function DailyTooltip({ active, payload, bucketLabel }) {
         </div>
       </div>
 
-      <div>
+      <div className="mb-2.5 pb-2.5 border-b border-gridline">
         <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-0.5">
           Winning Bidders — {w.new + w.returning}
         </div>
@@ -212,6 +202,43 @@ function DailyTooltip({ active, payload, bucketLabel }) {
         <div className="tabular text-[12.5px]">
           {formatCompactPeso(wTotalAmount)} value — New {wNewShare.toFixed(1)}% · Returning {wReturningShare.toFixed(1)}%
         </div>
+      </div>
+
+      <div className="mb-2.5 pb-2.5 border-b border-gridline">
+        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Service Income</div>
+        <div className="grid grid-cols-3 gap-2">
+          <div>
+            <div className="text-muted text-[11px]">Buyer's Premium</div>
+            <div className="tabular font-medium">{formatCompactPeso(financials.buyersPremium)}</div>
+          </div>
+          <div>
+            <div className="text-muted text-[11px]">Service Fee</div>
+            <div className="tabular font-medium">{formatCompactPeso(financials.commission)}</div>
+          </div>
+          <div>
+            <div className="text-muted text-[11px]">Total</div>
+            <div className="tabular font-medium text-series1">{formatCompactPeso(financials.serviceIncome)}</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="text-[11.5px] uppercase tracking-wide text-muted font-semibold mb-1">Auction Events by Branch</div>
+        {financials.branches.length === 0 ? (
+          <div className="text-[12px] text-muted">No settled auction activity.</div>
+        ) : (
+          <div className="space-y-0.5">
+            {financials.branches.slice(0, 4).map((b) => (
+              <div key={b.branch} className="flex items-center justify-between gap-2 text-[12px]">
+                <span className="text-ink truncate">{b.branch}</span>
+                <span className="tabular text-muted shrink-0">{b.auctionEvents} · {formatCompactPeso(b.bidAmount)}</span>
+              </div>
+            ))}
+            {financials.branches.length > 4 && (
+              <div className="text-[11px] text-muted">+{financials.branches.length - 4} more — click for the full breakdown</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -222,8 +249,9 @@ function DailyTooltip({ active, payload, bucketLabel }) {
 // calendar day's SETTLED value (never cumulative), so real day-to-day
 // fluctuation is visible. Hovering shows that day's complete snapshot —
 // see DailyTooltip above.
-export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, action }) {
+export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, action, auctionSummary = [] }) {
   const palette = usePalette();
+  const [selectedBucket, setSelectedBucket] = useState(null);
 
   // Bucket grain (day/week/month) follows the selected dashboard date
   // preset — see api/overview.js's BID TREND comment and
@@ -273,9 +301,21 @@ export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, a
           No settled activity in this period.
         </div>
       ) : (
-        <div className="h-[240px]">
+        <div className="h-[240px] cursor-pointer">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <AreaChart
+              data={data}
+              margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
+              // Click-through detail (PART REORG task) — the hover tooltip
+              // above is the quick preview, this opens the deeper
+              // per-period drilldown. Recharts hands back the same
+              // `payload` shape as the Tooltip via activePayload, so no
+              // extra lookup is needed.
+              onClick={(state) => {
+                const bucketRow = state?.activePayload?.[0]?.payload;
+                if (bucketRow) setSelectedBucket(bucketRow);
+              }}
+            >
               <defs>
                 <linearGradient id="bidTrendFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={palette.series1} stopOpacity={0.22} />
@@ -312,7 +352,10 @@ export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, a
                 width={56}
                 allowDataOverflow={false}
               />
-              <Tooltip content={<DailyTooltip bucketLabel={bucketLabel} />} cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }} />
+              <Tooltip
+                content={<DailyTooltip bucketLabel={bucketLabel} auctionSummary={auctionSummary} />}
+                cursor={{ stroke: palette.series1, strokeWidth: 1, strokeDasharray: "4 4" }}
+              />
               <Area
                 type="linear"
                 // Y-POSITION ONLY — Recharts' Tooltip `payload` always
@@ -331,6 +374,15 @@ export default function BidTrendChart({ data, bucketLabel = "day", rangeLabel, a
           </ResponsiveContainer>
         </div>
       )}
+
+      <BidTrendDetailModal
+        bucket={selectedBucket}
+        onClose={() => setSelectedBucket(null)}
+        bucketLabel={bucketLabel}
+        data={data}
+        auctionSummary={auctionSummary}
+        rangeLabel={rangeLabel}
+      />
     </Card>
   );
 }
