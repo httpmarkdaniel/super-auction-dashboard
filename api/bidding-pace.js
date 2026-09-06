@@ -175,8 +175,8 @@ export default async function handler(req, res) {
           -- period it ENDS in, not the period it started in — same
           -- selected_auctions scoping convention as every other settled/
           -- winning cohort query in this codebase.
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 

@@ -131,8 +131,8 @@ export default async function handler(req, res) {
           -- August, not July) — see the ENDING_TIME COHORT task. Full
           -- Auction Detail already displayed ending_time; this is the fix
           -- that makes the actual filtered population match it.
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number, store_name
         ),

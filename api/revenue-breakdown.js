@@ -104,8 +104,8 @@ export default async function handler(req, res) {
             min(starting_time) AS auction_starting_time,
             any(ending_time) AS auction_ending_time
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
           GROUP BY auction_number
         ),

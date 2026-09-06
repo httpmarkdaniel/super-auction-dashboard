@@ -60,8 +60,8 @@ function winningMaxBidQuery(groupByEntity) {
     WITH selected_auctions AS (
       SELECT DISTINCT auction_number, store_name
       FROM xv3.mart_auction_productivity_report
-      WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-        AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+      WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+        AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
         AND ({store:String} = '' OR store_name = {store:String})
     ),
 
@@ -642,7 +642,17 @@ export default async function handler(req, res) {
       const { preset = "" } = req.query;
       const btsParams = { from, to, store, category };
       const { fn: bucketFn, label: bucketLabel } = pickBucketGrain(preset, from, to);
+      // fe.first_ever_at (bidder identity, derived from bid_created_at/
+      // date_time_paid) keeps the tagged bucketExpr below — NOT proven to
+      // share ending_time's mislabeling bug (different tables/columns,
+      // never investigated), per the global timezone audit's explicit
+      // "fix only what's proven" scope. ending_time itself IS proven
+      // mislabeled (same class of bug already fixed for Bid Trend's
+      // bidTrendBucketExpr — see that comment) — bucketExprEndingTime is
+      // its own untagged expression so fixing it can never accidentally
+      // change fe.first_ever_at's bucketing too.
       const bucketExpr = (col) => `${bucketFn}(${col}, 'Asia/Manila')`;
+      const bucketExprEndingTime = (col) => `${bucketFn}(${col})`;
 
       // Shared bucketed union population — every real bid-history bidder
       // AND every resolved winning bidder, each tagged with the bucket
@@ -657,10 +667,10 @@ export default async function handler(req, res) {
       function bucketedUnionCTEs() {
         return `
           WITH selected_auctions AS (
-            SELECT DISTINCT auction_number, store_name, ${bucketExpr("ending_time")} AS bucket
+            SELECT DISTINCT auction_number, store_name, ${bucketExprEndingTime("ending_time")} AS bucket
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           lot_category AS (
@@ -817,8 +827,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
 
               AND (
                 {store:String} = ''
@@ -979,8 +989,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
 
               AND (
                 {store:String} = ''
@@ -1112,8 +1122,8 @@ export default async function handler(req, res) {
               auction_number,
               store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
 
@@ -1262,8 +1272,8 @@ export default async function handler(req, res) {
               auction_number,
               store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
 
@@ -1394,8 +1404,8 @@ export default async function handler(req, res) {
 
             FROM xv3.mart_auction_productivity_report
 
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
 
               AND (
                 {store:String} = ''
@@ -1539,8 +1549,8 @@ export default async function handler(req, res) {
                 any(store_name) AS auction_store_name,
                 any(ending_time) AS auction_ending_time
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
               GROUP BY auction_number
             ),
@@ -2086,8 +2096,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -2208,8 +2218,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -2709,8 +2719,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         )
 
@@ -2748,8 +2758,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -2813,8 +2823,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -2884,8 +2894,8 @@ export default async function handler(req, res) {
             auction_number,
             store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND (
               {store:String} = ''
               OR store_name = {store:String}
@@ -2989,8 +2999,8 @@ export default async function handler(req, res) {
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
             AND ({store:String} = '' OR store_name = {store:String})
         ),
 
@@ -3277,8 +3287,8 @@ export default async function handler(req, res) {
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           settled_lots AS (
@@ -3324,8 +3334,8 @@ export default async function handler(req, res) {
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           settled_lots AS (
@@ -3367,8 +3377,8 @@ export default async function handler(req, res) {
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           lot_category AS (
@@ -3482,8 +3492,8 @@ export default async function handler(req, res) {
           WITH selected_auctions AS (
             SELECT DISTINCT auction_number, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+            WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+              AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
               AND ({store:String} = '' OR store_name = {store:String})
           ),
           lot_category AS (
@@ -4008,8 +4018,8 @@ export default async function handler(req, res) {
 
           FROM xv3.mart_auction_productivity_report
 
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
 
             AND (
               {store:String} = ''
@@ -4097,8 +4107,8 @@ export default async function handler(req, res) {
 
           FROM xv3.mart_auction_productivity_report
 
-          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+          WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+            AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
 
             AND (
               {store:String} = ''
@@ -4600,8 +4610,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -4630,8 +4640,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             lots AS (
@@ -4662,8 +4672,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -4693,8 +4703,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             )
             SELECT
@@ -4718,8 +4728,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -4757,8 +4767,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
@@ -4800,8 +4810,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             lot_category AS (
@@ -4846,8 +4856,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             lot_category AS (
@@ -4912,8 +4922,8 @@ export default async function handler(req, res) {
             WITH selected_auctions AS (
               SELECT DISTINCT auction_number, store_name
               FROM xv3.mart_auction_productivity_report
-              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'), 'Asia/Manila')
-                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00'), 'Asia/Manila'), 1)
+              WHERE ending_time >= toDateTime(concat({from:String}, ' 00:00:00'))
+                AND ending_time < addDays(toDateTime(concat({to:String}, ' 00:00:00')), 1)
                 AND ({store:String} = '' OR store_name = {store:String})
             ),
             settled_lots AS (
