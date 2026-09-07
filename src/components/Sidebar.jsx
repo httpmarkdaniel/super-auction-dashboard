@@ -100,7 +100,13 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
               quick-export button are untouched below, just no longer
               reachable via any nav item — same pattern as Bidding
               Pace/Revenue Breakdown above. */}
-          <NavItem label="Vendor Summary" active={active === "Vendor Summary"} onClick={() => go("Vendor Summary")} />
+          {/* Displayed label reworded to "Vendor Analysis" per explicit
+              request — the internal tab id/routing key stays "Vendor
+              Summary" (unrelated to the OTHER "Vendor Analysis" nav item
+              above, in the Dashboard group), so this now shows two
+              differently-scoped destinations under the same visible
+              name. */}
+          <NavItem label="Vendor Analysis" active={active === "Vendor Summary"} onClick={() => go("Vendor Summary")} />
           <NavItem label="Auction Result" active={active === "Auction Result"} onClick={() => go("Auction Result")} />
         </NavGroup>
 

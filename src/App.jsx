@@ -1527,7 +1527,7 @@ const TITLES = {
   "Revenue Breakdown": "Revenue Breakdown",
   "Bidder Analytics": "Bidder Analytics",
   "Vendor Analytics": "Vendor Analytics",
-  "Vendor Summary": "Vendor Summary",
+  "Vendor Summary": "Vendor Analysis",
   "Auction Result": "Auction Result",
   Export: "Export Report",
 };
