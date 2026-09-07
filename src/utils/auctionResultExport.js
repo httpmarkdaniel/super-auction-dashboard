@@ -45,39 +45,53 @@ function buildFilterLines(filters, filterLabels) {
   ];
 }
 
-// Detailed export's 22 business-label columns, in order — [label, cell
-// value getter]. BP %/SF % pass through as-is (buyers_premium/commission
-// are stored as plain percentage numbers already, e.g. 15/17/18 — NEVER
-// multiplied by 100 here; see api/overview.js's own comment on this).
+// Detailed export's 20 business-label columns, in the exact requested
+// sequence — [label, cell value getter]. BP %/SF % pass through as-is
+// (buyers_premium/commission are stored as plain percentage numbers
+// already, e.g. 15/17/18 — NEVER multiplied by 100 here; see
+// api/overview.js's own comment on this).
+//
+// PO Number: NO source field for this exists on xv3.mart_auction_vendor_
+// analysis (verified against the table's full column list) — receiving_
+// number/dr_number/or_number/client_reference_number are each a distinct,
+// already-mapped concept, none proven equivalent to a Purchase Order
+// number. Rendered as "—" (the same convention as every other missing
+// value in this sheet) rather than silently substituting a wrong field;
+// flagged as a real source gap, not fabricated.
+//
+// Receiving Number/DR PIS/Account Executive: dropped from this sheet per
+// the requested column sequence (which excludes them) — still returned
+// by the type=auction-result-export API response itself (untouched;
+// nothing else reads this file's column list) in case another feature
+// needs them later.
 const DETAILED_COLUMNS = [
-  ["DR Received", (r) => endDateOnly(r.dr_received)],
-  ["Receiving Number", (r) => dash(r.receiving_number)],
-  ["Vendor", (r) => dash(r.vendor)],
   ["Branch", (r) => dash(r.branch)],
+  ["Vendor", (r) => dash(r.vendor)],
   ["Origin", (r) => dash(r.origin)],
   ["DR Number", (r) => dash(r.dr_number)],
-  ["DR PIS", (r) => dash(r.dr_pis)],
-  ["Account Executive", (r) => dash(r.account_executive)],
-  ["Auction Number", (r) => dash(r.auction_number)],
-  ["End Date", (r) => endDateOnly(r.end_date)],
-  ["Lot Number", (r) => dash(r.lot_number)],
+  ["DR Received", (r) => endDateOnly(r.dr_received)],
+  ["PO Number", () => "—"],
+  ["Client Ref No", (r) => dash(r.client_reference_number)],
   ["Item Barcode", (r) => dash(r.item_barcode)],
   ["Qty", (r) => numOrBlank(r.qty)],
   ["Item Status", (r) => dash(r.item_status)],
-  ["Client Reference Number", (r) => dash(r.client_reference_number)],
+  ["Auction Number", (r) => dash(r.auction_number)],
+  ["End Date", (r) => endDateOnly(r.end_date)],
+  ["Lot Number", (r) => dash(r.lot_number)],
   ["Description", (r) => dash(r.description)],
-  ["Payment Status", (r) => dash(r.payment_status)],
+  ["Reserved Price", (r) => r.reserved_price ?? 0],
+  ["Bid Amount", (r) => r.bid_amount ?? 0],
   ["BP %", (r) => numOrBlank(r.bp_percent)],
   ["SF %", (r) => numOrBlank(r.sf_percent)],
+  ["Payment Status", (r) => dash(r.payment_status)],
   ["For Approval Status", (r) => dash(r.for_approval_status)],
-  ["Bid Amount", (r) => r.bid_amount ?? 0],
-  ["Reserved Price", (r) => r.reserved_price ?? 0],
 ];
-const QTY_COL = 12;
-const BP_COL = 17;
-const SF_COL = 18;
-const BID_COL = 20;
-const RESERVED_COL = 21;
+const QTY_COL = 8;
+const RESERVED_COL = 14;
+const BID_COL = 15;
+const BP_COL = 16;
+const SF_COL = 17;
+const DESCRIPTION_COL = 13;
 const DETAILED_COL_COUNT = DETAILED_COLUMNS.length;
 
 // ============================================================
@@ -203,7 +217,7 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
       setFormat(ws3, r, RESERVED_COL, '"₱"#,##0.00');
     }
 
-    ws3["!cols"] = DETAILED_COLUMNS.map(([label]) => ({ wch: label === "Description" ? 44 : Math.max(14, label.length + 2) }));
+    ws3["!cols"] = DETAILED_COLUMNS.map(([label], i) => ({ wch: i === DESCRIPTION_COL ? 44 : Math.max(14, label.length + 2) }));
     ws3["!autofilter"] = {
       ref: XLSX.utils.encode_range({ s: { r: headerRow3, c: 0 }, e: { r: dataStartRow3 + detailed.rows.length - 1, c: DETAILED_COL_COUNT - 1 } }),
     };
@@ -320,7 +334,7 @@ export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, to
       margin: { left: marginLeft, right: marginLeft },
       styles: { fontSize: 6, cellPadding: 2, overflow: "linebreak" },
       headStyles: { fillColor: NAVY_RGB, textColor: 255, fontStyle: "bold", fontSize: 6 },
-      columnStyles: { 15: { cellWidth: 90 } }, // Description
+      columnStyles: { [DESCRIPTION_COL]: { cellWidth: 90 } }, // Description
       head: [DETAILED_COLUMNS.map(([label]) => label)],
       body: detailed.rows.map((r) => DETAILED_COLUMNS.map(([, get]) => String(get(r)))),
     });

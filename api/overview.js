@@ -255,12 +255,22 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
-    // AUCTION RESULT (type=auction-result) — reproduces, EXACTLY, the two
-    // Superset "Auction Result" reference queries against
+    // AUCTION RESULT (type=auction-result) — reproduces the Superset
+    // "Auction Result" reference queries against
     // xv3.mart_auction_vendor_analysis (grouped by status/for_approval_status,
-    // COUNT(DISTINCT lot_number)/SUM(reserved_price)/SUM(bid_amount)) —
-    // "Sales Summary" — plus the Top Info table, both sharing the same
-    // From/To/Branch/Vendor/Auction Number/Status/BDM scope. Vendor
+    // count of lots/SUM(reserved_price)/SUM(bid_amount)) — "Sales Summary"
+    // — plus the Top Info table, both sharing the same From/To/Branch/
+    // Vendor/Auction Number/Status/BDM scope.
+    //
+    // LOT IDENTITY FIX: count(DISTINCT (v.auction_number, v.lot_number)),
+    // NOT count(DISTINCT v.lot_number) — lot_number is only unique WITHIN
+    // an auction, not across auctions (e.g. auctions 549O/550O/551O each
+    // mint their own lot "1", "2", ...), so a bare DISTINCT lot_number
+    // undercounts whenever a vendor's lots span more than one auction in
+    // the selected range. Proven on ALSON DEVELOPMENT & INVESTMENT CORP /
+    // Sep 5, 2026: 12 real (auction_number, lot_number) pairs across
+    // auctions 549O/550O/551O were previously miscounted as 7 distinct
+    // lot_number values. Vendor
     // Summary (Paid/Released-only financial rollup by calendar year) USED
     // to live in this same response — it has MOVED to Vendor Analysis
     // (see api/leaderboards.js's type=vendor-financial-summary), so this
@@ -365,7 +375,7 @@ export default async function handler(req, res) {
             SELECT
               v.status AS payment_status,
               v.for_approval_status AS approval_status,
-              count(DISTINCT v.lot_number) AS count_of_lot,
+              count(DISTINCT (v.auction_number, v.lot_number)) AS count_of_lot,
               sum(v.reserved_price) AS reserved_price,
               sum(v.bid_amount) AS bid_amount
             FROM xv3.mart_auction_vendor_analysis v
@@ -380,7 +390,7 @@ export default async function handler(req, res) {
         client.query({
           query: `
             SELECT
-              count(DISTINCT v.lot_number) AS count_of_lot,
+              count(DISTINCT (v.auction_number, v.lot_number)) AS count_of_lot,
               sum(v.reserved_price) AS reserved_price,
               sum(v.bid_amount) AS bid_amount
             FROM xv3.mart_auction_vendor_analysis v
