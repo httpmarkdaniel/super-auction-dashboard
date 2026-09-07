@@ -42,6 +42,20 @@ function exportDateSuffix(filters) {
   return filters.from === filters.to ? filters.from : `${filters.from}_to_${filters.to}`;
 }
 
+// XLSX filename: "<Vendor> Auction Summary(<end_date>).xlsx" when a
+// Vendor filter is active, "All Vendors Auction Summary(<end_date>).xlsx"
+// otherwise — strips characters Windows/macOS both reject in filenames
+// (\ / : * ? " < > |), since a real vendor name is free-text and could
+// contain any of them.
+function sanitizeForFilename(value) {
+  return value.replace(/[\\/:*?"<>|]/g, "").trim();
+}
+
+function excelFileName(filters) {
+  const vendorPart = sanitizeForFilename(filters.vendor || "All Vendors");
+  return `${vendorPart} Auction Summary(${exportDateSuffix(filters)}).xlsx`;
+}
+
 // Detailed export's 20 business-label columns, in the exact requested
 // sequence — [label, cell value getter]. BP %/SF % pass through as-is
 // (buyers_premium/commission are stored as plain percentage numbers
@@ -199,7 +213,7 @@ export function exportAuctionResultExcel({ filters, totals, rows, topInfo, detai
     XLSX.utils.book_append_sheet(wb, ws3, "Detailed Auction Result");
   }
 
-  XLSX.writeFile(wb, `Auction_Result_${exportDateSuffix(filters)}.xlsx`);
+  XLSX.writeFile(wb, excelFileName(filters));
 }
 
 // ============================================================
