@@ -42,18 +42,6 @@ function exportDateSuffix(filters) {
   return filters.from === filters.to ? filters.from : `${filters.from}_to_${filters.to}`;
 }
 
-function buildFilterLines(filters, filterLabels) {
-  return [
-    ["From", filters.from],
-    ["To", filters.to],
-    ["Branch", filterLabels.branch],
-    ["Vendor", filterLabels.vendor],
-    ["Auction Number", filterLabels.auctionNumber],
-    ["Status", filterLabels.status],
-    ["BDM", filterLabels.bdm],
-  ];
-}
-
 // Detailed export's 20 business-label columns, in the exact requested
 // sequence — [label, cell value getter]. BP %/SF % pass through as-is
 // (buyers_premium/commission are stored as plain percentage numbers
@@ -105,37 +93,31 @@ const DETAILED_COL_COUNT = DETAILED_COLUMNS.length;
 
 // ============================================================
 // EXCEL — xlsx-js-style (SheetJS fork with cell style support).
-// Three sheets: "Auction Result Summary" (filter context + totals + Sales
-// Summary table), "Top Info", and "Detailed Auction Result" (the full
-// item-barcode-grain export — see api/overview.js's type=auction-result-
-// export). Sheets 1-2 are built from the already-loaded on-screen data;
-// Sheet 3's `detailed` argument is only ever populated by an on-demand
-// fetch triggered by the Export click itself (see useAuctionResult.js's
-// fetchAuctionResultExportData) — never fetched on normal page load.
+// Three sheets: "Auction Result Summary" (the Sales Summary table itself
+// — no separate filter/metadata or standalone-totals block above it; the
+// table's own total row already carries those totals), "Top Info", and
+// "Detailed Auction Result" (the full item-barcode-grain export — see
+// api/overview.js's type=auction-result-export). Sheets 1-2 are built
+// from the already-loaded on-screen data; Sheet 3's `detailed` argument
+// is only ever populated by an on-demand fetch triggered by the Export
+// click itself (see useAuctionResult.js's fetchAuctionResultExportData)
+// — never fetched on normal page load.
 // ============================================================
-export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, topInfo, detailed }) {
+export function exportAuctionResultExcel({ filters, totals, rows, topInfo, detailed }) {
   const wb = XLSX.utils.book_new();
 
   const headerStyle = {
     font: { bold: true, color: { rgb: "FFFFFF" } },
     fill: { fgColor: { rgb: NAVY_HEX } },
   };
-  const titleStyle = { font: { bold: true, sz: 13 } };
   const labelStyle = { font: { bold: true } };
 
   // --- Sheet 1: Auction Result Summary ---
+  // No filter/metadata block or standalone Total Lots/Reserved Price/Bid
+  // Amount lines above the table (per task) — the sheet opens directly
+  // with the Sales Summary header row; its own total row below still
+  // carries the same totals.
   const aoa = [];
-  aoa.push(["Auction Result Summary"]);
-  aoa.push([]);
-  buildFilterLines(filters, filterLabels).forEach(([label, value]) => aoa.push([label, value]));
-  aoa.push([]);
-  const totalLotsRow = aoa.length;
-  aoa.push(["Total Lots", totals.count_of_lot]);
-  const totalReservedRow = aoa.length;
-  aoa.push(["Total Reserved Price", totals.reserved_price]);
-  const totalBidRow = aoa.length;
-  aoa.push(["Total Bid Amount", totals.bid_amount]);
-  aoa.push([]);
   const headerRow = aoa.length;
   aoa.push(["Payment Status", "For Approval Status", "Count of Lot", "Reserved Price", "Bid Amount"]);
   const dataStartRow = aoa.length;
@@ -153,15 +135,6 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
     const addr = XLSX.utils.encode_cell({ r, c });
     if (ws[addr]) ws[addr].z = fmt;
   };
-
-  setStyle(ws1, 0, 0, titleStyle);
-  buildFilterLines(filters, filterLabels).forEach((_, i) => setStyle(ws1, 2 + i, 0, labelStyle));
-  setStyle(ws1, totalLotsRow, 0, labelStyle);
-  setStyle(ws1, totalReservedRow, 0, labelStyle);
-  setStyle(ws1, totalBidRow, 0, labelStyle);
-  setFormat(ws1, totalLotsRow, 1, "#,##0");
-  setFormat(ws1, totalReservedRow, 1, '"₱"#,##0.00');
-  setFormat(ws1, totalBidRow, 1, '"₱"#,##0.00');
 
   for (let c = 0; c < 5; c++) setStyle(ws1, headerRow, c, headerStyle);
 
@@ -191,16 +164,13 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
   XLSX.utils.book_append_sheet(wb, ws2, "Top Info");
 
   // --- Sheet 3: Detailed Auction Result ---
+  // No title row or standalone Total Bid Amount/Total Reserved Price
+  // block above the table (per task) — the sheet opens directly with the
+  // detailed header row, except for the truncation warning (kept when
+  // present — a data-completeness notice, not a decorative summary total).
   if (detailed) {
     const aoa3 = [];
-    aoa3.push(["Detailed Auction Result"]);
     if (detailed.truncated) aoa3.push([detailed.truncationNote]);
-    aoa3.push([]);
-    const totalBidRow3 = aoa3.length;
-    aoa3.push(["Total Bid Amount", detailed.totals.bid_amount]);
-    const totalReservedRow3 = aoa3.length;
-    aoa3.push(["Total Reserved Price", detailed.totals.reserved_price]);
-    aoa3.push([]);
     const headerRow3 = aoa3.length;
     aoa3.push(DETAILED_COLUMNS.map(([label]) => label));
     const dataStartRow3 = aoa3.length;
@@ -208,12 +178,7 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
 
     const ws3 = XLSX.utils.aoa_to_sheet(aoa3);
 
-    setStyle(ws3, 0, 0, titleStyle);
-    if (detailed.truncated) setStyle(ws3, 1, 0, { font: { italic: true, color: { rgb: "B00020" } } });
-    setStyle(ws3, totalBidRow3, 0, labelStyle);
-    setStyle(ws3, totalReservedRow3, 0, labelStyle);
-    setFormat(ws3, totalBidRow3, 1, '"₱"#,##0.00');
-    setFormat(ws3, totalReservedRow3, 1, '"₱"#,##0.00');
+    if (detailed.truncated) setStyle(ws3, 0, 0, { font: { italic: true, color: { rgb: "B00020" } } });
 
     for (let c = 0; c < DETAILED_COL_COUNT; c++) setStyle(ws3, headerRow3, c, headerStyle);
 
