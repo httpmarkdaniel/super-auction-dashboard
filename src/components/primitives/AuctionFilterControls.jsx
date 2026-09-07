@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 
 // Shared compact filter controls used by both Auction Result and Vendor
-// Analysis' Vendor Summary section (both scope xv3.mart_auction_vendor_
-// analysis by the same Branch/Vendor/Auction Number/From/To/BDM shape).
-// Extracted here when Vendor Summary moved into Vendor Analysis so the
+// Summary (both scope xv3.mart_auction_vendor_analysis by the same
+// Branch/Vendor/Auction Number/From/To/BDM shape). Extracted here so the
 // two never drift into two different-looking filter bars.
 
 export function FilterSelect({ label, value, onChange, options, allLabel, disabled }) {

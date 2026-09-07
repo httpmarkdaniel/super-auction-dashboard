@@ -22,6 +22,7 @@ import FullAuctionDetailView from "./components/FullAuctionDetailView";
 import RevenueBreakdownView from "./components/RevenueBreakdownView";
 import BidderAnalyticsView from "./components/BidderAnalyticsView";
 import VendorAnalyticsView from "./components/VendorAnalyticsView";
+import VendorSummaryView from "./components/VendorSummaryView";
 import OperationalFlagsView from "./components/OperationalFlagsView";
 import AuctionResultView from "./components/AuctionResultView";
 import BranchPerformanceTable from "./components/BranchPerformanceTable";
@@ -1526,6 +1527,7 @@ const TITLES = {
   "Revenue Breakdown": "Revenue Breakdown",
   "Bidder Analytics": "Bidder Analytics",
   "Vendor Analytics": "Vendor Analytics",
+  "Vendor Summary": "Vendor Summary",
   "Auction Result": "Auction Result",
   Export: "Export Report",
 };
@@ -1670,8 +1672,10 @@ export default function App() {
   // so the familiar picker still works exactly the same way (WTD/MTD/
   // YTD/Custom, switchable any time — see effectiveSetDateRange) without
   // either tab's selection ever touching the other's or Overview's.
-  // Auction Result is NOT part of this indirection at all any more (see
-  // hideFilters below) — it never reads or writes any of these values.
+  // Auction Result and Vendor Summary are NOT part of this indirection at
+  // all (see hideFilters below) — neither ever reads or writes any of
+  // these values, each keeping its own independent Branch/Vendor/Auction
+  // Number/From/To(/BDM) filter state instead.
   const effectiveDateRange =
     tab === "Bidder Analytics" ? bidderAnalyticsDateRange : tab === "Vendor Analytics" ? vendorAnalyticsDateRange : dateRange;
   const effectiveSetDateRange =
@@ -1736,7 +1740,7 @@ export default function App() {
           searchPool={searchPool}
           dateRange={effectiveDateRange}
           onDateRangeChange={effectiveSetDateRange}
-          hideFilters={tab === "Auction Result"}
+          hideFilters={tab === "Auction Result" || tab === "Vendor Summary"}
           storeOptions={storeOptions}
           updatedAt={formatUpdatedAt(
             lastUpdated,
@@ -1880,6 +1884,8 @@ export default function App() {
               refreshNonce={manualRefreshNonce}
             />
           )}
+
+          {tab === "Vendor Summary" && <VendorSummaryView refreshNonce={manualRefreshNonce} />}
 
           {tab === "Auction Result" && <AuctionResultView refreshNonce={manualRefreshNonce} />}
 

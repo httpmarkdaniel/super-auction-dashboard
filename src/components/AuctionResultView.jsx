@@ -110,10 +110,10 @@ function ExportMenu({ onExportExcel, onExportPdf }) {
 // report (xv3.mart_auction_vendor_analysis grouped by Payment Status/For
 // Approval Status — "Sales Summary") plus Top Info, sharing one Branch/
 // Vendor/Auction Number/Status/BDM filter set. Vendor Summary (Paid/
-// Released-only rollup by year) USED to live here — it has MOVED to
-// Vendor Analysis (see VendorAnalyticsView.jsx's VendorSummarySection),
-// since it's a vendor-financial concept, not an operational per-lot one.
-// Deliberately independent of the
+// Released-only rollup by year) USED to live here — it has since MOVED to
+// its own dedicated sidebar tab (see VendorSummaryView.jsx), since it's a
+// vendor-financial concept, not an operational per-lot one. Deliberately
+// independent of the
 // dashboard's global Store/Category/WTD-MTD-YTD-Custom controls — see
 // App.jsx's hideFilters wiring on Topbar. One request per filter change
 // via useAuctionResult.js; filter option lists load once via

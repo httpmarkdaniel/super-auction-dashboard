@@ -107,13 +107,15 @@ export default async function handler(req, res) {
     // VENDOR SUMMARY (type=vendor-financial-summary) — MOVED here from
     // Auction Result (api/overview.js's type=auction-result used to carry
     // this same data as `vendor_summary`/`vendor_summary_totals`; verified
-    // zero other consumers before removing it from that handler). Lives in
-    // Vendor Analysis now, with its OWN independent filter set — Branch/
-    // Vendor/Auction Number/From/To/BDM — deliberately NOT tied to the
-    // main Vendor Analytics tab's Store/Category/date-range state (see
+    // zero other consumers before removing it from that handler), then
+    // moved again from Vendor Analysis to its own dedicated sidebar tab
+    // (see src/components/VendorSummaryView.jsx) — this endpoint itself
+    // is unchanged by either move, same query/formulas both times, only
+    // the frontend location moved. Its OWN independent filter set —
+    // Branch/Vendor/Auction Number/From/To/BDM — is deliberately NOT tied
+    // to any other tab's Store/Category/date-range state (see
     // useVendorFinancialSummary.js: its own hook, own fetch, refetches
-    // only on its own filter change, never when the main Vendor Analytics
-    // filters change and vice versa).
+    // only on its own filter change).
     //
     // Status is intentionally NOT a filter here — this population is
     // hardcoded to status IN ('Paid','Released') always, per the task's
