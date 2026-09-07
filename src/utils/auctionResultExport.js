@@ -1,7 +1,16 @@
 import XLSX from "xlsx-js-style";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { formatPeso } from "./format";
+
+// jsPDF's standard 14 fonts (Helvetica et al.) have no glyph for "₱"
+// (U+20B1) — it renders as a garbled "±" in the PDF. Excel/HTML have no
+// such issue (real Unicode font support), so the shared formatPeso() in
+// ./format.js stays untouched (48 other call sites, all HTML/Excel) —
+// this ASCII-only variant is used ONLY inside exportAuctionResultPdf below.
+function formatPesoPdf(n) {
+  if (n === null || n === undefined) return "—";
+  return "PHP " + n.toLocaleString("en-PH", { maximumFractionDigits: 0 });
+}
 
 // Dashboard's own navy/orange tokens (src/theme.css light values) — used
 // lightly for export headers only, per the task's "do not overdesign it"
@@ -229,13 +238,16 @@ export function exportAuctionResultExcel({ filters, filterLabels, totals, rows, 
 }
 
 // ============================================================
-// PDF — jsPDF + jspdf-autotable. Compact report (filters, summary, Top
-// Info table, Sales Summary table, Detailed Auction Result table),
-// landscape so the wide detailed table stays readable — autoTable paginates
-// long tables across pages automatically (never a screenshot). Built from
-// the same in-memory data as the Excel export above.
+// PDF — jsPDF + jspdf-autotable. Opens directly with Top Info, then Sales
+// Summary, then Detailed Auction Result — no printed Selected Filters or
+// standalone Summary text block (per task; the underlying dataset is
+// still fully filtered upstream, only the PDF-printed filter/summary text
+// was removed — Sales Summary's own foot row still carries the totals).
+// Landscape so the wide detailed table stays readable — autoTable
+// paginates long tables across pages automatically (never a screenshot).
+// Built from the same in-memory data as the Excel export above.
 // ============================================================
-export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, topInfo, detailed }) {
+export function exportAuctionResultPdf({ filters, totals, rows, topInfo, detailed }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const marginLeft = 40;
   let y = 44;
@@ -245,33 +257,9 @@ export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, to
   doc.setTextColor(...NAVY_RGB);
   doc.text("AUCTION RESULT", marginLeft, y);
   doc.setTextColor(0, 0, 0);
-  y += 22;
+  y += 26;
 
   doc.setFontSize(10);
-  doc.setFont(undefined, "bold");
-  doc.text("Selected Filters", marginLeft, y);
-  y += 14;
-  doc.setFont(undefined, "normal");
-  buildFilterLines(filters, filterLabels).forEach(([label, value]) => {
-    doc.text(`${label}: ${value}`, marginLeft, y);
-    y += 13;
-  });
-
-  y += 6;
-  doc.setFont(undefined, "bold");
-  doc.text("Summary", marginLeft, y);
-  y += 14;
-  doc.setFont(undefined, "normal");
-  [
-    `Total Lots: ${totals.count_of_lot.toLocaleString()}`,
-    `Total Reserved Price: ${formatPeso(totals.reserved_price)}`,
-    `Total Bid Amount: ${formatPeso(totals.bid_amount)}`,
-  ].forEach((line) => {
-    doc.text(line, marginLeft, y);
-    y += 13;
-  });
-
-  y += 8;
   doc.setFont(undefined, "bold");
   doc.text("Top Info", marginLeft, y);
   y += 4;
@@ -297,8 +285,8 @@ export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, to
     styles: { fontSize: 8, cellPadding: 4 },
     headStyles: { fillColor: NAVY_RGB, textColor: 255, fontStyle: "bold" },
     head: [["Payment Status", "For Approval Status", "Count of Lot", "Reserved Price", "Bid Amount"]],
-    body: rows.map((r) => [r.payment_status, r.for_approval_status, r.count_of_lot.toLocaleString(), formatPeso(r.reserved_price), formatPeso(r.bid_amount)]),
-    foot: [["Total (distinct lots)", "", totals.count_of_lot.toLocaleString(), formatPeso(totals.reserved_price), formatPeso(totals.bid_amount)]],
+    body: rows.map((r) => [r.payment_status, r.for_approval_status, r.count_of_lot.toLocaleString(), formatPesoPdf(r.reserved_price), formatPesoPdf(r.bid_amount)]),
+    foot: [["Total (distinct lots)", "", totals.count_of_lot.toLocaleString(), formatPesoPdf(totals.reserved_price), formatPesoPdf(totals.bid_amount)]],
     footStyles: { fillColor: [230, 230, 235], textColor: NAVY_RGB, fontStyle: "bold" },
   });
 
@@ -315,13 +303,13 @@ export function exportAuctionResultPdf({ filters, filterLabels, totals, rows, to
     doc.setTextColor(0, 0, 0);
     y3 += 20;
 
-    doc.setFontSize(10);
-    doc.setFont(undefined, "normal");
-    doc.text(`Total Bid Amount: ${formatPeso(detailed.totals.bid_amount)}`, marginLeft, y3);
-    y3 += 13;
-    doc.text(`Total Reserved Price: ${formatPeso(detailed.totals.reserved_price)}`, marginLeft, y3);
-    y3 += 13;
+    // Standalone "Total Bid Amount"/"Total Reserved Price" lines removed
+    // per task (duplicated the Sales Summary table's own foot row) — the
+    // truncation note stays: it's a data-completeness warning, not a
+    // decorative summary total.
     if (detailed.truncated) {
+      doc.setFontSize(10);
+      doc.setFont(undefined, "normal");
       doc.setTextColor(176, 0, 32);
       doc.text(detailed.truncationNote, marginLeft, y3);
       doc.setTextColor(0, 0, 0);
