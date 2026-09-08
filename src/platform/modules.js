@@ -31,14 +31,6 @@ export const MODULES = [
     actionLabel: "Coming Soon",
   },
   {
-    id: "hmr-mart",
-    name: "HMR Mart",
-    status: "coming-soon",
-    description:
-      "HMR Mart orders, sales, cancellations, returns, customers and fulfillment performance.",
-    actionLabel: "Coming Soon",
-  },
-  {
     id: "inventory",
     name: "Inventory",
     status: "coming-soon",
