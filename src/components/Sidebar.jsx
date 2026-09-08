@@ -57,6 +57,19 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose }
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
+        <div className="px-3 pt-1 pb-2">
+          <a
+            href="/"
+            title="Return to HMR Analytics Home"
+            className="text-[12px] text-muted hover:text-ink transition-colors inline-flex items-center gap-1"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M11 18l-6-6 6-6" />
+            </svg>
+            HMR Analytics Home
+          </a>
+        </div>
+
         <div className="px-3 mb-3">
           <button
             type="button"
