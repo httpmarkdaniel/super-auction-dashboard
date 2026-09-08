@@ -16,10 +16,10 @@ export const MODULES = [
   {
     id: "hrh-online",
     name: "HRH Online",
-    status: "coming-soon",
+    status: "available",
     description:
       "E-commerce sales, customers, merchandising, fulfillment and channel performance.",
     route: "/hrh-online",
-    actionLabel: "Coming Soon",
+    actionLabel: "Open Dashboard",
   },
 ];
