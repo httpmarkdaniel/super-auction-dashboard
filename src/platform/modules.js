@@ -22,4 +22,52 @@ export const MODULES = [
     route: "/hrh-online",
     actionLabel: "Open Dashboard",
   },
+  {
+    id: "retail",
+    name: "Retail",
+    status: "coming-soon",
+    description:
+      "Retail sales performance, store productivity, transactions, basket size and category performance.",
+    actionLabel: "Coming Soon",
+  },
+  {
+    id: "hmr-mart",
+    name: "HMR Mart",
+    status: "coming-soon",
+    description:
+      "HMR Mart orders, sales, cancellations, returns, customers and fulfillment performance.",
+    actionLabel: "Coming Soon",
+  },
+  {
+    id: "inventory",
+    name: "Inventory",
+    status: "coming-soon",
+    description:
+      "Inventory levels, aging, movement, availability and stock performance.",
+    actionLabel: "Coming Soon",
+  },
+  {
+    id: "customer-analytics",
+    name: "Customer Analytics",
+    status: "coming-soon",
+    description:
+      "Customer growth, behavior, segmentation, retention and purchase patterns.",
+    actionLabel: "Coming Soon",
+  },
+  {
+    id: "bopis",
+    name: "BOPIS / Pickup at Store",
+    status: "coming-soon",
+    description:
+      "Buy Online Pick Up In Store sales, orders, redemption stores and customer pickup performance.",
+    actionLabel: "Coming Soon",
+  },
+  {
+    id: "email-analytics",
+    name: "Email Analytics",
+    status: "coming-soon",
+    description:
+      "Email delivery, engagement, campaign performance and business-unit communication analytics.",
+    actionLabel: "Coming Soon",
+  },
 ];
