@@ -5,6 +5,7 @@ import ExecutiveOverview from "./pages/ExecutiveOverview";
 import SalesAnalytics from "./pages/SalesAnalytics";
 import TrafficConversion from "./pages/TrafficConversion";
 import CustomerAnalytics from "./pages/CustomerAnalytics";
+import ProductAnalytics from "./pages/ProductAnalytics";
 import ProductMerchandising from "./pages/ProductMerchandising";
 import InventoryAging from "./pages/InventoryAging";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
@@ -20,6 +21,7 @@ const PAGES = {
   sales: SalesAnalytics,
   traffic: TrafficConversion,
   customers: CustomerAnalytics,
+  productAnalytics: ProductAnalytics,
   merchandising: ProductMerchandising,
   inventoryAging: InventoryAging,
   markdown: MarkdownAnalytics,

@@ -417,3 +417,106 @@ export const operationalFlags = [
   { id: "of5", severity: "warning", area: "Cancellations", flag: "Cancellation rate above baseline (TikTok)", affectedCount: 268, ageDays: 7 },
   { id: "of6", severity: "good", area: "Returns", flag: "Returns awaiting inspection", affectedCount: 19, ageDays: 1 },
 ];
+
+// ---------------------------------------------------------------------
+// Product Analytics — weekly product sales-performance view (HMR Mart
+// Product Analytics carry-over). Keyed by the same channel selector values
+// as CHANNEL_OPTIONS. Pending the real ClickHouse contract (mart_net_sales
+// x mart_level_of_inventory on barcode) — see productAnalyticsDataNotes.md
+// discussion in the PR — every figure below is a fabricated demo fixture.
+// ---------------------------------------------------------------------
+export const productAnalyticsDataNotes =
+  "Candidate sources: xv3.mart_net_sales (sales, sales_channel, barcode) joined to " +
+  "xv3.mart_level_of_inventory (current stock, current stock value) on barcode. Not yet wired.";
+
+export const productAnalytics = {
+  "All Channels": {
+    kpis: {
+      gmv: { value: 4_820_000, delta: 6.1 },
+      nmv: { value: 4_310_000, delta: 5.2 },
+      aov: { value: 1_218, delta: -0.8 },
+      orders: { value: 3_540, delta: 3.4 },
+      units: { value: 6_260, delta: 2.9 },
+    },
+    repeatSellers: [
+      { id: "rs1", product: "PORTABLE WIRELESS SPEAKER", priorSales: 182_000, currentSales: 214_000, units: 428, trend: "up", currentStock: 96, currentStockValue: 38_304 },
+      { id: "rs2", product: "LIGHTNING IPHONE CABLE", priorSales: 96_600, currentSales: 88_200, units: 252, trend: "down", currentStock: 340, currentStockValue: 118_660 },
+      { id: "rs3", product: "AC ADAPTER 20W", priorSales: 61_400, currentSales: 74_900, units: 214, trend: "up", currentStock: 512, currentStockValue: 50_688 },
+      { id: "rs4", product: "MICRO CABLE 1M DATA", priorSales: 48_100, currentSales: 46_800, units: 189, trend: "flat", currentStock: 664, currentStockValue: 65_736 },
+    ],
+    topProducts: [
+      { id: "tp1", product: "PORTABLE WIRELESS SPEAKER", currentGmv: 214_000, currentUnits: 428, previousGmv: 182_000, previousUnits: 368, note: "Growing — TikTok Live push" },
+      { id: "tp2", product: "AC ADAPTER 20W", currentGmv: 74_900, currentUnits: 214, previousGmv: 61_400, previousUnits: 178, note: "Growing — steady repeat demand" },
+      { id: "tp3", product: "LIGHTNING IPHONE CABLE", currentGmv: 88_200, currentUnits: 252, previousGmv: 96_600, previousUnits: 279, note: "Declining — check pricing vs. Shopee" },
+      { id: "tp4", product: "FLASHLIGHT 9LED", currentGmv: 31_850, currentUnits: 490, previousGmv: 33_150, previousUnits: 510, note: "Flat" },
+    ],
+    droppedProducts: [
+      { id: "dp1", product: "BLUETOOTH EARBUDS X2", previousSales: 42_300, previousUnits: 94, currentStock: 0, currentStockValue: 0, status: "Out of Stock" },
+      { id: "dp2", product: "USB-C FAST CHARGER 30W", previousSales: 28_600, previousUnits: 82, currentStock: 156, currentStockValue: 46_800, status: "In Stock — Investigate" },
+      { id: "dp3", product: "PHONE RING HOLDER", previousSales: 9_400, previousUnits: 188, currentStock: 0, currentStockValue: 0, status: "Out of Stock" },
+    ],
+  },
+  "HMRPH Online": {
+    kpis: {
+      gmv: { value: 2_610_000, delta: 7.4 },
+      nmv: { value: 2_340_000, delta: 6.5 },
+      aov: { value: 1_346, delta: -0.4 },
+      orders: { value: 1_940, delta: 4.8 },
+      units: { value: 3_340, delta: 4.0 },
+    },
+    repeatSellers: [
+      { id: "rs1", product: "PORTABLE WIRELESS SPEAKER", priorSales: 96_800, currentSales: 118_400, units: 236, trend: "up", currentStock: 96, currentStockValue: 38_304 },
+      { id: "rs2", product: "LIGHTNING IPHONE CABLE", priorSales: 58_200, currentSales: 52_100, units: 149, trend: "down", currentStock: 340, currentStockValue: 118_660 },
+      { id: "rs3", product: "AC ADAPTER 20W", priorSales: 34_600, currentSales: 41_900, units: 120, trend: "up", currentStock: 512, currentStockValue: 50_688 },
+    ],
+    topProducts: [
+      { id: "tp1", product: "PORTABLE WIRELESS SPEAKER", currentGmv: 118_400, currentUnits: 236, previousGmv: 96_800, previousUnits: 194, note: "Growing" },
+      { id: "tp2", product: "AC ADAPTER 20W", currentGmv: 41_900, currentUnits: 120, previousGmv: 34_600, previousUnits: 99, note: "Growing" },
+      { id: "tp3", product: "LIGHTNING IPHONE CABLE", currentGmv: 52_100, currentUnits: 149, previousGmv: 58_200, previousUnits: 166, note: "Declining" },
+    ],
+    droppedProducts: [
+      { id: "dp1", product: "BLUETOOTH EARBUDS X2", previousSales: 24_100, previousUnits: 54, currentStock: 0, currentStockValue: 0, status: "Out of Stock" },
+      { id: "dp2", product: "USB-C FAST CHARGER 30W", previousSales: 16_400, previousUnits: 47, currentStock: 156, currentStockValue: 46_800, status: "In Stock — Investigate" },
+    ],
+  },
+  TikTok: {
+    kpis: {
+      gmv: { value: 1_480_000, delta: 9.8 },
+      nmv: { value: 1_260_000, delta: 8.1 },
+      aov: { value: 986, delta: 1.6 },
+      orders: { value: 1_120, delta: 6.2 },
+      units: { value: 2_010, delta: 5.4 },
+    },
+    repeatSellers: [
+      { id: "rs1", product: "PORTABLE WIRELESS SPEAKER", priorSales: 68_400, currentSales: 79_600, units: 159, trend: "up", currentStock: 96, currentStockValue: 38_304 },
+      { id: "rs2", product: "FLASHLIGHT 9LED", priorSales: 18_900, currentSales: 17_800, units: 274, trend: "down", currentStock: 812, currentStockValue: 52_780 },
+    ],
+    topProducts: [
+      { id: "tp1", product: "PORTABLE WIRELESS SPEAKER", currentGmv: 79_600, currentUnits: 159, previousGmv: 68_400, previousUnits: 137, note: "Growing — TikTok Live push" },
+      { id: "tp2", product: "PHONE RING HOLDER", currentGmv: 5_100, currentUnits: 102, previousGmv: 7_400, previousUnits: 148, note: "Declining" },
+    ],
+    droppedProducts: [
+      { id: "dp1", product: "PHONE RING HOLDER", previousSales: 3_600, previousUnits: 72, currentStock: 0, currentStockValue: 0, status: "Out of Stock" },
+    ],
+  },
+  Shopee: {
+    kpis: {
+      gmv: { value: 730_000, delta: -1.9 },
+      nmv: { value: 710_000, delta: -2.3 },
+      aov: { value: 1_098, delta: -0.6 },
+      orders: { value: 480, delta: -3.1 },
+      units: { value: 910, delta: -2.4 },
+    },
+    repeatSellers: [
+      { id: "rs1", product: "AC ADAPTER 20W", priorSales: 12_800, currentSales: 11_900, units: 34, trend: "down", currentStock: 512, currentStockValue: 50_688 },
+      { id: "rs2", product: "MICRO CABLE 1M DATA", priorSales: 9_600, currentSales: 9_900, units: 40, trend: "flat", currentStock: 664, currentStockValue: 65_736 },
+    ],
+    topProducts: [
+      { id: "tp1", product: "AC ADAPTER 20W", currentGmv: 11_900, currentUnits: 34, previousGmv: 12_800, previousUnits: 37, note: "Flat" },
+      { id: "tp2", product: "MICRO CABLE 1M DATA", currentGmv: 9_900, currentUnits: 40, previousGmv: 9_600, previousUnits: 39, note: "Flat" },
+    ],
+    droppedProducts: [
+      { id: "dp1", product: "USB-C FAST CHARGER 30W", previousSales: 4_200, previousUnits: 12, currentStock: 156, currentStockValue: 46_800, status: "In Stock — Investigate" },
+    ],
+  },
+};
