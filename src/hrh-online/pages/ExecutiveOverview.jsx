@@ -7,11 +7,14 @@ import { hrh } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
 
 // Real order_status values from xv3.mart_xv3_order_report (verified, not
-// assumed), plus the synthetic "Unknown/Unmapped" bucket the API assigns to
-// a canonical order with no match in that table — see
+// assumed), plus a per-channel "Unmapped (Channel)" bucket the API assigns
+// to a canonical order with no match in that table — see
 // api/hrh-executive-overview.js's comment for why the Order Status donut
 // classifies the SAME canonical order population as the Orders KPI (so the
-// two always sum to the same total), rather than a separate one.
+// two always sum to the same total), rather than a separate one, and why
+// Unmapped is split by channel (it means something different per channel —
+// TikTok/Shopee orders are never tracked in that table at all, HMRPH Online
+// unmapped orders are a real smaller coverage gap).
 const ORDER_STATUS_COLOR = {
   Paid: hrh.good,
   Completed: hrh.series[2],
@@ -19,7 +22,9 @@ const ORDER_STATUS_COLOR = {
   Processing: hrh.accent,
   Pending: hrh.muted,
   Cancelled: hrh.bad,
-  "Unknown/Unmapped": "#c7cdd6",
+  "Unmapped (HMRPH Online)": "#c7cdd6",
+  "Unmapped (TikTok)": "#a9b1bd",
+  "Unmapped (Shopee)": "#8b95a3",
 };
 
 // HMRPH Online only — verified every TikTok/Shopee order carries

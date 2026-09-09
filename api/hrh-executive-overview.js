@@ -247,7 +247,7 @@ export default async function handler(req, res) {
       await client.query({
         query: `
           WITH canonical AS (
-            SELECT DISTINCT invoice_id
+            SELECT DISTINCT invoice_id, sales_channel
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
               AND sales_channel IN {channels:Array(String)}
@@ -262,18 +262,38 @@ export default async function handler(req, res) {
           )
           SELECT
             multiIf(s.order_status != '', s.order_status, 'Unknown/Unmapped') AS status,
+            c.sales_channel AS channel,
             count() AS c
           FROM canonical c
           LEFT JOIN statuses s ON c.invoice_id = s.invoice_id
-          GROUP BY status
+          GROUP BY status, channel
           ORDER BY c DESC
         `,
         query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
         format: "JSONEachRow",
       })
     ).json();
-    const orderStatus = orderStatusRows.map((r) => ({ status: r.status, count: toNum(r.c) }));
-    const hasUnmapped = orderStatus.some((r) => r.status === "Unknown/Unmapped");
+    // Matched statuses (Paid/Processing/etc.) stay collapsed across channels
+    // — coverage in xv3.mart_xv3_order_report is essentially HMRPH Online
+    // only anyway (see comment above). "Unknown/Unmapped" is split per
+    // channel instead of one blob, since it means something different per
+    // channel: for TikTok/Shopee it's simply "this table never tracks
+    // marketplace orders at all" (100% of those orders, every period); for
+    // HMRPH Online it's a real (smaller) coverage gap in that table.
+    const CHANNEL_DISPLAY = { "HMRPH ONLINE": "HMRPH Online", TIKTOK: "TikTok", SHOPEE: "Shopee" };
+    const matchedTotals = new Map();
+    const orderStatus = [];
+    for (const r of orderStatusRows) {
+      const count = toNum(r.c);
+      if (r.status === "Unknown/Unmapped") {
+        orderStatus.push({ status: `Unmapped (${CHANNEL_DISPLAY[r.channel] || r.channel})`, count });
+      } else {
+        matchedTotals.set(r.status, (matchedTotals.get(r.status) || 0) + count);
+      }
+    }
+    for (const [status, count] of matchedTotals) orderStatus.push({ status, count });
+    orderStatus.sort((a, b) => b.count - a.count);
+    const hasUnmapped = orderStatus.some((r) => r.status.startsWith("Unmapped"));
 
     // Customer Segments — deliberately HARD-CODED to sales_channel =
     // 'HMRPH ONLINE', ignoring the page's channel filter entirely. Verified
@@ -379,7 +399,7 @@ export default async function handler(req, res) {
         salesAsOf: k.sales_as_of || null,
         generatedAt: new Date().toISOString(),
         orderStatusNote: hasUnmapped
-          ? "Status coverage based on matched order records; unmatched sales orders are shown as Unknown/Unmapped."
+          ? "Status coverage based on matched order records; unmatched sales orders are shown as Unmapped, split by channel."
           : null,
       },
       kpis: {
