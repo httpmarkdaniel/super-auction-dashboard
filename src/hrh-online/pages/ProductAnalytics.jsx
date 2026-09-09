@@ -261,9 +261,7 @@ export default function ProductAnalytics() {
           >
             <DataTable
               columns={REPEAT_SELLER_COLUMNS}
-              rows={data.repeatSellers}
-              paginate
-              pageSize={10}
+              rows={data.repeatSellers.slice(0, 5)}
               emptyLabel="No repeat-selling products found for the selected 4-week window."
             />
           </Panel>
@@ -273,14 +271,14 @@ export default function ProductAnalytics() {
             subtitle={`Highest current-period GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
             className="mb-4"
           >
-            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
+            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts.slice(0, 5)} />
           </Panel>
 
           <Panel
             title="Dropped Products — Stock Check"
             subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
           >
-            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
+            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts.slice(0, 5)} />
           </Panel>
         </>
       )}
