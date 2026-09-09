@@ -17,6 +17,7 @@ import auctionDetail from "../api/auction-detail.js";
 import revenueBreakdown from "../api/revenue-breakdown.js";
 import upcomingAuctions from "../api/upcoming-auctions.js";
 import biddingPace from "../api/bidding-pace.js";
+import hrhProductAnalytics from "../api/hrh-product-analytics.js";
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.get("/api/auction-detail", auctionDetail);
 app.get("/api/revenue-breakdown", revenueBreakdown);
 app.get("/api/upcoming-auctions", upcomingAuctions);
 app.get("/api/bidding-pace", biddingPace);
+app.get("/api/hrh-product-analytics", hrhProductAnalytics);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 

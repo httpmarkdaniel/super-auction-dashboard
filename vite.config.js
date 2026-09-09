@@ -26,6 +26,7 @@ export default defineConfig({
       '/api/revenue-breakdown': 'http://localhost:8080',
       '/api/upcoming-auctions': 'http://localhost:8080',
       '/api/bidding-pace': 'http://localhost:8080',
+      '/api/hrh-product-analytics': 'http://localhost:8080',
     },
   },
 })
