@@ -1,4 +1,19 @@
-import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  ComposedChart,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 import { hrh } from "../theme";
 import { formatCompactPeso } from "../format";
 
@@ -32,6 +47,51 @@ export function TrendChart({ data, series, xKey = "label", height = 260, valueFo
           <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color || hrh.series[i % hrh.series.length]} strokeWidth={2} dot={false} />
         ))}
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function ComboTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span style={{ color: "#a3adba" }}>{p.name}:</span>
+          <span className="font-semibold">{p.dataKey === "gmv" ? formatCompactPeso(p.value) : p.value.toLocaleString("en-PH")}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// GMV (line, left axis, pesos) + Orders (bars, right axis, whole-number
+// count) on one combined time-series chart — two genuinely different units,
+// so two independent y-axes rather than forcing one scale or normalizing to
+// percentages. `data`: [{ dateLabel, gmv, orders }].
+export function SalesTrendComboChart({ data, height = 260 }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={hrh.border} vertical={false} />
+        <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <YAxis yAxisId="gmv" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={formatCompactPeso} width={60} />
+        <YAxis
+          yAxisId="orders"
+          orientation="right"
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={false}
+          tickLine={false}
+          allowDecimals={false}
+          width={36}
+        />
+        <Tooltip content={<ComboTooltip />} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar yAxisId="orders" dataKey="orders" name="Orders" fill={hrh.series[1]} radius={[2, 2, 0, 0]} maxBarSize={24} />
+        <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }
