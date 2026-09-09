@@ -22,6 +22,19 @@ const ORDER_STATUS_COLOR = {
   "Unknown/Unmapped": "#c7cdd6",
 };
 
+// HMRPH Online only — verified every TikTok/Shopee order carries
+// customer_name = 'WALK IN' (no real buyer identity captured on HMR's
+// side for marketplace orders), so this panel is fixed to HMRPH Online
+// regardless of the page's Channel filter — see
+// api/hrh-executive-overview.js's comment for the full reasoning.
+const SEGMENT_COLOR = {
+  New: hrh.good,
+  Retained: hrh.series[0],
+  Reactivated: hrh.accent,
+  Unregistered: "#c7cdd6",
+  Unknown: hrh.muted,
+};
+
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function formatIsoDateLabel(iso) {
   if (!iso) return null;
@@ -175,6 +188,9 @@ export default function ExecutiveOverview({ filters }) {
     data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
   const orderStatusSegments = data?.orderStatus.map((s) => ({ label: s.status, value: s.count, color: ORDER_STATUS_COLOR[s.status] || hrh.muted })) || [];
   const totalOrderStatusCount = orderStatusSegments.reduce((s, x) => s + x.value, 0);
+  const customerSegments =
+    data?.customerSegments.map((s) => ({ label: s.segment, value: s.orders, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
+  const totalCustomerSegmentCount = customerSegments.reduce((s, x) => s + x.value, 0);
 
   return (
     <div>
@@ -221,7 +237,7 @@ export default function ExecutiveOverview({ filters }) {
             <SalesTrendComboChart data={salesTrend} />
           </Panel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Panel title="Sales by Channel" subtitle="GMV share for the selected period">
               <DonutChart segments={channelSegments} centerValue={formatCompactPeso(data.kpis.gmv.value)} centerLabel="Total GMV" />
             </Panel>
@@ -230,6 +246,9 @@ export default function ExecutiveOverview({ filters }) {
               subtitle={data.meta?.orderStatusNote || "Status breakdown of the selected period's Orders"}
             >
               <DonutChart segments={orderStatusSegments} centerValue={formatNum(totalOrderStatusCount)} centerLabel="Total Orders" />
+            </Panel>
+            <Panel title="Customer Segments" subtitle="HMRPH Online only — not affected by the Channel filter above">
+              <DonutChart segments={customerSegments} centerValue={formatNum(totalCustomerSegmentCount)} centerLabel="HMRPH Online Orders" />
             </Panel>
           </div>
         </>

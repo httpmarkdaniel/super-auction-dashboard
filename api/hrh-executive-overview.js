@@ -275,6 +275,100 @@ export default async function handler(req, res) {
     const orderStatus = orderStatusRows.map((r) => ({ status: r.status, count: toNum(r.c) }));
     const hasUnmapped = orderStatus.some((r) => r.status === "Unknown/Unmapped");
 
+    // Customer Segments — deliberately HARD-CODED to sales_channel =
+    // 'HMRPH ONLINE', ignoring the page's channel filter entirely. Verified
+    // (2026-09-09, MTD window): every single TikTok/Shopee order carries
+    // customer_name = 'WALK IN' (HMR's own systems never capture a real
+    // buyer identity for marketplace orders — that relationship lives on
+    // TikTok's/Shopee's own platform), so classifying those channels would
+    // just produce ~100% "Unregistered" noise, not a meaningful segment
+    // split. HMRPH Online is the only channel where this is real signal.
+    //
+    // Anchored to the SAME canonical invoice_id population style as Order
+    // Status (store/date-scoped positive-sale invoices from mart_net_sales,
+    // channel fixed here), so SUM(customerSegments.orders) is always a
+    // clean subset with a known, stated scope — never a mismatched
+    // population. New/Retained/Reactivated/Unregistered come from a full
+    // cross-store purchase-history cohort analysis on customer_name (the
+    // only identifier consistently populated across xv3.mart_invoice_items'
+    // history) — a customer already active at a physical branch for years
+    // is correctly NOT "New" just because this is their first HRH Online
+    // order. Classification is evaluated as of the window's last month
+    // (toStartOfMonth(current.to)) — exact for WTD/MTD (single month),
+    // an end-of-range snapshot rather than a month-by-month sum for
+    // multi-month windows (YTD/wide Custom ranges).
+    const customerSegmentRows = await (
+      await client.query({
+        query: `
+          WITH canonical AS (
+            SELECT DISTINCT invoice_id
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String} AND sales_channel = 'HMRPH ONLINE'
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+              AND net_sales_amount > 0 AND invoice_id IS NOT NULL
+          ),
+          canonical_customer AS (
+            SELECT c.invoice_id AS invoice_id, any(m.customer_name) AS customer_name
+            FROM canonical c
+            LEFT JOIN xv3.mart_invoice_items m ON c.invoice_id = m.invoice_id
+            GROUP BY c.invoice_id
+          ),
+          customer_purchase_history AS (
+            SELECT
+              customer_name,
+              transaction_date,
+              MIN(transaction_date) OVER (PARTITION BY customer_name) AS first_ever_date,
+              lag(transaction_date) OVER (PARTITION BY customer_name ORDER BY transaction_date ASC) AS previous_date
+            FROM (
+              SELECT DISTINCT customer_name, toDate(transaction_date) AS transaction_date
+              FROM xv3.mart_invoice_items
+              WHERE customer_name IS NOT NULL AND trim(customer_name) != ''
+                AND customer_name NOT IN ('n/a', 'WALK IN') AND match(customer_name, '[a-zA-Z]')
+            )
+          ),
+          customer_month_segment AS (
+            SELECT
+              customer_name,
+              toStartOfMonth(transaction_date) AS purchase_month,
+              MIN(transaction_date) AS first_transaction_in_month,
+              argMin(first_ever_date, transaction_date) AS first_order_date,
+              argMin(previous_date, transaction_date) AS first_previous_date
+            FROM (
+              SELECT
+                m.customer_name AS customer_name,
+                toDate(m.transaction_date) AS transaction_date,
+                ch.first_ever_date AS first_ever_date,
+                ch.previous_date AS previous_date
+              FROM xv3.mart_invoice_items m
+              LEFT JOIN customer_purchase_history ch
+                ON m.customer_name = ch.customer_name AND toDate(m.transaction_date) = ch.transaction_date
+              WHERE m.customer_name IS NOT NULL AND trim(m.customer_name) != ''
+                AND m.customer_name NOT IN ('n/a', 'WALK IN') AND match(m.customer_name, '[a-zA-Z]')
+            )
+            GROUP BY customer_name, toStartOfMonth(transaction_date)
+          )
+          SELECT
+            multiIf(
+              cc.customer_name IS NULL OR trim(cc.customer_name) = '' OR cc.customer_name IN ('n/a', 'WALK IN') OR NOT match(cc.customer_name, '[a-zA-Z]'), 'Unregistered',
+              toStartOfMonth(cms.first_order_date) = cms.purchase_month, 'New',
+              cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) <= 2, 'Retained',
+              cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) > 2, 'Reactivated',
+              'Unknown'
+            ) AS segment,
+            count() AS orders
+          FROM canonical_customer cc
+          LEFT JOIN customer_month_segment cms
+            ON cc.customer_name = cms.customer_name
+            AND cms.purchase_month = toStartOfMonth(toDate({curTo:String}))
+          GROUP BY segment
+          ORDER BY orders DESC
+        `,
+        query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const customerSegments = customerSegmentRows.map((r) => ({ segment: r.segment, orders: toNum(r.orders) }));
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -298,6 +392,7 @@ export default async function handler(req, res) {
       salesTrend,
       channelMix,
       orderStatus,
+      customerSegments,
     });
   } catch (err) {
     console.error("HRH Executive Overview API error:", err);
