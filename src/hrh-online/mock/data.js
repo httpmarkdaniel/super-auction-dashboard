@@ -15,13 +15,10 @@ export const overview = {
   kpis: {
     gmv: { value: 18_420_000, delta: 8.4 },
     nmv: { value: 15_960_000, delta: 6.9 },
-    orders: { value: 12_840, delta: 4.1 },
     aov: { value: 1_434, delta: -1.2 },
-    cancellationRate: { value: 4.6, delta: -0.8 },
-    pickupShare: { value: 21.3, delta: 2.5 },
+    orders: { value: 12_840, delta: 4.1 },
+    units: { value: 21_530, delta: 5.0 },
   },
-  // Reserved secondary slot — GA4 reconciliation pending, value withheld.
-  conversionKpi: { label: "Conversion Rate", value: null, note: "Pending GA4 integration" },
   trend: WEEKS.map((label, i) => ({
     label,
     gmv: 1_900_000 + i * 120_000 + (i % 3 === 0 ? 90_000 : 0),
@@ -32,18 +29,17 @@ export const overview = {
     { label: "TikTok", value: 5_120_000, color: "#d99a3d" },
     { label: "Shopee", value: 3_450_000, color: "#1baf7a" },
   ],
-  orderFunnel: [
-    { label: "Orders", value: 12_840 },
-    { label: "Paid", value: 11_260 },
-    { label: "Pending", value: 780 },
-    { label: "Cancelled", value: 590 },
-    { label: "Returned", value: 210 },
+  orderStatus: [
+    { label: "Paid", value: 11_260, color: "#22304f" },
+    { label: "Pending", value: 780, color: "#d99a3d" },
+    { label: "Cancelled", value: 590, color: "#e34948" },
   ],
-  operationalFlagsPreview: [
-    { severity: "critical", issue: "Unposted items aging past SLA", count: 214 },
-    { severity: "warning", issue: "Pending picks over 24h", count: 88 },
-    { severity: "warning", issue: "Orders stuck in Pending payment", count: 63 },
-    { severity: "good", issue: "Returns awaiting inspection", count: 19 },
+  recentOrders: [
+    { id: "ro1", orderNumber: "HRH-100482", date: "Sep 9", customer: "Maria Santos", channel: "HMRPH Online", status: "Paid", amount: 2_450 },
+    { id: "ro2", orderNumber: "HRH-100481", date: "Sep 9", customer: "John Cruz", channel: "TikTok", status: "Paid", amount: 1_990 },
+    { id: "ro3", orderNumber: "HRH-100480", date: "Sep 9", customer: "Ana Reyes", channel: "Shopee", status: "Pending", amount: 3_250 },
+    { id: "ro4", orderNumber: "HRH-100479", date: "Sep 8", customer: "Luis Dela Cruz", channel: "HMRPH Online", status: "Paid", amount: 890 },
+    { id: "ro5", orderNumber: "HRH-100478", date: "Sep 8", customer: "Karla Mendoza", channel: "TikTok", status: "Cancelled", amount: 1_200 },
   ],
 };
 

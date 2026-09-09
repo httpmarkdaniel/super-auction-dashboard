@@ -1,4 +1,4 @@
-import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
 import { hrh } from "../theme";
 import { formatCompactPeso } from "../format";
 
@@ -33,6 +33,53 @@ export function TrendChart({ data, series, xKey = "label", height = 260, valueFo
         ))}
       </LineChart>
     </ResponsiveContainer>
+  );
+}
+
+// Donut share breakdown with a centered total and a metric-list legend —
+// same `segments` shape ShareBar already uses ([{ label, value, color }]),
+// just a ring instead of a strip for panels that want the more prominent
+// "total in the middle" treatment (Sales by Channel, Order Status).
+export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
+  const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  return (
+    <div className="grid gap-4 items-center" style={{ gridTemplateColumns: `${size}px 1fr` }}>
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <PieChart width={size} height={size}>
+          <Pie data={segments} dataKey="value" nameKey="label" innerRadius={size * 0.33} outerRadius={size * 0.5} startAngle={90} endAngle={-270} stroke="none">
+            {segments.map((s) => (
+              <Cell key={s.label} fill={s.color} />
+            ))}
+          </Pie>
+          <Tooltip content={<ChartTooltip valueFormatter={(v) => `${((v / total) * 100).toFixed(1)}%`} />} />
+        </PieChart>
+        {(centerValue || centerLabel) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none px-2">
+            {centerValue && (
+              <div className="text-[14px] font-bold leading-tight" style={{ color: hrh.ink }}>
+                {centerValue}
+              </div>
+            )}
+            {centerLabel && (
+              <div className="text-[10px] leading-tight" style={{ color: hrh.muted }}>
+                {centerLabel}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">
+        {segments.map((s) => (
+          <div key={s.label} className="flex items-center gap-1.5 text-[11.5px]" style={{ color: hrh.ink2 }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+            <span className="truncate">{s.label}</span>
+            <span className="ml-auto font-semibold shrink-0" style={{ color: hrh.ink }}>
+              {((s.value / total) * 100).toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

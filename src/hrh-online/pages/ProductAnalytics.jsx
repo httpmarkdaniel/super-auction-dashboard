@@ -256,13 +256,9 @@ export default function ProductAnalytics() {
 
           <Panel
             title="Repeat Sellers"
-            action={
-              data.meta?.weeklyBuckets && (
-                <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
-                  4-week window: {formatCompactRange(data.meta.weeklyBuckets.wk1)} · {formatCompactRange(data.meta.weeklyBuckets.wk2)} ·{" "}
-                  {formatCompactRange(data.meta.weeklyBuckets.wk3)} · {formatCompactRange(data.meta.weeklyBuckets.wk4)}
-                </span>
-              )
+            subtitle={
+              data.meta?.weeklyBuckets &&
+              `Products with positive sales in 2+ of the last 4 weeks: ${formatCompactRange(data.meta.weeklyBuckets.wk1)} · ${formatCompactRange(data.meta.weeklyBuckets.wk2)} · ${formatCompactRange(data.meta.weeklyBuckets.wk3)} · ${formatCompactRange(data.meta.weeklyBuckets.wk4)}`
             }
             className="mb-4"
           >
@@ -277,11 +273,7 @@ export default function ProductAnalytics() {
 
           <Panel
             title="Top Products — Current vs Previous Period"
-            action={
-              <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
-                {effectivePeriodLabel(data.meta.current)} vs {effectivePeriodLabel(data.meta.previous)}
-              </span>
-            }
+            subtitle={`Highest current-period GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
             className="mb-4"
           >
             <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
@@ -289,11 +281,7 @@ export default function ProductAnalytics() {
 
           <Panel
             title="Dropped Products — Stock Check"
-            action={
-              <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
-                Sold {effectivePeriodLabel(data.meta.previous)}, zero sales {effectivePeriodLabel(data.meta.current)}
-              </span>
-            }
+            subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
           >
             <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
           </Panel>
