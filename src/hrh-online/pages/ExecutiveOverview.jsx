@@ -32,6 +32,84 @@ function formatShortDateLabel(iso) {
   const [, m, d] = iso.split("-").map(Number);
   return `${SHORT_MONTHS[m - 1]} ${d}`;
 }
+function addDaysISOLocal(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+function mondayOfWeekISO(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+  return addDaysISOLocal(iso, dow === 0 ? -6 : 1 - dow);
+}
+function formatWeekRangeLabel(weekStartIso) {
+  const weekEndIso = addDaysISOLocal(weekStartIso, 6);
+  const [, sm, sd] = weekStartIso.split("-").map(Number);
+  const [, em, ed] = weekEndIso.split("-").map(Number);
+  const start = `${SHORT_MONTHS[sm - 1]} ${sd}`;
+  const end = sm === em ? `${ed}` : `${SHORT_MONTHS[em - 1]} ${ed}`;
+  return `${start}–${end}`;
+}
+function formatMonthLabel(yyyyMm) {
+  const [y, m] = yyyyMm.split("-").map(Number);
+  return `${SHORT_MONTHS[m - 1]} ${y}`;
+}
+
+const TREND_BUCKETS = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+];
+
+// Re-buckets the API's daily salesTrend rows into day/week/month totals —
+// purely a client-side view of the SAME data already fetched for the
+// selected Date Range filter, so it's a separate, lightweight "how do you
+// want to look at it" control, not another data-fetching filter.
+function bucketSalesTrend(rows, bucket) {
+  if (!rows || rows.length === 0) return [];
+  if (bucket === "day") {
+    return rows.map((d) => ({ dateLabel: formatShortDateLabel(d.date), gmv: d.gmv, orders: d.orders }));
+  }
+  const keyFor = bucket === "week" ? (d) => mondayOfWeekISO(d.date) : (d) => d.date.slice(0, 7);
+  const labelFor = bucket === "week" ? formatWeekRangeLabel : formatMonthLabel;
+  const buckets = new Map();
+  for (const d of rows) {
+    const key = keyFor(d);
+    const b = buckets.get(key) || { key, gmv: 0, orders: 0 };
+    b.gmv += d.gmv;
+    b.orders += d.orders;
+    buckets.set(key, b);
+  }
+  return Array.from(buckets.values())
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map((b) => ({ dateLabel: labelFor(b.key), gmv: b.gmv, orders: b.orders }));
+}
+
+function TrendBucketPills({ value, onChange }) {
+  return (
+    <div className="flex gap-1">
+      {TREND_BUCKETS.map((b) => {
+        const active = b.key === value;
+        return (
+          <button
+            key={b.key}
+            type="button"
+            onClick={() => onChange(b.key)}
+            className="text-[11.5px] font-semibold px-2.5 h-6 rounded"
+            style={
+              active
+                ? { background: hrh.navy, color: "#ffffff" }
+                : { background: "transparent", color: hrh.ink2, border: `1px solid ${hrh.border}` }
+            }
+          >
+            {b.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 function effectivePeriodLabel(period) {
   if (!period) return null;
   const from = formatIsoDateLabel(period.from);
@@ -62,6 +140,7 @@ export default function ExecutiveOverview({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [trendBucket, setTrendBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -91,7 +170,7 @@ export default function ExecutiveOverview({ filters }) {
     return () => controller.abort();
   }, [channel, params, ready, load]);
 
-  const salesTrend = data?.salesTrend.map((d) => ({ dateLabel: formatShortDateLabel(d.date), gmv: d.gmv, orders: d.orders })) || [];
+  const salesTrend = bucketSalesTrend(data?.salesTrend, trendBucket);
   const channelSegments =
     data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
   const orderStatusSegments = data?.orderStatus.map((s) => ({ label: s.status, value: s.count, color: ORDER_STATUS_COLOR[s.status] || hrh.muted })) || [];
@@ -133,7 +212,12 @@ export default function ExecutiveOverview({ filters }) {
             <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
           </KpiRow>
 
-          <Panel title="Sales Trend" subtitle="Daily GMV and Orders for the selected period" className="mb-4">
+          <Panel
+            title="Sales Trend"
+            subtitle={`GMV and Orders for the selected period, bucketed by ${trendBucket}`}
+            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
+            className="mb-4"
+          >
             <SalesTrendComboChart data={salesTrend} />
           </Panel>
 
