@@ -107,7 +107,7 @@ export default function HomePage() {
         className="relative overflow-hidden shrink-0"
         style={{ background: "radial-gradient(ellipse 900px 500px at 10% 15%, #16202f 0%, #0f1622 60%)" }}
       >
-        <div className="relative max-w-[1480px] mx-auto px-6 md:px-10 py-12 md:py-0 md:h-[320px] flex flex-col md:flex-row items-center gap-8">
+        <div className="relative max-w-[1450px] mx-auto px-[5vw] py-12 md:py-0 md:h-[320px] flex flex-col md:flex-row items-center gap-8">
           <div className="md:w-[42%] shrink-0">
             <div className="text-[12.5px] tracking-[0.2em] uppercase font-semibold mb-3" style={{ color: "#7e93c2" }}>
               HMR
@@ -132,9 +132,9 @@ export default function HomePage() {
 
       {/* Dashboard directory — light */}
       <section className="flex-1" style={{ background: "#ffffff" }}>
-        <div className="max-w-[1480px] mx-auto px-6 md:px-10 py-14 md:py-16">
+        <div className="max-w-[1450px] mx-auto px-[5vw] py-10 md:py-12">
           <SectionHeading>Available Dashboards</SectionHeading>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 mb-14">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-5 mb-10">
             {available.map((module) => (
               <ModuleCard key={module.id} module={module} />
             ))}
@@ -151,7 +151,7 @@ export default function HomePage() {
 
       {/* Footer */}
       <footer className="shrink-0" style={{ background: "#0f1622" }}>
-        <div className="max-w-[1480px] mx-auto px-6 md:px-10 py-7 flex flex-col sm:flex-row items-center justify-between gap-2">
+        <div className="max-w-[1450px] mx-auto px-[5vw] py-7 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="text-[17px] leading-none font-display tracking-[0.02em]" style={{ color: "#f5f6f8" }}>
             HMR ANALYTICS
           </div>

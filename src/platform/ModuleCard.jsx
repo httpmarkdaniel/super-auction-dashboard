@@ -190,7 +190,7 @@ function ComingSoonGlyph({ id }) {
 function ComingSoonCard({ module }) {
   return (
     <div
-      className="relative overflow-hidden flex flex-col rounded-md p-4 min-h-[190px] md:min-h-[208px] cursor-default"
+      className="relative overflow-hidden flex flex-col rounded-md p-4 min-h-[200px] md:min-h-[216px] cursor-default"
       style={{ background: "#16202f", border: "1px solid #24304a" }}
     >
       <ComingSoonGlyph id={module.id} />
