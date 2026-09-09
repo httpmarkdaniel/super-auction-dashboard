@@ -1,3 +1,4 @@
+import { Children } from "react";
 import { hrh } from "../theme";
 
 // Compact executive KPI card — thin orange top accent, room for a future
@@ -28,6 +29,23 @@ export function KpiCard({ label, value, delta, sub }) {
   );
 }
 
+// Static (not interpolated) class lists per card count — Tailwind's JIT
+// scanner only picks up class names that appear literally in source, so a
+// dynamically-built `grid-cols-${n}` string would silently fail to
+// generate. Cards should fill the full row width regardless of count
+// (never leave an awkward empty slot), so the column count matches the
+// child count exactly at the widest breakpoint.
+const COLS_BY_COUNT = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-2 md:grid-cols-3",
+  4: "grid-cols-2 md:grid-cols-4",
+  5: "grid-cols-2 md:grid-cols-3 xl:grid-cols-5",
+  6: "grid-cols-2 md:grid-cols-3 xl:grid-cols-6",
+};
+
 export function KpiRow({ children }) {
-  return <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">{children}</div>;
+  const count = Children.count(children);
+  const cols = COLS_BY_COUNT[count] || "grid-cols-2 md:grid-cols-3 xl:grid-cols-6";
+  return <div className={`grid ${cols} gap-3 mb-5`}>{children}</div>;
 }

@@ -128,12 +128,23 @@ function formatIsoDateLabel(iso) {
   return `${SHORT_MONTHS[m - 1]} ${d}, ${y}`;
 }
 
-function effectivePeriodLabel(current) {
-  if (!current) return null;
-  const from = formatIsoDateLabel(current.from);
-  const to = formatIsoDateLabel(current.to);
+function effectivePeriodLabel(period) {
+  if (!period) return null;
+  const from = formatIsoDateLabel(period.from);
+  const to = formatIsoDateLabel(period.to);
   if (!from || !to) return null;
   return from === to ? from : `${from} – ${to}`;
+}
+
+// Compact "Aug 10–16" / "Aug 31–Sep 6" form (no year — used for the 4-week
+// Repeat Sellers buckets, matching the density of the rest of that panel).
+function formatCompactRange(period) {
+  if (!period) return null;
+  const [, fm, fd] = period.from.split("-").map(Number);
+  const [, tm, td] = period.to.split("-").map(Number);
+  const fromLabel = `${SHORT_MONTHS[fm - 1]} ${fd}`;
+  const toLabel = fm === tm ? `${td}` : `${SHORT_MONTHS[tm - 1]} ${td}`;
+  return `${fromLabel}–${toLabel}`;
 }
 
 // Query params for the API's range contract: a preset key sends
@@ -219,8 +230,12 @@ export default function ProductAnalytics() {
           <ChannelPills value={channel} onChange={setChannel} />
         </div>
         {data?.meta?.current && (
-          <span className="text-[11.5px] font-semibold" style={{ color: hrh.ink2 }}>
+          <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
             {effectivePeriodLabel(data.meta.current)}
+            <span className="font-normal" style={{ color: hrh.muted }}>
+              {" "}
+              vs {effectivePeriodLabel(data.meta.previous)}
+            </span>
           </span>
         )}
       </div>
@@ -239,16 +254,48 @@ export default function ProductAnalytics() {
             <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
           </KpiRow>
 
-          <Panel title="Repeat Sellers" className="mb-4">
-            <DataTable columns={REPEAT_SELLER_COLUMNS} rows={data.repeatSellers} />
+          <Panel
+            title="Repeat Sellers"
+            action={
+              data.meta?.weeklyBuckets && (
+                <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
+                  4-week window: {formatCompactRange(data.meta.weeklyBuckets.wk1)} · {formatCompactRange(data.meta.weeklyBuckets.wk2)} ·{" "}
+                  {formatCompactRange(data.meta.weeklyBuckets.wk3)} · {formatCompactRange(data.meta.weeklyBuckets.wk4)}
+                </span>
+              )
+            }
+            className="mb-4"
+          >
+            <DataTable
+              columns={REPEAT_SELLER_COLUMNS}
+              rows={data.repeatSellers}
+              paginate
+              pageSize={10}
+              emptyLabel="No repeat-selling products found for the selected 4-week window."
+            />
           </Panel>
 
-          <Panel title="Top Products — Current vs Previous Period" className="mb-4">
-            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} />
+          <Panel
+            title="Top Products — Current vs Previous Period"
+            action={
+              <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
+                {effectivePeriodLabel(data.meta.current)} vs {effectivePeriodLabel(data.meta.previous)}
+              </span>
+            }
+            className="mb-4"
+          >
+            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
           </Panel>
 
-          <Panel title="Dropped Products — Stock Check">
-            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} />
+          <Panel
+            title="Dropped Products — Stock Check"
+            action={
+              <span className="text-[11px] font-normal whitespace-nowrap" style={{ color: hrh.muted }}>
+                Sold {effectivePeriodLabel(data.meta.previous)}, zero sales {effectivePeriodLabel(data.meta.current)}
+              </span>
+            }
+          >
+            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
           </Panel>
         </>
       )}

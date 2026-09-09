@@ -22,7 +22,15 @@ function FilterSelect({ value, onChange, options }) {
 // page's table/breakdown already has a channel dimension (see each page's
 // own comment); Date Range/Store are visual-only placeholders until real
 // APIs land, deliberately not faking a date-driven recompute of mock data.
-export default function Header({ filters, onFilterChange }) {
+//
+// Product Analytics is the one page that owns real, working Date Range +
+// Channel controls of its own (see ProductAnalytics.jsx) — showing this
+// generic, disconnected bar alongside them would just be a second,
+// confusing filter row, so it's hidden there entirely rather than only
+// dropping Store. Every other (still mock) page keeps all three.
+export default function Header({ filters, onFilterChange, page }) {
+  const isProductAnalytics = page === "productAnalytics";
+
   return (
     <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
       <div className="px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
@@ -34,11 +42,13 @@ export default function Header({ filters, onFilterChange }) {
             Executive Commerce Dashboard
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <FilterSelect value={filters.dateRange} onChange={(v) => onFilterChange("dateRange", v)} options={DATE_PRESETS} />
-          <FilterSelect value={filters.channel} onChange={(v) => onFilterChange("channel", v)} options={CHANNEL_OPTIONS} />
-          <FilterSelect value={filters.store} onChange={(v) => onFilterChange("store", v)} options={STORE_OPTIONS} />
-        </div>
+        {!isProductAnalytics && (
+          <div className="flex items-center gap-2">
+            <FilterSelect value={filters.dateRange} onChange={(v) => onFilterChange("dateRange", v)} options={DATE_PRESETS} />
+            <FilterSelect value={filters.channel} onChange={(v) => onFilterChange("channel", v)} options={CHANNEL_OPTIONS} />
+            <FilterSelect value={filters.store} onChange={(v) => onFilterChange("store", v)} options={STORE_OPTIONS} />
+          </div>
+        )}
       </div>
     </div>
   );

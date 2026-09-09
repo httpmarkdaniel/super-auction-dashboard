@@ -298,6 +298,14 @@ export default async function handler(req, res) {
     // wouldn't mean anything as a "weekly" figure). product_name/
     // category_name/barcode picked via argMax/any — display only, never
     // the join/group key.
+    //
+    // coalesce(sumIf(...), 0) is load-bearing, not decoration: sumIf over a
+    // Nullable column returns NULL (not 0) when zero rows match, and
+    // NULL > 0 is NULL — so summing four such NULL-capable comparisons with
+    // "+" silently propagates NULL through the whole HAVING expression the
+    // moment ANY one week has no sales. That was hiding true repeat sellers
+    // for every channel (confirmed against real data: coalescing raised
+    // HMRPH Online 0->26, TikTok 9->57, Shopee 0->3 for the same window).
     const repeatRows = await (
       await client.query({
         query: `
@@ -306,11 +314,11 @@ export default async function handler(req, res) {
             any(barcode) AS barcode,
             argMax(product_name, transaction_date) AS product_name,
             argMax(category_name, transaction_date) AS category_name,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}) AS wk1_gmv,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}) AS wk2_gmv,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}) AS wk3_gmv,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_units
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
@@ -319,7 +327,7 @@ export default async function handler(req, res) {
           GROUP BY \`ct.item_id\`
           HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 2
           ORDER BY wk4_gmv DESC
-          LIMIT 50
+          LIMIT 500
         `,
         query_params: {
           store: HRH_STORE,
@@ -450,16 +458,19 @@ export default async function handler(req, res) {
       };
     });
 
+    // Capped at 500 (safety net, not a "top N" truncation) — the frontend
+    // paginates the full list it receives, 10 rows/page, so this only needs
+    // to be far above any realistic per-store SKU count, not exactly 10/20.
     const topProducts = comparisons
       .filter((r) => r.currentGmv > 0)
       .sort((a, b) => b.currentGmv - a.currentGmv)
-      .slice(0, 20)
+      .slice(0, 500)
       .map(({ postedQty: _postedQty, ...rest }) => rest);
 
     const droppedProducts = comparisons
       .filter((r) => r.currentGmv <= 0 && r.previousGmv > 0)
       .sort((a, b) => b.previousGmv - a.previousGmv)
-      .slice(0, 50)
+      .slice(0, 500)
       .map((r) => ({
         sku: r.sku,
         product: r.product,

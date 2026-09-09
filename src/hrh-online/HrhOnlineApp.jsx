@@ -49,7 +49,7 @@ export default function HrhOnlineApp() {
     <div className="min-h-screen flex" style={{ background: hrh.bg }}>
       <Sidebar active={page} onNavigate={setPage} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <Header filters={filters} onFilterChange={(key, value) => setFilters((f) => ({ ...f, [key]: value }))} />
+        <Header page={page} filters={filters} onFilterChange={(key, value) => setFilters((f) => ({ ...f, [key]: value }))} />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />
         </main>
