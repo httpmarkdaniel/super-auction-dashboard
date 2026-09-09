@@ -251,37 +251,37 @@ export default function ProductAnalytics() {
             <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
           </KpiRow>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <Panel
-              title="Repeat Sellers"
-              subtitle={
-                data.meta?.weeklyBuckets &&
-                `Positive sales in 2+ of the last 4 weeks: ${formatCompactRange(data.meta.weeklyBuckets.wk1)} · ${formatCompactRange(data.meta.weeklyBuckets.wk2)} · ${formatCompactRange(data.meta.weeklyBuckets.wk3)} · ${formatCompactRange(data.meta.weeklyBuckets.wk4)}`
-              }
-            >
-              <DataTable
-                columns={REPEAT_SELLER_COLUMNS}
-                rows={data.repeatSellers}
-                paginate
-                pageSize={10}
-                emptyLabel="No repeat-selling products found for the selected 4-week window."
-              />
-            </Panel>
+          <Panel
+            title="Repeat Sellers"
+            subtitle={
+              data.meta?.weeklyBuckets &&
+              `Positive sales in 2+ of the last 4 weeks: ${formatCompactRange(data.meta.weeklyBuckets.wk1)} · ${formatCompactRange(data.meta.weeklyBuckets.wk2)} · ${formatCompactRange(data.meta.weeklyBuckets.wk3)} · ${formatCompactRange(data.meta.weeklyBuckets.wk4)}`
+            }
+            className="mb-4"
+          >
+            <DataTable
+              columns={REPEAT_SELLER_COLUMNS}
+              rows={data.repeatSellers}
+              paginate
+              pageSize={10}
+              emptyLabel="No repeat-selling products found for the selected 4-week window."
+            />
+          </Panel>
 
-            <Panel
-              title="Top Products"
-              subtitle={`Highest GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
-            >
-              <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
-            </Panel>
+          <Panel
+            title="Top Products — Current vs Previous Period"
+            subtitle={`Highest current-period GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
+            className="mb-4"
+          >
+            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
+          </Panel>
 
-            <Panel
-              title="Dropped Products"
-              subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
-            >
-              <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
-            </Panel>
-          </div>
+          <Panel
+            title="Dropped Products — Stock Check"
+            subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
+          >
+            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
+          </Panel>
         </>
       )}
     </div>
