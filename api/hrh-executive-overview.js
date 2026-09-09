@@ -275,85 +275,6 @@ export default async function handler(req, res) {
     const orderStatus = orderStatusRows.map((r) => ({ status: r.status, count: toNum(r.c) }));
     const hasUnmapped = orderStatus.some((r) => r.status === "Unknown/Unmapped");
 
-    // Top Products — same canonical key (`ct.item_id`) and positive-sale
-    // definition as Product Analytics, current window only, plus Orders
-    // (distinct invoices) per product. Capped at 500 (frontend paginates
-    // 10/page), not a "top N" truncation.
-    const topProductRows = await (
-      await client.query({
-        query: `
-          SELECT
-            \`ct.item_id\` AS item_id,
-            argMax(product_name, transaction_date) AS product_name,
-            argMax(sales_channel, transaction_date) AS channel,
-            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
-            sumIf(net_quantity, net_sales_amount > 0) AS units,
-            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-            AND \`ct.item_id\` IS NOT NULL
-          GROUP BY \`ct.item_id\`
-          HAVING gmv > 0
-          ORDER BY gmv DESC
-          LIMIT 500
-        `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const topProducts = topProductRows.map((r) => ({
-      product: r.product_name,
-      channel: r.channel,
-      gmv: toNum(r.gmv),
-      units: toNum(r.units),
-      orders: toNum(r.orders),
-    }));
-
-    // Recent Orders — order-intake rows from mart_xv3_order_report, newest
-    // first, LEFT JOINed once (not N+1) to a per-invoice aggregate of
-    // mart_net_sales for Amount + Channel (neither field exists directly on
-    // the order-report table). Orders not yet invoiced show "—" for both
-    // rather than a fabricated value. Not filtered by the channel selector
-    // for the same reason as Order Status (no channel column to filter on
-    // pre-join); the joined channel is still real per-invoice data.
-    const recentOrderRows = await (
-      await client.query({
-        query: `
-          WITH invoice_sales AS (
-            SELECT invoice_id, sum(net_sales_amount) AS amount, argMax(sales_channel, transaction_date) AS channel
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String} AND invoice_id IS NOT NULL
-            GROUP BY invoice_id
-          )
-          SELECT
-            o.order_number AS order_number,
-            o.created_at AS created_at,
-            o.customer_name AS customer_name,
-            o.order_status AS order_status,
-            s.amount AS amount,
-            s.channel AS channel
-          FROM xv3.mart_xv3_order_report o
-          LEFT JOIN invoice_sales s ON o.invoice_id = s.invoice_id
-          WHERE o.store_name = {store:String}
-            AND o.created_at BETWEEN {curFrom:String} AND {curToExclusive:String}
-          ORDER BY o.created_at DESC
-          LIMIT 200
-        `,
-        query_params: { store: HRH_STORE, curFrom: `${current.from} 00:00:00`, curToExclusive: `${addDaysISO(current.to, 1)} 00:00:00` },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const recentOrders = recentOrderRows.map((r) => ({
-      orderNumber: r.order_number,
-      createdAt: r.created_at,
-      customer: r.customer_name,
-      channel: r.channel || null,
-      status: r.order_status || "Unknown",
-      amount: r.amount !== null && r.amount !== undefined ? toNum(r.amount) : null,
-    }));
-
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -377,8 +298,6 @@ export default async function handler(req, res) {
       salesTrend,
       channelMix,
       orderStatus,
-      topProducts,
-      recentOrders,
     });
   } catch (err) {
     console.error("HRH Executive Overview API error:", err);
