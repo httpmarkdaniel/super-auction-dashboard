@@ -133,10 +133,11 @@ export default function ExecutiveOverview({ filters }) {
             <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
           </KpiRow>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[1.6fr_1fr_1fr] gap-4 mb-4">
-            <Panel title="Sales Trend" subtitle="Daily GMV and Orders for the selected period">
-              <SalesTrendComboChart data={salesTrend} />
-            </Panel>
+          <Panel title="Sales Trend" subtitle="Daily GMV and Orders for the selected period" className="mb-4">
+            <SalesTrendComboChart data={salesTrend} />
+          </Panel>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Panel title="Sales by Channel" subtitle="GMV share for the selected period">
               <DonutChart segments={channelSegments} centerValue={formatCompactPeso(data.kpis.gmv.value)} centerLabel="Total GMV" />
             </Panel>
