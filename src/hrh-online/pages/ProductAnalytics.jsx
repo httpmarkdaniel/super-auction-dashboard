@@ -3,11 +3,8 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import SeverityBadge from "../components/SeverityBadge";
-import DateRangePicker from "../components/DateRangePicker";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
-import { CHANNEL_OPTIONS } from "../mock/filterOptions";
-import { defaultDateRange } from "../../utils/dateRange";
 import { formatPeso, formatNum, formatPct } from "../format";
 
 const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
@@ -76,35 +73,6 @@ const DROPPED_PRODUCT_COLUMNS = [
   { key: "status", label: "Status", render: (r) => <SeverityBadge severity={STATUS_SEVERITY[r.status] || "critical"} text={r.status} /> },
 ];
 
-// Local, page-only channel selector — deliberately independent of the
-// global Header channel filter (which drives other pages' tables). Product
-// Analytics needs its own current/previous-period breakdown per channel,
-// so it keeps its own state rather than reusing filters.channel.
-function ChannelPills({ value, onChange }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {CHANNEL_OPTIONS.map((option) => {
-        const active = option === value;
-        return (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onChange(option)}
-            className="text-[12.5px] font-semibold px-3 h-8 rounded-md whitespace-nowrap"
-            style={
-              active
-                ? { background: hrh.navy, color: "#ffffff", border: `1px solid ${hrh.navy}` }
-                : { background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
-            }
-          >
-            {option}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function formatAsOf(meta) {
   if (!meta) return null;
   const sales = meta.salesAsOf;
@@ -161,13 +129,13 @@ function isDateRangeReady(dateRange) {
 }
 
 // Real ClickHouse-backed Product Analytics — see api/hrh-product-analytics.js
-// for the query/reconciliation. Fetches on mount and whenever the channel or
-// date range changes; no polling (this is historical/analytical, not a live
-// feed). A custom range is never sent to the API until both dates are
-// picked and from <= to.
-export default function ProductAnalytics() {
-  const [channel, setChannel] = useState("All Channels");
-  const [dateRange, setDateRange] = useState(defaultDateRange());
+// for the query/reconciliation. Date Range + Channel are now the dashboard-
+// wide filter owned by HrhOnlineApp and shown in Header (`filters` prop),
+// not page-local state — fetches on mount and whenever either changes; no
+// polling (this is historical/analytical, not a live feed). A custom range
+// is never sent to the API until both dates are picked and from <= to.
+export default function ProductAnalytics({ filters }) {
+  const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -209,6 +177,15 @@ export default function ProductAnalytics() {
               {formatAsOf(data.meta)}
             </span>
           )}
+          {data?.meta?.current && (
+            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+              {effectivePeriodLabel(data.meta.current)}
+              <span className="font-normal" style={{ color: hrh.muted }}>
+                {" "}
+                vs {effectivePeriodLabel(data.meta.previous)}
+              </span>
+            </span>
+          )}
           <button
             type="button"
             onClick={() => ready && load(channel, params)}
@@ -221,23 +198,7 @@ export default function ProductAnalytics() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <div className="flex items-center gap-3 flex-wrap">
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
-          <ChannelPills value={channel} onChange={setChannel} />
-        </div>
-        {data?.meta?.current && (
-          <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
-            {effectivePeriodLabel(data.meta.current)}
-            <span className="font-normal" style={{ color: hrh.muted }}>
-              {" "}
-              vs {effectivePeriodLabel(data.meta.previous)}
-            </span>
-          </span>
-        )}
-      </div>
-
-      {!ready && <ErrorState label="Select both a From and To date for the custom range." />}
+      {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
       {ready && loading && !data && <LoadingState label="Loading Product Analytics…" />}
       {error && <ErrorState label={`Couldn't load Product Analytics: ${error}`} />}
 

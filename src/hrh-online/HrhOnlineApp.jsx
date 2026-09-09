@@ -15,6 +15,7 @@ import ChannelPerformance from "./pages/ChannelPerformance";
 import OperationalFlags from "./pages/OperationalFlags";
 import { OPERATIONAL_FLAGS_KEY } from "./nav";
 import { hrh } from "./theme";
+import { defaultDateRange } from "../utils/dateRange";
 
 const PAGES = {
   overview: ExecutiveOverview,
@@ -35,21 +36,30 @@ const PAGES = {
 // state — same state-based "tab" pattern Auction already uses internally
 // (see main.jsx's comment), just not sharing any of Auction's components
 // or business logic.
+//
+// Date Range + Channel are now a single dashboard-wide filter (originally
+// Product Analytics-only) — every page reads the same `filters.dateRange`/
+// `filters.channel` from here via Header, rather than each page owning its
+// own copy. Pages with a real API (Product Analytics) refetch on change;
+// mock pages that have a channel dimension (e.g. Sales Analytics) filter
+// their existing rows by it, same as before.
 export default function HrhOnlineApp() {
   const [page, setPage] = useState("overview");
-  const [filters, setFilters] = useState({ dateRange: "Last 30 Days", channel: "All Channels", store: "All Stores" });
+  const [channel, setChannel] = useState("All Channels");
+  const [dateRange, setDateRange] = useState(defaultDateRange());
 
   useEffect(() => {
     document.title = "HRH Online · HMR Analytics";
   }, []);
 
   const Page = PAGES[page] || ExecutiveOverview;
+  const filters = { channel, dateRange };
 
   return (
     <div className="min-h-screen flex" style={{ background: hrh.bg }}>
       <Sidebar active={page} onNavigate={setPage} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <Header page={page} filters={filters} onFilterChange={(key, value) => setFilters((f) => ({ ...f, [key]: value }))} />
+        <Header channel={channel} onChannelChange={setChannel} dateRange={dateRange} onDateRangeChange={setDateRange} />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />
         </main>
