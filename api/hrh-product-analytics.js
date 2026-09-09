@@ -18,8 +18,9 @@ const HRH_STORE = "HRH ONLINE";
 // Exact stored sales_channel values — verified via `system.columns`/sample
 // queries against xv3.mart_net_sales, not assumed. Compound variants like
 // "HMRPH ONLINE - VIBER" exist in the raw data but fall OUTSIDE the
-// HRH_STORE population entirely once store_name is filtered, so no explicit
-// exclusion list is needed here.
+// HRH_STORE population entirely once store_name is filtered. CAROUSEL is
+// deliberately excluded — it is a distinct in-store channel, not part of
+// this dashboard's online population.
 const CHANNEL_MAP = {
   "All Channels": ["HMRPH ONLINE", "TIKTOK", "SHOPEE"],
   "HMRPH Online": ["HMRPH ONLINE"],
@@ -71,12 +72,12 @@ function mondayOfWeek(iso) {
   return addDaysISO(iso, mondayOffset);
 }
 
-// Current/previous comparison window — Monday-through-today by default
-// (partial current week vs. the SAME elapsed number of days in the prior
-// week, per spec: never compare a partial current week to a full previous
-// week). An explicit ?from=&to= overrides "current" with a caller-chosen
-// range; "previous" is always the immediately preceding period of equal
-// length.
+// Current/previous comparison window — Monday-through-today (Asia/Manila)
+// by default (partial current week vs. the SAME elapsed number of days in
+// the prior week — never a partial current week against a full previous
+// week). An explicit ?from=&to= overrides "current" for regression testing
+// against a known historical window; "previous" is always the immediately
+// preceding period of equal length.
 function resolveWindows(fromParam, toParam) {
   const to = toParam || manilaTodayISODate();
   const from = fromParam || mondayOfWeek(to);
@@ -100,30 +101,54 @@ function weeklyBuckets(current) {
   return [wk1, wk2, wk3, wk4];
 }
 
-async function fetchInventory(barcodes) {
-  if (barcodes.length === 0) return new Map();
+// Inventory — joined on the numeric canonical key (item_id -> product_id),
+// never barcode/product_name text. Physical stock (item_qty/total_current_srp)
+// and HMRPH CMS-posted stock (cms_hmrph_posting_quantity/cms_posting_total_value)
+// are reported separately and are NOT forced to reconcile — they are two
+// legitimately different operational numbers (see stockStatus below).
+async function fetchInventory(itemIds) {
+  if (itemIds.length === 0) return new Map();
   const rows = await (
     await client.query({
       query: `
-        SELECT barcode, sum(item_qty) AS stock_qty, sum(total_current_srp) AS stock_value
+        SELECT
+          product_id,
+          sum(item_qty) AS stock_qty,
+          sum(total_current_srp) AS stock_value,
+          sum(cms_hmrph_posting_quantity) AS posted_qty,
+          sum(cms_posting_total_value) AS posted_value,
+          any(inventory_aging) AS aging
         FROM xv3.mart_level_of_inventory
-        WHERE store_name = {store:String} AND barcode IN {barcodes:Array(String)}
-        GROUP BY barcode
+        WHERE store_name = {store:String} AND product_id IN {itemIds:Array(Int64)}
+        GROUP BY product_id
       `,
-      query_params: { store: HRH_STORE, barcodes },
+      query_params: { store: HRH_STORE, itemIds },
       format: "JSONEachRow",
     })
   ).json();
   const map = new Map();
   for (const r of rows) {
-    map.set(r.barcode, { stockQty: toNum(r.stock_qty), stockValue: toNum(r.stock_value) });
+    map.set(String(r.product_id), {
+      stockQty: toNum(r.stock_qty),
+      stockValue: toNum(r.stock_value),
+      postedQty: toNum(r.posted_qty),
+      postedValue: toNum(r.posted_value),
+      aging: r.aging || null,
+    });
   }
   return map;
 }
 
+// Four deterministic states — the whole point of this section is telling
+// "genuinely out of stock" apart from "still has stock, just not posted"
+// apart from "posted and still has stock" (all legitimately different
+// business situations), and never silently treating a missing inventory
+// match as zero stock.
 function stockStatus(inv) {
   if (!inv) return "UNKNOWN STOCK";
-  return inv.stockQty > 0 ? "HAS STOCK" : "OUT OF STOCK";
+  if (inv.stockQty <= 0) return "OUT OF STOCK";
+  if (inv.postedQty <= 0) return "HAS STOCK / NOT POSTED";
+  return "HAS STOCK";
 }
 
 export default async function handler(req, res) {
@@ -134,26 +159,25 @@ export default async function handler(req, res) {
     const [wk1, wk2, wk3, wk4] = weeklyBuckets(current);
 
     // KPIs — one bounded scan covering both windows, conditionally
-    // aggregated. GMV = gross value of 'sale' rows only (returns excluded).
-    // NMV = net of returns (transaction_type='return' rows already carry a
-    // negative net_sales_amount in this mart). Units = gross quantity sold
-    // ('sale' rows only — net_quantity nets returns, which Units should
-    // NOT do). Orders = distinct invoices on 'sale' rows (invoice_no, not
-    // order_no — order_no is frequently blank for TikTok/Shopee rows).
+    // aggregated. GMV = SUM(net_sales_amount) where net_sales_amount > 0
+    // (returns already carry a negative net_sales_amount in this mart, so
+    // this is gross sales value only). NMV = SUM(net_sales_amount) with no
+    // filter (net of returns). Units = SUM(net_quantity) gated the same way
+    // as GMV. Orders = distinct invoice_id on the same gross-sale rows.
     // Every formula here reconciled exactly against a known historical
     // week (see commit message / PR description for the reconciliation).
     const kpiRows = await (
       await client.query({
         query: `
           SELECT
-            sumIf(net_sales_amount, transaction_type = 'sale' AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
             sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_nmv,
-            sumIf(net_quantity, transaction_type = 'sale' AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            uniqExactIf(invoice_no, transaction_type = 'sale' AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
-            sumIf(net_sales_amount, transaction_type = 'sale' AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
             sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_nmv,
-            sumIf(net_quantity, transaction_type = 'sale' AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
-            uniqExactIf(invoice_no, transaction_type = 'sale' AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
+            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
             max(transaction_date) AS sales_as_of
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
@@ -183,32 +207,34 @@ export default async function handler(req, res) {
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
 
-    // Repeat Sellers — canonical SKU (barcode) with positive sale-side GMV
-    // in at least 2 of the last 4 weekly buckets. product_name/category_name
-    // picked via argMax(transaction_date) so a barcode's occasional naming
-    // variance doesn't matter — display only, never the join/group key.
+    // Repeat Sellers — canonical key `ct.item_id` (the literal dot requires
+    // backticks) with positive GMV in >= 2 of the last 4 weekly buckets.
+    // Also carries the page-level current/previous window sums so the
+    // displayed Prior/Current-Period Sales columns stay consistent with
+    // Top Products' definition of "current vs previous". product_name/
+    // category_name/barcode picked via argMax/any — display only, never
+    // the join/group key.
     const repeatRows = await (
       await client.query({
         query: `
           SELECT
-            barcode,
+            \`ct.item_id\` AS item_id,
+            any(barcode) AS barcode,
             argMax(product_name, transaction_date) AS product_name,
             argMax(category_name, transaction_date) AS category_name,
-            sumIf(net_sales_amount, transaction_date BETWEEN {wk1From:String} AND {wk1To:String}) AS wk1_gmv,
-            sumIf(net_quantity, transaction_date BETWEEN {wk1From:String} AND {wk1To:String}) AS wk1_units,
-            sumIf(net_sales_amount, transaction_date BETWEEN {wk2From:String} AND {wk2To:String}) AS wk2_gmv,
-            sumIf(net_quantity, transaction_date BETWEEN {wk2From:String} AND {wk2To:String}) AS wk2_units,
-            sumIf(net_sales_amount, transaction_date BETWEEN {wk3From:String} AND {wk3To:String}) AS wk3_gmv,
-            sumIf(net_quantity, transaction_date BETWEEN {wk3From:String} AND {wk3To:String}) AS wk3_units,
-            sumIf(net_sales_amount, transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_gmv,
-            sumIf(net_quantity, transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_units
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}) AS wk1_gmv,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}) AS wk2_gmv,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}) AS wk3_gmv,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_gmv,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
-            AND transaction_type = 'sale'
             AND transaction_date BETWEEN {wk1From:String} AND {wk4To:String}
-            AND barcode IS NOT NULL AND barcode != ''
-          GROUP BY barcode
+            AND \`ct.item_id\` IS NOT NULL
+          GROUP BY \`ct.item_id\`
           HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 2
           ORDER BY wk4_gmv DESC
           LIMIT 50
@@ -224,32 +250,38 @@ export default async function handler(req, res) {
           wk3To: wk3.to,
           wk4From: wk4.from,
           wk4To: wk4.to,
+          curFrom: current.from,
+          curTo: current.to,
+          prevFrom: previous.from,
+          prevTo: previous.to,
         },
         format: "JSONEachRow",
       })
     ).json();
 
     // Product comparison (current vs previous window) — feeds BOTH Top
-    // Products and Dropped Products, unpaged, so a dropped SKU (current
+    // Products and Dropped Products, unpaged, so a dropped item (current
     // GMV = 0) isn't cut off by a "top N" limit before we can classify it.
+    // previousUnits is computed and carried straight through to both
+    // consumers below — never hardcoded to 0.
     const comparisonRows = await (
       await client.query({
         query: `
           SELECT
-            barcode,
+            \`ct.item_id\` AS item_id,
+            any(barcode) AS barcode,
             argMax(product_name, transaction_date) AS product_name,
             argMax(category_name, transaction_date) AS category_name,
-            sumIf(net_sales_amount, transaction_type = 'sale' AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_quantity, transaction_type = 'sale' AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            sumIf(net_sales_amount, transaction_type = 'sale' AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-            sumIf(net_quantity, transaction_type = 'sale' AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
-            AND transaction_type = 'sale'
             AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            AND barcode IS NOT NULL AND barcode != ''
-          GROUP BY barcode
+            AND \`ct.item_id\` IS NOT NULL
+          GROUP BY \`ct.item_id\`
           HAVING cur_gmv > 0 OR prev_gmv > 0
         `,
         query_params: {
@@ -274,10 +306,18 @@ export default async function handler(req, res) {
       })
     ).json();
 
-    const allBarcodes = Array.from(
-      new Set([...repeatRows.map((r) => r.barcode), ...comparisonRows.map((r) => r.barcode)].filter(Boolean)),
+    // ClickHouse's JSONEachRow format returns Int64 columns as strings (to
+    // avoid JS number-precision loss on large values) — coerce back to a
+    // real number here so the client serializes this as Array(Int64), not
+    // a quoted-string array ClickHouse then rejects.
+    const allItemIds = Array.from(
+      new Set(
+        [...repeatRows.map((r) => r.item_id), ...comparisonRows.map((r) => r.item_id)]
+          .filter((v) => v !== null && v !== undefined)
+          .map((v) => Number(v)),
+      ),
     );
-    const inventoryMap = await fetchInventory(allBarcodes);
+    const inventoryMap = await fetchInventory(allItemIds);
 
     // Trend rule (Repeat Sellers) — deliberately simple and deterministic:
     // Wk4 (current) vs. the AVERAGE of Wk1-3, +/-5% band = "flat". Averaging
@@ -296,19 +336,14 @@ export default async function handler(req, res) {
       } else if (wk4Gmv > 0) {
         trend = "up";
       }
-      const inv = inventoryMap.get(r.barcode);
+      const inv = inventoryMap.get(String(r.item_id));
       return {
         sku: r.barcode,
         product: r.product_name,
         category: r.category_name || null,
-        wk1Gmv,
-        wk1Units: toNum(r.wk1_units),
-        wk2Gmv,
-        wk2Units: toNum(r.wk2_units),
-        wk3Gmv,
-        wk3Units: toNum(r.wk3_units),
-        wk4Gmv,
-        wk4Units: toNum(r.wk4_units),
+        priorSales: toNum(r.prev_gmv),
+        currentSales: toNum(r.cur_gmv),
+        units: toNum(r.cur_units),
         trend,
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,
@@ -316,7 +351,7 @@ export default async function handler(req, res) {
     });
 
     const comparisons = comparisonRows.map((r) => {
-      const inv = inventoryMap.get(r.barcode);
+      const inv = inventoryMap.get(String(r.item_id));
       const curG = toNum(r.cur_gmv);
       const prevG = toNum(r.prev_gmv);
       const curU = toNum(r.cur_units);
@@ -333,13 +368,15 @@ export default async function handler(req, res) {
         unitsChangePct: pctDelta(curU, prevU),
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,
+        postedQty: inv ? inv.postedQty : null,
       };
     });
 
     const topProducts = comparisons
       .filter((r) => r.currentGmv > 0)
       .sort((a, b) => b.currentGmv - a.currentGmv)
-      .slice(0, 20);
+      .slice(0, 20)
+      .map(({ postedQty: _postedQty, ...rest }) => rest);
 
     const droppedProducts = comparisons
       .filter((r) => r.currentGmv <= 0 && r.previousGmv > 0)
@@ -355,7 +392,9 @@ export default async function handler(req, res) {
         currentUnits: r.currentUnits,
         currentStockQty: r.currentStockQty,
         currentStockValue: r.currentStockValue,
-        status: stockStatus(r.currentStockQty !== null ? { stockQty: r.currentStockQty } : null),
+        status: stockStatus(
+          r.currentStockQty !== null ? { stockQty: r.currentStockQty, postedQty: r.postedQty } : null,
+        ),
       }));
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");

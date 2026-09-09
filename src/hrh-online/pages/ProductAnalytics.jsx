@@ -10,9 +10,17 @@ import { formatPeso, formatNum, formatPct } from "../format";
 
 const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
 const TREND_COLOR = { up: hrh.good, down: hrh.bad, flat: hrh.muted };
-// HAS STOCK is the one that needs a human to look at it (sold out despite
-// stock on hand) — deliberately the "warning" (orange) tone, not "good".
-const STATUS_SEVERITY = { "OUT OF STOCK": "good", "HAS STOCK": "warning", "UNKNOWN STOCK": "critical" };
+// OUT OF STOCK is the "explained, nothing to do" case (green). The two HAS
+// STOCK variants both need a human to look at it (sold out despite stock
+// on hand) — "warning" (orange), not "good". UNKNOWN STOCK means the
+// inventory match itself is missing — flagged as "critical" so a data gap
+// never quietly reads as resolved.
+const STATUS_SEVERITY = {
+  "OUT OF STOCK": "good",
+  "HAS STOCK": "warning",
+  "HAS STOCK / NOT POSTED": "warning",
+  "UNKNOWN STOCK": "critical",
+};
 
 function changeCell(pct) {
   if (pct === null || pct === undefined) return "—";
@@ -29,14 +37,9 @@ const REPEAT_SELLER_COLUMNS = [
   { key: "sku", label: "SKU" },
   { key: "product", label: "Product" },
   { key: "category", label: "Category", render: (r) => r.category || "—" },
-  { key: "wk1Gmv", label: "Wk1 GMV", render: (r) => formatPeso(r.wk1Gmv) },
-  { key: "wk1Units", label: "Wk1 Units", render: (r) => formatNum(r.wk1Units) },
-  { key: "wk2Gmv", label: "Wk2 GMV", render: (r) => formatPeso(r.wk2Gmv) },
-  { key: "wk2Units", label: "Wk2 Units", render: (r) => formatNum(r.wk2Units) },
-  { key: "wk3Gmv", label: "Wk3 GMV", render: (r) => formatPeso(r.wk3Gmv) },
-  { key: "wk3Units", label: "Wk3 Units", render: (r) => formatNum(r.wk3Units) },
-  { key: "wk4Gmv", label: "Wk4 GMV", render: (r) => formatPeso(r.wk4Gmv) },
-  { key: "wk4Units", label: "Wk4 Units", render: (r) => formatNum(r.wk4Units) },
+  { key: "priorSales", label: "Prior-Period Sales", render: (r) => formatPeso(r.priorSales) },
+  { key: "currentSales", label: "Current-Period Sales", render: (r) => formatPeso(r.currentSales) },
+  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
   {
     key: "trend",
     label: "Trend",
@@ -47,7 +50,7 @@ const REPEAT_SELLER_COLUMNS = [
     ),
   },
   { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Current Stock Value", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
 ];
 
 const TOP_PRODUCT_COLUMNS = [
@@ -58,20 +61,19 @@ const TOP_PRODUCT_COLUMNS = [
   { key: "currentUnits", label: "Current Units", render: (r) => formatNum(r.currentUnits) },
   { key: "previousGmv", label: "Previous GMV", render: (r) => formatPeso(r.previousGmv) },
   { key: "previousUnits", label: "Previous Units", render: (r) => formatNum(r.previousUnits) },
-  { key: "gmvChangePct", label: "GMV Change", render: (r) => changeCell(r.gmvChangePct) },
-  { key: "unitsChangePct", label: "Units Change", render: (r) => changeCell(r.unitsChangePct) },
+  { key: "gmvChangePct", label: "Change / Note", render: (r) => changeCell(r.gmvChangePct) },
   { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Current Stock Value", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
 ];
 
 const DROPPED_PRODUCT_COLUMNS = [
   { key: "sku", label: "SKU" },
   { key: "product", label: "Product" },
   { key: "category", label: "Category", render: (r) => r.category || "—" },
-  { key: "previousGmv", label: "Previous GMV", render: (r) => formatPeso(r.previousGmv) },
-  { key: "previousUnits", label: "Previous Units", render: (r) => formatNum(r.previousUnits) },
+  { key: "previousGmv", label: "Previous-Period Sales", render: (r) => formatPeso(r.previousGmv) },
+  { key: "previousUnits", label: "Previous-Period Units", render: (r) => formatNum(r.previousUnits) },
   { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Current Stock Value", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
   { key: "status", label: "Status", render: (r) => <SeverityBadge severity={STATUS_SEVERITY[r.status] || "critical"} text={r.status} /> },
 ];
 
