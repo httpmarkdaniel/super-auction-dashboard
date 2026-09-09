@@ -1,11 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import SeverityBadge from "../components/SeverityBadge";
+import DateRangePicker from "../components/DateRangePicker";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { CHANNEL_OPTIONS } from "../mock/filterOptions";
+import { defaultDateRange } from "../../utils/dateRange";
 import { formatPeso, formatNum, formatPct } from "../format";
 
 const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
@@ -116,20 +118,61 @@ function formatAsOf(meta) {
   return `Sales as of ${sales} · Inventory as of ${inventory}`;
 }
 
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Formats a plain YYYY-MM-DD (no time component — transaction_date is a
+// ClickHouse Date, not DateTime, so there is no intraday precision to show).
+function formatIsoDateLabel(iso) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${SHORT_MONTHS[m - 1]} ${d}, ${y}`;
+}
+
+function effectivePeriodLabel(current) {
+  if (!current) return null;
+  const from = formatIsoDateLabel(current.from);
+  const to = formatIsoDateLabel(current.to);
+  if (!from || !to) return null;
+  return from === to ? from : `${from} – ${to}`;
+}
+
+// Query params for the API's range contract: a preset key sends
+// ?range=<key>; a custom selection sends ?range=custom&from=&to=.
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
+
+function isDateRangeReady(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return Boolean(dateRange.from && dateRange.to && dateRange.from <= dateRange.to);
+  }
+  return Boolean(dateRange);
+}
+
 // Real ClickHouse-backed Product Analytics — see api/hrh-product-analytics.js
-// for the query/reconciliation. Fetches on mount and whenever the channel
-// changes; no polling (this is historical/analytical, not a live feed).
+// for the query/reconciliation. Fetches on mount and whenever the channel or
+// date range changes; no polling (this is historical/analytical, not a live
+// feed). A custom range is never sent to the API until both dates are
+// picked and from <= to.
 export default function ProductAnalytics() {
   const [channel, setChannel] = useState("All Channels");
+  const [dateRange, setDateRange] = useState(defaultDateRange());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async (ch) => {
+  const ready = isDateRangeReady(dateRange);
+  const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
+
+  const load = useCallback(async (ch, p) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/hrh-product-analytics?channel=${encodeURIComponent(ch)}`);
+      const qs = new URLSearchParams({ channel: ch, ...p });
+      const res = await fetch(`/api/hrh-product-analytics?${qs.toString()}`);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
@@ -142,8 +185,9 @@ export default function ProductAnalytics() {
   }, []);
 
   useEffect(() => {
-    load(channel);
-  }, [channel, load]);
+    if (!ready) return;
+    load(channel, params);
+  }, [channel, params, ready, load]);
 
   return (
     <div>
@@ -159,9 +203,9 @@ export default function ProductAnalytics() {
           )}
           <button
             type="button"
-            onClick={() => load(channel)}
-            disabled={loading}
-            className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md"
+            onClick={() => ready && load(channel, params)}
+            disabled={loading || !ready}
+            className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
             style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
           >
             {loading ? "Refreshing…" : "Refresh"}
@@ -169,11 +213,20 @@ export default function ProductAnalytics() {
         </div>
       </div>
 
-      <div className="mb-4">
-        <ChannelPills value={channel} onChange={setChannel} />
+      <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <DateRangePicker value={dateRange} onChange={setDateRange} />
+          <ChannelPills value={channel} onChange={setChannel} />
+        </div>
+        {data?.meta?.current && (
+          <span className="text-[11.5px] font-semibold" style={{ color: hrh.ink2 }}>
+            {effectivePeriodLabel(data.meta.current)}
+          </span>
+        )}
       </div>
 
-      {loading && !data && <LoadingState label="Loading Product Analytics…" />}
+      {!ready && <ErrorState label="Select both a From and To date for the custom range." />}
+      {ready && loading && !data && <LoadingState label="Loading Product Analytics…" />}
       {error && <ErrorState label={`Couldn't load Product Analytics: ${error}`} />}
 
       {data && !error && (

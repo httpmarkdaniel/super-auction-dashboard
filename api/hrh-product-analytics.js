@@ -72,26 +72,98 @@ function mondayOfWeek(iso) {
   return addDaysISO(iso, mondayOffset);
 }
 
-// Current/previous comparison window — Monday-through-today (Asia/Manila)
-// by default (partial current week vs. the SAME elapsed number of days in
-// the prior week — never a partial current week against a full previous
-// week). An explicit ?from=&to= overrides "current" for regression testing
-// against a known historical window; "previous" is always the immediately
-// preceding period of equal length.
-function resolveWindows(fromParam, toParam) {
-  const to = toParam || manilaTodayISODate();
-  const from = fromParam || mondayOfWeek(to);
-  const lengthDays = daysBetweenISO(from, to) + 1;
-  const prevTo = addDaysISO(from, -1);
-  const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
-  return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+function firstOfMonthISO(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  return `${y}-${String(m).padStart(2, "0")}-01`;
 }
 
-// Four rolling weekly buckets for Repeat Sellers — Wk4 is the "current"
-// window above (may be partial), Wk1-3 are the three full 7-day weeks
-// immediately before it.
-function weeklyBuckets(current) {
-  const wk4 = current;
+function daysInMonth(year, month1Based) {
+  // Date.UTC's month arg is 0-based, so passing the 1-based month directly
+  // asks for day 0 of the NEXT month — i.e. the last day of this one.
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
+}
+
+// Same month N months back, day-of-month clamped to that month's length
+// (e.g. Mar 31 - 1 month -> Feb 28/29, never Mar 3).
+function shiftMonthsClampedISO(iso, deltaMonths) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total0 = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total0 / 12);
+  const nm1 = (((total0 % 12) + 12) % 12) + 1;
+  const nd = Math.min(d, daysInMonth(ny, nm1));
+  return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+
+// Same month/day N years back, clamped for Feb 29 into a non-leap year.
+function shiftYearsClampedISO(iso, deltaYears) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const ny = y + deltaYears;
+  const nd = Math.min(d, daysInMonth(ny, m));
+  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+
+// Preset/custom current+previous windows — Asia/Manila "today" throughout
+// (never the server's own UTC date). Mirrors the exact same preset
+// semantics as the Auction Dashboard's shared src/utils/dateRange.js
+// (resolveComparisonRange), reimplemented here on plain ISO date strings
+// because that browser-facing util assumes the VIEWER's local clock is
+// Manila time — true for a browser, not for this server process (which
+// runs in UTC on Vercel), so it can't be imported and called as-is here.
+//
+// - wtd: Monday-of-week -> today; previous = same span shifted back
+//   exactly 7 days (the prior calendar week's same weekdays, NOT the
+//   immediately preceding 7 days — those differ once "today" isn't Sunday).
+// - mtd: 1st-of-month -> today; previous = 1st of the prior month through
+//   the same day-of-month (clamped for shorter months).
+// - ytd: Jan 1 -> today; previous = Jan 1 of the prior year through the
+//   same month/day a year back (clamped for Feb 29).
+// - custom: caller-supplied from/to; previous = the immediately preceding
+//   period of identical length (the one shape that IS adjacency-based).
+function resolveRange(range, fromParam, toParam) {
+  const today = manilaTodayISODate();
+
+  if (range === "custom") {
+    if (!fromParam || !toParam) {
+      throw new RangeError("Custom range requires both from and to");
+    }
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    const lengthDays = daysBetweenISO(from, to) + 1;
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+
+  if (range === "mtd") {
+    const to = today;
+    const from = firstOfMonthISO(to);
+    const prevAnchor = shiftMonthsClampedISO(to, -1);
+    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+  }
+
+  if (range === "ytd") {
+    const to = today;
+    const from = `${to.slice(0, 4)}-01-01`;
+    const prevTo = shiftYearsClampedISO(to, -1);
+    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+
+  // wtd (default)
+  const to = today;
+  const from = mondayOfWeek(to);
+  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+}
+
+// Four rolling weekly buckets for Repeat Sellers — always the 4 most
+// recent real 7-day calendar weeks ending at the effective "to" date,
+// deliberately INDEPENDENT of whichever range preset is selected (a WTD/
+// MTD/YTD/Custom "current" window can be a single day or a whole year;
+// none of those shapes fit "weekly repeat-purchase cadence", so this
+// lookback stays fixed and explicit no matter what's chosen elsewhere on
+// the page).
+function weeklyBucketsEndingAt(to) {
+  const wk4 = { from: addDaysISO(to, -6), to };
   const wk3To = addDaysISO(wk4.from, -1);
   const wk3 = { from: addDaysISO(wk3To, -6), to: wk3To };
   const wk2To = addDaysISO(wk3.from, -1);
@@ -154,9 +226,19 @@ function stockStatus(inv) {
 export default async function handler(req, res) {
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
+    // No explicit `range`: an explicit from/to (regression tests, older
+    // links) behaves as "custom"; otherwise default to Week to Date.
+    const range = req.query.range || (from && to ? "custom" : "wtd");
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
-    const { current, previous } = resolveWindows(from, to);
-    const [wk1, wk2, wk3, wk4] = weeklyBuckets(current);
+
+    let current;
+    let previous;
+    try {
+      ({ current, previous } = resolveRange(range, from, to));
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const [wk1, wk2, wk3, wk4] = weeklyBucketsEndingAt(current.to);
 
     // KPIs — one bounded scan covering both windows, conditionally
     // aggregated. GMV = SUM(net_sales_amount) where net_sales_amount > 0
@@ -208,10 +290,12 @@ export default async function handler(req, res) {
     const prevAov = safeDivide(prevGmv, prevOrders);
 
     // Repeat Sellers — canonical key `ct.item_id` (the literal dot requires
-    // backticks) with positive GMV in >= 2 of the last 4 weekly buckets.
-    // Also carries the page-level current/previous window sums so the
-    // displayed Prior/Current-Period Sales columns stay consistent with
-    // Top Products' definition of "current vs previous". product_name/
+    // backticks) with positive GMV in >= 2 of the last 4 weekly buckets
+    // (see weeklyBucketsEndingAt — always real 7-day weeks ending "today",
+    // independent of the page's selected range preset). Prior/Current-
+    // Period Sales and Units are Wk3/Wk4 directly, NOT the page-level
+    // current/previous window (which for MTD/YTD can span months and
+    // wouldn't mean anything as a "weekly" figure). product_name/
     // category_name/barcode picked via argMax/any — display only, never
     // the join/group key.
     const repeatRows = await (
@@ -226,9 +310,7 @@ export default async function handler(req, res) {
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}) AS wk2_gmv,
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}) AS wk3_gmv,
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_gmv,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv
+            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}) AS wk4_units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
@@ -250,10 +332,6 @@ export default async function handler(req, res) {
           wk3To: wk3.to,
           wk4From: wk4.from,
           wk4To: wk4.to,
-          curFrom: current.from,
-          curTo: current.to,
-          prevFrom: previous.from,
-          prevTo: previous.to,
         },
         format: "JSONEachRow",
       })
@@ -341,9 +419,9 @@ export default async function handler(req, res) {
         sku: r.barcode,
         product: r.product_name,
         category: r.category_name || null,
-        priorSales: toNum(r.prev_gmv),
-        currentSales: toNum(r.cur_gmv),
-        units: toNum(r.cur_units),
+        priorSales: wk3Gmv,
+        currentSales: wk4Gmv,
+        units: toNum(r.wk4_units),
         trend,
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,
@@ -401,6 +479,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       meta: {
         channel,
+        range,
         current,
         previous,
         weeklyBuckets: { wk1, wk2, wk3, wk4 },
