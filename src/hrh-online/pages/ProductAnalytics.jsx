@@ -37,7 +37,7 @@ function changeCell(pct) {
 
 const REPEAT_SELLER_COLUMNS = [
   { key: "sku", label: "SKU" },
-  { key: "product", label: "Product" },
+  { key: "product", label: "Product", maxWidth: 130 },
   { key: "category", label: "Category", render: (r) => r.category || "—" },
   { key: "priorSales", label: "Prior-Period Sales", render: (r) => formatPeso(r.priorSales) },
   { key: "currentSales", label: "Current-Period Sales", render: (r) => formatPeso(r.currentSales) },
@@ -57,7 +57,7 @@ const REPEAT_SELLER_COLUMNS = [
 
 const TOP_PRODUCT_COLUMNS = [
   { key: "sku", label: "SKU" },
-  { key: "product", label: "Product" },
+  { key: "product", label: "Product", maxWidth: 130 },
   { key: "category", label: "Category", render: (r) => r.category || "—" },
   { key: "currentGmv", label: "Current GMV", render: (r) => formatPeso(r.currentGmv) },
   { key: "currentUnits", label: "Current Units", render: (r) => formatNum(r.currentUnits) },
@@ -70,7 +70,7 @@ const TOP_PRODUCT_COLUMNS = [
 
 const DROPPED_PRODUCT_COLUMNS = [
   { key: "sku", label: "SKU" },
-  { key: "product", label: "Product" },
+  { key: "product", label: "Product", maxWidth: 130 },
   { key: "category", label: "Category", render: (r) => r.category || "—" },
   { key: "previousGmv", label: "Previous-Period Sales", render: (r) => formatPeso(r.previousGmv) },
   { key: "previousUnits", label: "Previous-Period Units", render: (r) => formatNum(r.previousUnits) },
