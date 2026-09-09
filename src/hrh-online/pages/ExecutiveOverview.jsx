@@ -10,9 +10,11 @@ import { formatPeso, formatCompactPeso, formatNum } from "../format";
 import { formatManila } from "../../utils/manilaTime";
 
 // Real order_status values from xv3.mart_xv3_order_report (verified, not
-// assumed) — see api/hrh-executive-overview.js's comment for why this
-// table's status/population does NOT include Returns and won't reconcile
-// to the Orders KPI.
+// assumed), plus the synthetic "Unknown/Unmapped" bucket the API assigns to
+// a canonical order with no match in that table — see
+// api/hrh-executive-overview.js's comment for why the Order Status donut
+// classifies the SAME canonical order population as the Orders KPI (so the
+// two always sum to the same total), rather than a separate one.
 const ORDER_STATUS_SEVERITY = {
   Paid: "good",
   Completed: "good",
@@ -20,6 +22,7 @@ const ORDER_STATUS_SEVERITY = {
   Processing: "warning",
   Pending: "warning",
   Cancelled: "critical",
+  "Unknown/Unmapped": "warning",
 };
 const ORDER_STATUS_COLOR = {
   Paid: hrh.good,
@@ -28,6 +31,7 @@ const ORDER_STATUS_COLOR = {
   Processing: hrh.accent,
   Pending: hrh.muted,
   Cancelled: hrh.bad,
+  "Unknown/Unmapped": "#c7cdd6",
 };
 
 const TOP_PRODUCT_COLUMNS = [
@@ -167,9 +171,9 @@ export default function ExecutiveOverview({ filters }) {
             </Panel>
             <Panel
               title="Order Status"
-              subtitle="Order-intake status for the selected period (separate order population — see caveat)"
+              subtitle={data.meta?.orderStatusNote || "Status breakdown of the selected period's Orders"}
             >
-              <DonutChart segments={orderStatusSegments} centerValue={formatNum(totalOrderStatusCount)} centerLabel="Orders (intake)" />
+              <DonutChart segments={orderStatusSegments} centerValue={formatNum(totalOrderStatusCount)} centerLabel="Total Orders" />
             </Panel>
           </div>
 

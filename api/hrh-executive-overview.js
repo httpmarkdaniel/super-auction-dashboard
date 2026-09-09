@@ -222,32 +222,58 @@ export default async function handler(req, res) {
           }))
         : [{ channel: channels[0], gmv: curGmv, sharePct: curGmv > 0 ? 100 : 0 }];
 
-    // Order Status — GROUNDING GAP (see commit/report): xv3.mart_xv3_order_report
-    // is a genuinely different, smaller order-intake population than
-    // mart_net_sales (2,106 vs tens of thousands of invoiced sales rows for
-    // this store), has no sales_channel column (so this breakdown is NOT
-    // channel-filterable), and has no "Returned" status — returns only
-    // exist in mart_net_sales as transaction_type='return', with no
-    // reliable way to net them against this table's order_status without
-    // risking double-counting the same order. So: real order_status values
-    // only (Paid/Cancelled/Completed/For Delivery/Processing/Pending),
-    // scoped to store_name='HRH ONLINE' and created_at in the current
-    // window, and it will NOT numerically reconcile to the Orders KPI.
+    // Order Status — MUST classify the exact same canonical order population
+    // as the Orders KPI (uniqExactIf(invoice_id, net_sales_amount > 0) on
+    // mart_net_sales, same store/channel/date scope), never a different,
+    // smaller population, so SUM(orderStatus.count) === kpis.orders always.
+    //
+    // Each canonical invoice_id gets exactly one status (single GROUP BY
+    // over the canonical set, not separate additive queries, so there is
+    // no double-counting by construction):
+    //   1. order_status from xv3.mart_xv3_order_report, LEFT JOINed on
+    //      invoice_id (the same field Recent Orders already joins on) —
+    //      real values only (Paid/Cancelled/Completed/For Delivery/
+    //      Processing/Pending).
+    //   2. "Unknown/Unmapped" for every canonical invoice_id with no match
+    //      in that table (investigated: TikTok/Shopee orders and a
+    //      majority of HMRPH Online orders aren't tracked there at all —
+    //      that table is HMRPH's own storefront checkout system, not a
+    //      universal order ledger, so this is expected, not a bug).
+    // "Returned" was investigated and deliberately NOT added: a return's
+    // invoice_id does not match its original sale's invoice_id in
+    // mart_net_sales (checked directly — zero overlap), so there is no
+    // reliable way to tag a canonical order as returned without guessing.
     const orderStatusRows = await (
       await client.query({
         query: `
-          SELECT order_status AS status, count() AS c
-          FROM xv3.mart_xv3_order_report
-          WHERE store_name = {store:String}
-            AND created_at BETWEEN {curFrom:String} AND {curToExclusive:String}
-          GROUP BY order_status
+          WITH canonical AS (
+            SELECT DISTINCT invoice_id
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+              AND net_sales_amount > 0 AND invoice_id IS NOT NULL
+          ),
+          statuses AS (
+            SELECT invoice_id, argMax(order_status, created_at) AS order_status
+            FROM xv3.mart_xv3_order_report
+            WHERE invoice_id IS NOT NULL
+            GROUP BY invoice_id
+          )
+          SELECT
+            multiIf(s.order_status != '', s.order_status, 'Unknown/Unmapped') AS status,
+            count() AS c
+          FROM canonical c
+          LEFT JOIN statuses s ON c.invoice_id = s.invoice_id
+          GROUP BY status
           ORDER BY c DESC
         `,
-        query_params: { store: HRH_STORE, curFrom: `${current.from} 00:00:00`, curToExclusive: `${addDaysISO(current.to, 1)} 00:00:00` },
+        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
         format: "JSONEachRow",
       })
     ).json();
-    const orderStatus = orderStatusRows.map((r) => ({ status: r.status || "Unknown", count: toNum(r.c) }));
+    const orderStatus = orderStatusRows.map((r) => ({ status: r.status, count: toNum(r.c) }));
+    const hasUnmapped = orderStatus.some((r) => r.status === "Unknown/Unmapped");
 
     // Top Products — same canonical key (`ct.item_id`) and positive-sale
     // definition as Product Analytics, current window only, plus Orders
@@ -337,9 +363,9 @@ export default async function handler(req, res) {
         previous,
         salesAsOf: k.sales_as_of || null,
         generatedAt: new Date().toISOString(),
-        dataGaps: {
-          orderStatus: "xv3.mart_xv3_order_report is a smaller, separate order-intake population from mart_net_sales, has no sales_channel column, and has no Returned status (returns live only in mart_net_sales). Counts will not reconcile to the Orders KPI.",
-        },
+        orderStatusNote: hasUnmapped
+          ? "Status coverage based on matched order records; unmatched sales orders are shown as Unknown/Unmapped."
+          : null,
       },
       kpis: {
         gmv: { value: curGmv, delta: pctDelta(curGmv, prevGmv) },
