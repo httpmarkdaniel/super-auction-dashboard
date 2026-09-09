@@ -158,6 +158,9 @@
   .hero-bg-bar {
     animation: hero-bar-grow 5.2s ease-in-out infinite;
   }
+  .hero-kpi-fade {
+    animation: hero-kpi-fade 4.8s ease-in-out infinite;
+  }
 }
 
 @keyframes hero-grid-drift {
@@ -188,5 +191,14 @@
   }
   50% {
     transform: scaleY(1);
+  }
+}
+@keyframes hero-kpi-fade {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.95;
   }
 }
