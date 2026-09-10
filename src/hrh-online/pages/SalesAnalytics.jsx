@@ -22,15 +22,23 @@ const OTHER_TOOLTIP_SHOWN = 8;
 // for the SPECIFIC bucket being hovered (using the otherDetail array
 // ContributionTrendPanel attaches to each data row via bucketArrayField),
 // not just the whole-period breakdown shown as a footnote under the chart.
+// Rows are re-sorted by THIS bucket's own value (largest first) rather than
+// the chart's fixed whole-period series order — a category that's #1 across
+// the whole window can easily be small (or zero) on any one day, so the
+// series order and a given day's actual ranking often disagree. A Total row
+// at the bottom sums every series for the bucket, so the full picture is
+// visible even though only the top items are listed above it.
 function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
   if (!active || !payload?.length) return null;
+  const sorted = [...payload].sort((a, b) => b.value - a.value);
+  const total = payload.reduce((s, p) => s + (p.value || 0), 0);
   return (
     <div
       className="rounded-md px-3 py-2 text-[12px] max-w-[280px]"
       style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}
     >
       <div className="font-semibold mb-1">{label}</div>
-      {payload.map((p) => {
+      {sorted.map((p) => {
         const otherDetail = p.dataKey === "Other" ? p.payload?.otherDetail || [] : null;
         return (
           <div key={p.dataKey} className="mb-1 last:mb-0">
@@ -57,6 +65,10 @@ function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
           </div>
         );
       })}
+      <div className="flex items-center justify-between gap-3 mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${hrh.navyBorder}` }}>
+        <span style={{ color: "#a3adba" }}>Total:</span>
+        <span className="font-semibold">{valueFormatter(total)}</span>
+      </div>
     </div>
   );
 }
