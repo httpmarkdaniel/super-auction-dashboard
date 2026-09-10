@@ -461,6 +461,86 @@ export default async function handler(req, res) {
         ? "Based on orders tracked by HMRPH's checkout system — TikTok/Shopee marketplace orders aren't tracked there, and are excluded rather than shown as unknown."
         : null;
 
+    // Voucher/Discount-Assisted Sales — cms.mart_cms_voucher_report, ONE ROW
+    // PER ORDER that used a voucher. This table has NO sales_channel column
+    // and — verified this session, same as every other cms.* table used on
+    // this page — carries only HMRPH Online orders for this store (360 rows
+    // total, order_number is genuinely unique, no dupes), so it is fixed to
+    // HMRPH Online regardless of the page's Channel filter, same convention
+    // as Executive Overview's Customer Segments panel. Windowed on
+    // order_created_at (this table has no transaction_date at all), the
+    // same lesson learned from the Cancellation Rate bug above. Cancelled
+    // orders (1 row total, ever) are excluded — not a real voucher-assisted
+    // sale.
+    //
+    // Distinct Customers is INTENTIONALLY a single whole-window number, not
+    // part of the bucketed trend: uniqExact per day does not sum into a
+    // correct per-week/month unique count (the same customer buying twice
+    // in one week would be double-counted), so it is computed once, exactly,
+    // over the full selected window instead of faked via addition.
+    const [voucherDailyRows, voucherCustomerRows] = await Promise.all([
+      (
+        await client.query({
+          query: `
+            SELECT
+              toString(toDate(order_created_at)) AS d,
+              count() AS orders,
+              sum(total_order_price) AS order_price,
+              sum(total_discount_price) AS discount_price
+            FROM cms.mart_cms_voucher_report
+            WHERE store_name = {store:String} AND order_status != 'Cancelled'
+              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+            GROUP BY d
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${current.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json(),
+      (
+        await client.query({
+          query: `
+            SELECT uniqExact(customer_name) AS distinct_customers
+            FROM cms.mart_cms_voucher_report
+            WHERE store_name = {store:String} AND order_status != 'Cancelled'
+              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${current.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json(),
+    ]);
+    const voucherByDate = new Map(voucherDailyRows.map((r) => [r.d, r]));
+    const voucherTrend = enumerateDatesISO(current.from, current.to).map((date) => {
+      const r = voucherByDate.get(date);
+      return {
+        date,
+        orders: toNum(r?.orders),
+        orderPrice: toNum(r?.order_price),
+        discountPrice: toNum(r?.discount_price),
+      };
+    });
+    const voucherTotalOrders = voucherTrend.reduce((s, r) => s + r.orders, 0);
+    const voucherTotalOrderPrice = voucherTrend.reduce((s, r) => s + r.orderPrice, 0);
+    const voucherTotalDiscountPrice = voucherTrend.reduce((s, r) => s + r.discountPrice, 0);
+    const voucherAssistedSales = {
+      totals: {
+        orders: voucherTotalOrders,
+        distinctCustomers: toNum(voucherCustomerRows[0]?.distinct_customers),
+        orderPrice: voucherTotalOrderPrice,
+        discountPrice: voucherTotalDiscountPrice,
+        aov: safeDivide(voucherTotalOrderPrice, voucherTotalOrders),
+      },
+      trend: voucherTrend,
+    };
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -475,6 +555,7 @@ export default async function handler(req, res) {
       subcategoryContribution,
       paymentType,
       fulfillmentMethod,
+      voucherAssistedSales,
     });
   } catch (err) {
     console.error("HRH Sales Analytics API error:", err);

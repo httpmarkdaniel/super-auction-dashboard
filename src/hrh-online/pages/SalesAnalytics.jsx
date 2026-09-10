@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import { BarComparisonChart, DonutChart } from "../components/Charts";
+import { KpiCard, KpiRow } from "../components/Kpi";
+import { BarComparisonChart, ComboBarLineChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows, bucketArrayField } from "../trendBucket";
@@ -131,6 +132,46 @@ function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucke
   );
 }
 
+// cms.mart_cms_voucher_report has no sales_channel column and — verified —
+// carries only HMRPH Online orders for this store, so this panel is fixed
+// to HMRPH Online regardless of the page's Channel filter (same convention
+// as Executive Overview's Customer Segments). Distinct Customers is a
+// whole-window number only (see api/hrh-sales-analytics.js's comment on why
+// it can't be correctly summed per bucket); Orders/Order Value/Discount
+// Value/AOV are shown both as whole-window KPIs and as a bucketable
+// Order-Value-vs-Discount-Value trend below.
+function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChange }) {
+  const totals = voucherAssistedSales?.totals;
+  const trendData = bucketRows(voucherAssistedSales?.trend, bucket, ["orders", "orderPrice", "discountPrice"]);
+  return (
+    <Panel
+      title="Voucher / Discount-Assisted Sales"
+      subtitle="HMRPH Online only — not affected by the Channel filter above"
+      action={<TrendBucketPills value={bucket} onChange={onBucketChange} />}
+      className="mb-4"
+    >
+      <KpiRow>
+        <KpiCard label="Orders" value={formatNum(totals?.orders)} />
+        <KpiCard label="Distinct Customers" value={formatNum(totals?.distinctCustomers)} />
+        <KpiCard label="Total Order Value" value={formatPeso(totals?.orderPrice)} />
+        <KpiCard label="Total Discount Value" value={formatPeso(totals?.discountPrice)} />
+        <KpiCard label="Average Order Value" value={formatPeso(totals?.aov)} />
+      </KpiRow>
+      <ComboBarLineChart
+        data={trendData}
+        xKey="dateLabel"
+        barKey="orderPrice"
+        barName="Order Value"
+        barColor="#3f79d1"
+        lineKey="discountPrice"
+        lineName="Discount Value"
+        lineColor={hrh.accent}
+        valueFormatter={formatCompactPeso}
+      />
+    </Panel>
+  );
+}
+
 // Real ClickHouse-backed Sales Analytics — see api/hrh-sales-analytics.js
 // for the queries (same locked GMV/NMV/Orders/Units/AOV contract as Product
 // Analytics/Executive Overview). Channel Comparison always shows all 3
@@ -144,6 +185,7 @@ export default function SalesAnalytics({ filters }) {
   const [error, setError] = useState(null);
   const [categoryBucket, setCategoryBucket] = useState("day");
   const [subcategoryBucket, setSubcategoryBucket] = useState("day");
+  const [voucherBucket, setVoucherBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
 
@@ -203,6 +245,8 @@ export default function SalesAnalytics({ filters }) {
             bucket={subcategoryBucket}
             onBucketChange={setSubcategoryBucket}
           />
+
+          <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}>

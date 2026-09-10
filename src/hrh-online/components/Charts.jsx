@@ -99,6 +99,26 @@ export function SalesTrendComboChart({ data, height = 260 }) {
   );
 }
 
+// Two same-unit series (both peso amounts, e.g. order value vs. discount
+// cost) on one shared axis — unlike SalesTrendComboChart's GMV/Orders pair,
+// these don't need separate y-axes since they're already the same unit.
+// `data`: [{ [xKey]: label, [barKey]: number, [lineKey]: number }].
+export function ComboBarLineChart({ data, xKey, barKey, barName, barColor, lineKey, lineName, lineColor, height = 260, valueFormatter = formatCompactPeso }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={hrh.border} vertical={false} />
+        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
+        <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar dataKey={barKey} name={barName} fill={barColor} radius={[2, 2, 0, 0]} maxBarSize={28} />
+        <Line type="monotone" dataKey={lineKey} name={lineName} stroke={lineColor} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 // Donut share breakdown with a centered total and a metric-list legend —
 // same `segments` shape ShareBar already uses ([{ label, value, color }]),
 // just a ring instead of a strip for panels that want the more prominent
