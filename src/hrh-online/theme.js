@@ -6,9 +6,13 @@ export const hrh = {
   navySoft: "#16202f",
   navyBorder: "#2b303a",
   navyAccentRow: "#22304f",
-  accent: "#d99a3d",
-  accentSoft: "#faf1df",
-  accentText: "#b07514",
+  // Same orange as the Auction dashboard's brand accent (src/theme.css's
+  // --series-8, light mode) — HRH Online has its own fixed palette (not the
+  // Auction side's light/dark toggle), but the two dashboards' orange
+  // should read as the same HMR brand color.
+  accent: "#eb6834",
+  accentSoft: "#fdece2",
+  accentText: "#b8481d",
   // HMR's brand blue — the third color in the white/orange/blue triad the
   // filter bar (and Sales Analytics' Order Value bar/area) sticks to.
   blue: "#3f79d1",
