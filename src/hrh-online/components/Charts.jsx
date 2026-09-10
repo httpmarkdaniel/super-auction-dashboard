@@ -146,14 +146,14 @@ export function StackedAreaChart({
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 8 : 0, bottom: xAxisLabel ? 20 : 0 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 18 : 0, bottom: xAxisLabel ? 22 : 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
         <XAxis
           dataKey={xKey}
           tick={{ fontSize: 11, fill: hrh.ink2 }}
           axisLine={{ stroke: hrh.border }}
           tickLine={false}
-          label={xAxisLabel ? { value: xAxisLabel, position: "insideBottom", offset: -14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
+          label={xAxisLabel ? { value: xAxisLabel, position: "bottom", offset: 14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
         />
         <YAxis
           tick={{ fontSize: 11, fill: hrh.ink2 }}
@@ -163,7 +163,7 @@ export function StackedAreaChart({
           width={64}
           label={
             yAxisLabel
-              ? { value: yAxisLabel, angle: -90, position: "insideLeft", offset: 10, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
+              ? { value: yAxisLabel, angle: -90, position: "left", offset: 8, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
               : undefined
           }
         />
@@ -250,14 +250,14 @@ export function BarComparisonChart({
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 8 : 0, bottom: xAxisLabel ? 20 : 0 }}>
+      <BarChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 18 : 0, bottom: xAxisLabel ? 22 : 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
         <XAxis
           dataKey={xKey}
           tick={{ fontSize: 11, fill: hrh.ink2 }}
           axisLine={{ stroke: hrh.border }}
           tickLine={false}
-          label={xAxisLabel ? { value: xAxisLabel, position: "insideBottom", offset: -14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
+          label={xAxisLabel ? { value: xAxisLabel, position: "bottom", offset: 14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
         />
         <YAxis
           tick={{ fontSize: 11, fill: hrh.ink2 }}
@@ -267,7 +267,7 @@ export function BarComparisonChart({
           width={64}
           label={
             yAxisLabel
-              ? { value: yAxisLabel, angle: -90, position: "insideLeft", offset: 10, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
+              ? { value: yAxisLabel, angle: -90, position: "left", offset: 8, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
               : undefined
           }
         />
