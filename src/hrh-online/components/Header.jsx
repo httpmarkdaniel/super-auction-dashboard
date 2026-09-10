@@ -20,7 +20,7 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
             Executive Commerce Dashboard
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>

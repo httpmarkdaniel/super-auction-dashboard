@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { RANGE_PRESETS, resolveDateRange } from "../../utils/dateRange";
 import { hrh } from "../theme";
 
+const FILTER_FONT = { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em" };
+
 // Same button+popover interaction as the Auction Dashboard's DateRangePicker
 // (src/components/Topbar.jsx) and the SAME shared ../../utils/dateRange.js
 // preset/comparison logic — not a parallel date-range implementation,
@@ -46,21 +48,21 @@ export default function DateRangePicker({ value, onChange }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 text-[13.5px] font-semibold px-4 h-10 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.03]"
+        className="flex items-center gap-2 text-[17px] px-5 h-11 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.03]"
         style={
           open
-            ? { background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.25)" }
-            : { background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
+            ? { ...FILTER_FONT, background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.25)" }
+            : { ...FILTER_FONT, background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
         }
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
         </svg>
         {current.label}
         <svg
-          width="11"
-          height="11"
+          width="12"
+          height="12"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -86,10 +88,10 @@ export default function DateRangePicker({ value, onChange }) {
                   onChange(p.key);
                   setOpen(false);
                 }}
-                className="w-full text-left px-3.5 py-1.5 text-[13.5px] transition-colors duration-150"
+                className="w-full text-left px-4 py-2 text-[16px] transition-colors duration-150"
                 style={{
+                  ...FILTER_FONT,
                   color: selected ? hrh.accentText : hrh.ink,
-                  fontWeight: selected ? 600 : 400,
                   background: selected ? hrh.accentSoft : "transparent",
                 }}
               >
@@ -127,8 +129,8 @@ export default function DateRangePicker({ value, onChange }) {
               type="button"
               onClick={applyCustom}
               disabled={!draftFrom || !draftTo}
-              className="w-full text-center text-[13.5px] font-semibold rounded-md px-2 py-1.5 disabled:opacity-40 transition-transform duration-150 hover:scale-[1.02]"
-              style={{ background: hrh.accent, color: "#ffffff" }}
+              className="w-full text-center text-[16px] rounded-md px-2 py-2 disabled:opacity-40 transition-transform duration-150 hover:scale-[1.02]"
+              style={{ ...FILTER_FONT, background: hrh.accent, color: "#ffffff" }}
             >
               Apply
             </button>

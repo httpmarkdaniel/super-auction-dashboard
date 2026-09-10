@@ -8,9 +8,11 @@ import { CHANNEL_OPTIONS } from "../mock/filterOptions";
 // blue triad: white for the inactive/neutral state, blue for "selected" —
 // orange is reserved for the Date Range control next to it, so the two
 // filters read as visually distinct at a glance.
+const FILTER_FONT = { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em" };
+
 export default function ChannelPills({ value, onChange }) {
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2.5">
       {CHANNEL_OPTIONS.map((option) => {
         const active = option === value;
         return (
@@ -18,11 +20,11 @@ export default function ChannelPills({ value, onChange }) {
             key={option}
             type="button"
             onClick={() => onChange(option)}
-            className="text-[13.5px] font-semibold px-4 h-10 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.04]"
+            className="text-[17px] px-5 h-11 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.04]"
             style={
               active
-                ? { background: hrh.blue, color: "#ffffff", border: `1px solid ${hrh.blue}`, boxShadow: "0 2px 10px rgba(63,121,209,0.4)" }
-                : { background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
+                ? { ...FILTER_FONT, background: hrh.blue, color: "#ffffff", border: `1px solid ${hrh.blue}`, boxShadow: "0 2px 10px rgba(63,121,209,0.4)" }
+                : { ...FILTER_FONT, background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
             }
           >
             {option}
