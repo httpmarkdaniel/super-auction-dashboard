@@ -66,6 +66,33 @@ function formatRateWithCount(rate, count) {
   return `${formatPct(rate)} (${formatNum(count)})`;
 }
 
+function maxBy(rows, key) {
+  return rows.reduce((best, r) => (r[key] !== null && r[key] !== undefined && (!best || r[key] > best[key]) ? r : best), null);
+}
+
+// Same channelComparison rows the table above already shows, just called
+// out as "which channel wins on what" — real signal the raw table doesn't
+// surface on its own (a reader has to eyeball 3 rows x 7 columns to spot
+// these), not a duplicate visualization of the same numbers.
+function ChannelHighlights({ channelComparison }) {
+  if (!channelComparison || channelComparison.length === 0) return null;
+  const topGmv = maxBy(channelComparison, "gmv");
+  const bestAov = maxBy(channelComparison, "aov");
+  const highestReturn = maxBy(channelComparison, "returnRate");
+  return (
+    <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
+        Channel Highlights
+      </div>
+      <KpiRow>
+        <KpiCard label="Top Channel by GMV" value={topGmv ? formatPeso(topGmv.gmv) : "—"} sub={topGmv?.channel} />
+        <KpiCard label="Best AOV" value={bestAov ? formatPeso(bestAov.aov) : "—"} sub={bestAov?.channel} />
+        <KpiCard label="Highest Return Rate" value={highestReturn ? formatPct(highestReturn.returnRate) : "—"} sub={highestReturn?.channel} />
+      </KpiRow>
+    </div>
+  );
+}
+
 const VOUCHER_TABLE_COLUMNS = [
   { key: "voucher", label: "Voucher", maxWidth: 260 },
   { key: "code", label: "Code" },
@@ -278,6 +305,7 @@ export default function SalesAnalytics({ filters }) {
             <div className="xl:col-span-2">
               <Panel title="Channel Comparison" className="h-full">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
+                <ChannelHighlights channelComparison={data.channelComparison} />
               </Panel>
             </div>
             <div className="flex flex-col gap-4 h-full">
