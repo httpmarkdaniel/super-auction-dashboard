@@ -274,28 +274,40 @@ export default function SalesAnalytics({ filters }) {
         <>
           <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4 items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
             <div className="xl:col-span-2">
               <Panel title="Channel Comparison">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
               </Panel>
             </div>
-            <div className="flex flex-col gap-4">
-              <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}>
-                <DonutChart
-                  segments={data.paymentType}
-                  size={100}
-                  centerValue={formatNum(data.paymentType.reduce((s, x) => s + x.value, 0))}
-                  centerLabel="Orders"
-                />
+            <div className="flex flex-col gap-4 h-full">
+              <Panel
+                title="Payment Type"
+                subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}
+                className="flex-1 flex flex-col"
+              >
+                <div className="flex-1 flex items-center">
+                  <DonutChart
+                    segments={data.paymentType}
+                    size={84}
+                    centerValue={formatNum(data.paymentType.reduce((s, x) => s + x.value, 0))}
+                    centerLabel="Orders"
+                  />
+                </div>
               </Panel>
-              <Panel title="Checkout / Fulfillment Method" subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}>
-                <DonutChart
-                  segments={data.fulfillmentMethod}
-                  size={100}
-                  centerValue={formatNum(data.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
-                  centerLabel="Orders"
-                />
+              <Panel
+                title="Checkout / Fulfillment Method"
+                subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}
+                className="flex-1 flex flex-col"
+              >
+                <div className="flex-1 flex items-center">
+                  <DonutChart
+                    segments={data.fulfillmentMethod}
+                    size={84}
+                    centerValue={formatNum(data.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
+                    centerLabel="Orders"
+                  />
+                </div>
                 <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
                   A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
                 </p>
