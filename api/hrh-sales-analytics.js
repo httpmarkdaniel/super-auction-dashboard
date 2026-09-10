@@ -160,32 +160,33 @@ export default async function handler(req, res) {
     // ever attributed to the HMRPH Online row below; TikTok/Shopee report
     // Cancellation Rate as null ("N/A"), never a fabricated 0%.
     //
-    // NOTE: for a very recent window (e.g. the current month), this can
-    // legitimately still read 0% — cancellations lag order placement by
-    // days/weeks as orders work through fulfillment, so a month that just
-    // started hasn't had time to accumulate any yet (verified against this
-    // store's month-by-month history: the then-current month always shows
-    // zero cancelled orders, rising over the following weeks). That is a
-    // real timing effect, not a data or query bug.
+    // Windowed on order_created_at, NOT transaction_date — verified every
+    // single 'Cancelled' row for this store has transaction_date = NULL
+    // (that field is only ever populated once a sale actually posts, which
+    // never happens for a cancelled order), so filtering on transaction_date
+    // silently dropped 100% of cancellations (this is what produced a
+    // fabricated 0% for the current month — a real bug, now fixed, not the
+    // "cancellations lag order placement" timing effect it looked like).
+    // Classification itself is intentionally UNSCOPED by store/date (matches
+    // the reference query exactly) — a customer's reorder used to reclassify
+    // a cancellation may itself fall outside this window or store, and
+    // narrowing the match search would wrongly turn real "Re-ordered" swaps
+    // into "True Cancellation"s. Only the FINAL count is filtered to this
+    // store + window, via a LEFT JOIN back onto every row (cancelled or not)
+    // of the base table, same shape as the reference query's virtual_table.
     const cancellationRows = await (
       await client.query({
         query: `
-          WITH base AS (
-            SELECT order_number, sku, email, contact_number, order_created_at, order_status
-            FROM cms.mart_cms_order_report_detailed
-            WHERE store_name = {store:String}
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-          ),
-          cancelled_items AS (
+          WITH cancelled_items AS (
             SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
               replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS cancelled_created_at
-            FROM base
+            FROM cms.mart_cms_order_report_detailed
             WHERE order_status = 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
           ),
           successful_items AS (
             SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
               replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS successful_created_at
-            FROM base
+            FROM cms.mart_cms_order_report_detailed
             WHERE order_status != 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
           ),
           item_matches AS (
@@ -199,18 +200,56 @@ export default async function handler(req, res) {
               AND s.item_key = c.item_key
               AND s.successful_created_at > c.cancelled_created_at
             GROUP BY c.order_number, c.item_key
+          ),
+          classification AS (
+            SELECT cancelled_order_number AS order_number, item_key,
+              multiIf(reorder_order_number IS NOT NULL, 'Re-ordered', 'True Cancellation') AS cancellation_type
+            FROM item_matches
           )
-          SELECT
-            multiIf(reorder_order_number IS NOT NULL, 'Re-ordered', 'True Cancellation') AS cancellation_type,
-            uniqExact(cancelled_order_number) AS orders
-          FROM item_matches
+          SELECT c.cancellation_type AS cancellation_type, uniqExact(b.order_number) AS orders
+          FROM cms.mart_cms_order_report_detailed b
+          LEFT JOIN classification c ON b.order_number = c.order_number AND b.sku = c.item_key
+          WHERE b.store_name = {store:String}
+            AND b.order_created_at >= {curFromDt:String} AND b.order_created_at < {curToExclusiveDt:String}
+            AND c.cancellation_type IS NOT NULL
           GROUP BY cancellation_type
         `,
-        query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
+        query_params: {
+          store: HRH_STORE,
+          curFromDt: `${current.from} 00:00:00`,
+          curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+        },
         format: "JSONEachRow",
       })
     ).json();
     const trueCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "True Cancellation")?.orders);
+
+    // Denominator for Cancellation Rate is intentionally this SAME table's
+    // total distinct order_number (not the mart_net_sales Orders count used
+    // for every other column) — cms.mart_cms_order_report_detailed tracks
+    // ALL order attempts (including ones that never became a completed
+    // sale), keyed on order_created_at, a genuinely different population
+    // from mart_net_sales' completed-sale, transaction_date-keyed Orders.
+    // Dividing the True Cancellation count by a differently-scoped
+    // denominator would produce an incoherent rate, not just an
+    // apples-to-oranges one.
+    const cmsTotalOrdersRows = await (
+      await client.query({
+        query: `
+          SELECT uniqExact(order_number) AS total
+          FROM cms.mart_cms_order_report_detailed
+          WHERE store_name = {store:String}
+            AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+        `,
+        query_params: {
+          store: HRH_STORE,
+          curFromDt: `${current.from} 00:00:00`,
+          curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+        },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const cmsTotalOrders = toNum(cmsTotalOrdersRows[0]?.total);
 
     const channelComparison = allChannels.map((ch) => {
       const r = channelRows.find((row) => row.ch === ch) || {};
@@ -228,8 +267,10 @@ export default async function handler(req, res) {
         aov: safeDivide(gmv, orders),
         // Only HMRPH Online is ever covered by the cms.mart_cms_order_report_detailed
         // cancellation classification (see comment above) — TikTok/Shopee
-        // always report null ("N/A"), never a fabricated 0%.
-        cancellationRate: ch === "HMRPH ONLINE" && orders > 0 ? (trueCancellations / orders) * 100 : null,
+        // always report null ("N/A"), never a fabricated 0%. Denominator is
+        // cmsTotalOrders (same table/population as the numerator), not the
+        // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
+        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
         returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
       };
     });
