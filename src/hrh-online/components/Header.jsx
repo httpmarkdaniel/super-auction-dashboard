@@ -30,7 +30,7 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
         <div className="order-3 w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>
-        <div className="mr-0 md:mr-6 lg:mr-12">
+        <div className="mr-0 md:mr-10 lg:mr-20">
           <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
         </div>
       </div>

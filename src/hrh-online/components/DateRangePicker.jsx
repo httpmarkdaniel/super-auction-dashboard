@@ -75,7 +75,7 @@ export default function DateRangePicker({ value, onChange }) {
 
       {open && (
         <div
-          className="absolute left-0 mt-1.5 w-64 rounded-md py-2 z-30"
+          className="absolute right-0 mt-1.5 w-64 rounded-md py-2 z-30"
           style={{ background: hrh.surface, border: `1px solid ${hrh.border}`, boxShadow: "0 4px 16px rgba(15,22,34,.12)" }}
         >
           {RANGE_PRESETS.map((p) => {
