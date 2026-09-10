@@ -7,6 +7,17 @@ const client = createClient({
   database: process.env.CLICKHOUSE_DATABASE,
 });
 
+// Underscore-prefixed (like _bidderIdentity.js, _bucketing.js, etc. on the
+// Auction side) so Vercel does NOT deploy this as its own Serverless
+// Function — the project's Hobby plan caps deployments at 12 functions and
+// was already exactly at that cap (Auction's 9 + HRH's 3 existing
+// endpoints), so a genuinely separate /api/hrh-traffic-analytics route
+// would have pushed it to 13 and been rejected at deploy time (verified:
+// it was). api/hrh-sales-analytics.js imports and dispatches to
+// `handleTrafficAnalytics` here when `?report=traffic` is present,
+// otherwise running its own original Sales Analytics logic completely
+// unchanged — see that file's top-of-handler branch.
+//
 // GA4 discovery (this session): HMR's GA4 exports are already ETL'd (via
 // Airbyte) into ClickHouse's `ga4` database — no separate Google service
 // account / Data API call needed, this file just reuses the SAME
@@ -139,7 +150,7 @@ function isoToYyyymmdd(iso) {
 
 const FUNNEL_EVENTS = ["view_item", "add_to_cart", "begin_checkout", "purchase"];
 
-export default async function handler(req, res) {
+export async function handleTrafficAnalytics(req, res) {
   try {
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");

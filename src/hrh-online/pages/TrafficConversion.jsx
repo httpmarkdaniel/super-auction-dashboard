@@ -60,8 +60,12 @@ export default function TrafficConversion({ filters }) {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams(params);
-      const res = await fetch(`/api/hrh-traffic-analytics?${qs.toString()}`, { signal });
+      // Co-located under hrh-sales-analytics.js (report=traffic dispatches to
+      // a completely separate handler) — the Vercel project's Hobby plan
+      // caps deployments at 12 Serverless Functions and was already at that
+      // cap, so this couldn't be its own /api/hrh-traffic-analytics route.
+      const qs = new URLSearchParams({ ...params, report: "traffic" });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);

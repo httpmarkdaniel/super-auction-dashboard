@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { handleTrafficAnalytics } from "./_hrh-traffic-analytics.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -177,7 +178,16 @@ function buildTopSeriesTrend(rows, from, to, topN) {
   return { series, data, otherBreakdown, otherMoreCount };
 }
 
+// `?report=traffic` dispatches to Traffic & Conversion's completely
+// separate handler (api/_hrh-traffic-analytics.js) BEFORE any of this
+// file's own Sales Analytics logic runs — co-located here only because the
+// Vercel project's Hobby plan caps deployments at 12 Serverless Functions
+// and was already exactly at that cap, not because the two reports are
+// related. Every request without that param (i.e. every real Sales
+// Analytics page load) falls through to the original, completely
+// unmodified logic below.
 export default async function handler(req, res) {
+  if (req.query.report === "traffic") return handleTrafficAnalytics(req, res);
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
