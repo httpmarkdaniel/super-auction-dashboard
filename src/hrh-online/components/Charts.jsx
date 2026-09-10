@@ -130,15 +130,43 @@ export function ComboBarLineChart({ data, xKey, barKey, barName, barColor, lineK
 // `categories`: [{ key, name, color }]. `tooltipContent` lets a caller
 // override the default per-series ChartTooltip (e.g. SalesAnalytics.jsx's
 // VoucherTrendTooltip, which derives AOV from the underlying data row
-// instead of showing raw series values).
-export function StackedAreaChart({ data, categories, xKey = "label", height = 260, valueFormatter = formatCompactPeso, tooltipContent, stacked = false }) {
+// instead of showing raw series values). `xAxisLabel`/`yAxisLabel` add a
+// titled axis (extra margin is added automatically so the title has room).
+export function StackedAreaChart({
+  data,
+  categories,
+  xKey = "label",
+  height = 260,
+  valueFormatter = formatCompactPeso,
+  tooltipContent,
+  stacked = false,
+  xAxisLabel,
+  yAxisLabel,
+}) {
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 8 : 0, bottom: xAxisLabel ? 20 : 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
-        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
-        <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
+        <XAxis
+          dataKey={xKey}
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={{ stroke: hrh.border }}
+          tickLine={false}
+          label={xAxisLabel ? { value: xAxisLabel, position: "insideBottom", offset: -14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
+        />
+        <YAxis
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={valueFormatter}
+          width={64}
+          label={
+            yAxisLabel
+              ? { value: yAxisLabel, angle: -90, position: "insideLeft", offset: 10, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
+              : undefined
+          }
+        />
         <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         {categories.map((c, i) => (

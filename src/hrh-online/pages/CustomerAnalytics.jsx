@@ -2,9 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import HorizontalBarList from "../components/HorizontalBarList";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { ComboBarLineChart, DonutChart } from "../components/Charts";
+import { ComboBarLineChart, DonutChart, StackedAreaChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
 import { hrh } from "../theme";
@@ -92,8 +91,8 @@ export default function CustomerAnalytics({ filters }) {
   const newVsReturningSegments =
     data?.newVsReturning.map((s) => ({ label: s.segment, value: s.count, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
   const valueSegments = data?.valueSegments.map((s) => ({ label: s.segment, value: s.count })) || [];
-  const purchaseFrequencyRows = data?.purchaseFrequency.map((r) => ({ label: r.bucket, value: r.count })) || [];
-  const spendDistributionRows = data?.spendDistribution.map((r) => ({ label: r.bucket, value: r.count })) || [];
+  const purchaseFrequencyRows = data?.purchaseFrequency.map((r) => ({ label: r.bucket, customers: r.count })) || [];
+  const spendDistributionRows = data?.spendDistribution.map((r) => ({ label: r.bucket, customers: r.count })) || [];
   const totalNewVsReturning = newVsReturningSegments.reduce((s, x) => s + x.value, 0);
 
   return (
@@ -155,10 +154,24 @@ export default function CustomerAnalytics({ filters }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Panel title="Purchase Frequency">
-              <HorizontalBarList rows={purchaseFrequencyRows} />
+              <StackedAreaChart
+                data={purchaseFrequencyRows}
+                xKey="label"
+                categories={[{ key: "customers", name: "Customers", color: hrh.blue }]}
+                valueFormatter={formatNum}
+                xAxisLabel="Orders per Customer"
+                yAxisLabel="Customers"
+              />
             </Panel>
             <Panel title="Customer Spend Distribution">
-              <HorizontalBarList rows={spendDistributionRows} />
+              <StackedAreaChart
+                data={spendDistributionRows}
+                xKey="label"
+                categories={[{ key: "customers", name: "Customers", color: hrh.accent }]}
+                valueFormatter={formatNum}
+                xAxisLabel="Spend Range"
+                yAxisLabel="Customers"
+              />
             </Panel>
           </div>
 
