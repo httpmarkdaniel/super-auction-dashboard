@@ -19,6 +19,35 @@ import {
 import { hrh } from "../theme";
 import { formatCompactPeso } from "../format";
 
+// Plain-DOM axis titles, laid out entirely outside the chart's SVG — avoids
+// recharts' in-SVG axis `label` prop, which shares drawing space with tick
+// text/bars and overlaps them no matter how margins/offsets are tuned.
+// yAxisLabel gets its own fixed-width column to the chart's left; xAxisLabel
+// gets its own row below it. Neither can ever collide with chart content
+// since they're separate boxes in normal document flow.
+function ChartWithAxisTitles({ xAxisLabel, yAxisLabel, children }) {
+  if (!xAxisLabel && !yAxisLabel) return children;
+  return (
+    <div className="flex items-stretch">
+      {yAxisLabel && (
+        <div className="shrink-0 flex items-center justify-center overflow-visible" style={{ width: 18 }}>
+          <span className="whitespace-nowrap text-[11px]" style={{ color: hrh.ink2, transform: "rotate(-90deg)" }}>
+            {yAxisLabel}
+          </span>
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        {children}
+        {xAxisLabel && (
+          <div className="text-center text-[11px] mt-1" style={{ color: hrh.ink2 }}>
+            {xAxisLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ChartTooltip({ active, payload, label, valueFormatter }) {
   if (!active || !payload?.length) return null;
   return (
@@ -145,44 +174,29 @@ export function StackedAreaChart({
 }) {
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 18 : 0, bottom: xAxisLabel ? 22 : 0 }}>
-        <CartesianGrid stroke={hrh.border} vertical={false} />
-        <XAxis
-          dataKey={xKey}
-          tick={{ fontSize: 11, fill: hrh.ink2 }}
-          axisLine={{ stroke: hrh.border }}
-          tickLine={false}
-          label={xAxisLabel ? { value: xAxisLabel, position: "bottom", offset: 14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: hrh.ink2 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={valueFormatter}
-          width={64}
-          label={
-            yAxisLabel
-              ? { value: yAxisLabel, angle: -90, position: "left", offset: 8, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
-              : undefined
-          }
-        />
-        <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        {categories.map((c, i) => (
-          <Area
-            key={c.key}
-            type="monotone"
-            dataKey={c.key}
-            name={c.name}
-            stackId={stacked ? "1" : undefined}
-            stroke={c.color || hrh.series[i % hrh.series.length]}
-            fill={c.color || hrh.series[i % hrh.series.length]}
-            fillOpacity={0.3}
-          />
-        ))}
-      </AreaChart>
-    </ResponsiveContainer>
+    <ChartWithAxisTitles xAxisLabel={xAxisLabel} yAxisLabel={yAxisLabel}>
+      <ResponsiveContainer width="100%" height={height}>
+        <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={hrh.border} vertical={false} />
+          <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+          <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
+          <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {categories.map((c, i) => (
+            <Area
+              key={c.key}
+              type="monotone"
+              dataKey={c.key}
+              name={c.name}
+              stackId={stacked ? "1" : undefined}
+              stroke={c.color || hrh.series[i % hrh.series.length]}
+              fill={c.color || hrh.series[i % hrh.series.length]}
+              fillOpacity={0.3}
+            />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </ChartWithAxisTitles>
   );
 }
 
@@ -249,34 +263,19 @@ export function BarComparisonChart({
 }) {
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} margin={{ top: 8, right: 12, left: yAxisLabel ? 18 : 0, bottom: xAxisLabel ? 22 : 0 }}>
-        <CartesianGrid stroke={hrh.border} vertical={false} />
-        <XAxis
-          dataKey={xKey}
-          tick={{ fontSize: 11, fill: hrh.ink2 }}
-          axisLine={{ stroke: hrh.border }}
-          tickLine={false}
-          label={xAxisLabel ? { value: xAxisLabel, position: "bottom", offset: 14, fontSize: 11.5, fill: hrh.ink2 } : undefined}
-        />
-        <YAxis
-          tick={{ fontSize: 11, fill: hrh.ink2 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={valueFormatter}
-          width={64}
-          label={
-            yAxisLabel
-              ? { value: yAxisLabel, angle: -90, position: "left", offset: 8, style: { textAnchor: "middle" }, fontSize: 11.5, fill: hrh.ink2 }
-              : undefined
-          }
-        />
-        <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        {series.map((s, i) => (
-          <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color || hrh.series[i % hrh.series.length]} radius={[2, 2, 0, 0]} maxBarSize={36} />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
+    <ChartWithAxisTitles xAxisLabel={xAxisLabel} yAxisLabel={yAxisLabel}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={hrh.border} vertical={false} />
+          <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+          <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
+          <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {series.map((s, i) => (
+            <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color || hrh.series[i % hrh.series.length]} radius={[2, 2, 0, 0]} maxBarSize={36} />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartWithAxisTitles>
   );
 }
