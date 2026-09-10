@@ -11,7 +11,7 @@ import ChannelPills from "./ChannelPills";
 export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange }) {
   return (
     <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
-      <div className="px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div className="px-5 md:px-6 py-3.5 grid grid-cols-1 md:grid-cols-3 items-center gap-3">
         <div>
           <h1 className="text-[19px] font-bold" style={{ color: hrh.ink }}>
             HRH Online
@@ -20,10 +20,11 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
             Executive Commerce Dashboard
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center justify-center gap-4">
           <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>
+        <div />
       </div>
     </div>
   );
