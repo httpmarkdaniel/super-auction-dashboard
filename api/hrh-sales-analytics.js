@@ -101,6 +101,53 @@ function toTopSegments(rows, labelKey, valueKey, topN, seriesColors, otherColor)
 const SERIES_COLORS = ["#22304f", "#d99a3d", "#1baf7a", "#4a3aa7", "#e34948", "#2f8fd6"];
 const OTHER_COLOR = "#94a0ae";
 
+function enumerateDatesISO(from, to) {
+  const dates = [];
+  let cur = from;
+  while (cur <= to) {
+    dates.push(cur);
+    cur = addDaysISO(cur, 1);
+  }
+  return dates;
+}
+
+// Builds a grouped-bar-chart-ready { series, data } shape from raw
+// { d, label, gmv } rows: picks the top N labels by total window GMV as
+// their own series (color-assigned), collapses every remaining label into
+// one "Other" series (so a long tail of hundreds of categories/subcategories
+// doesn't produce hundreds of bars), then zero-fills every day in the
+// window for every series key — same zero-fill convention as
+// api/hrh-executive-overview.js's Sales Trend, so a day with no sales in a
+// given category doesn't create a gap.
+function buildTopSeriesTrend(rows, from, to, topN) {
+  const totalsByLabel = new Map();
+  for (const r of rows) totalsByLabel.set(r.label, (totalsByLabel.get(r.label) || 0) + toNum(r.gmv));
+  const sortedLabels = Array.from(totalsByLabel.entries()).sort((a, b) => b[1] - a[1]);
+  const topLabels = sortedLabels.slice(0, topN).map(([label]) => label);
+  const hasOther = sortedLabels.length > topN;
+
+  const labelToKey = new Map(topLabels.map((label) => [label, label]));
+  const series = topLabels.map((label, i) => ({ key: label, name: label, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
+  if (hasOther) series.push({ key: "Other", name: "Other", color: OTHER_COLOR });
+
+  const byDate = new Map();
+  for (const r of rows) {
+    const key = labelToKey.get(r.label) || "Other";
+    const bucket = byDate.get(r.d) || {};
+    bucket[key] = (bucket[key] || 0) + toNum(r.gmv);
+    byDate.set(r.d, bucket);
+  }
+  const seriesKeys = series.map((s) => s.key);
+  const data = enumerateDatesISO(from, to).map((date) => {
+    const bucket = byDate.get(date) || {};
+    const out = { date };
+    for (const key of seriesKeys) out[key] = bucket[key] || 0;
+    return out;
+  });
+
+  return { series, data };
+}
+
 export default async function handler(req, res) {
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
@@ -275,23 +322,26 @@ export default async function handler(req, res) {
       };
     });
 
-    // Category / Department Contribution — GMV share for the CURRENT
-    // window and the page's selected channel filter (unlike the table
-    // above, these two respect it — they're a single distribution, not a
-    // channel-by-channel comparison). category_name/department_name are
-    // 100% populated on this store's population (verified), so every row
-    // gets a real bucket, never an "Unknown" catch-all.
-    const [categoryRows, departmentRows] = await Promise.all([
+    // Category / Subcategory Contribution — GMV per day, per category (or
+    // sub_category_name), for the CURRENT window and the page's selected
+    // channel filter (unlike the table above, these two respect it — each
+    // is a single distribution, not a channel-by-channel comparison).
+    // category_name/sub_category_name are 100% populated on this store's
+    // population (verified: sub_category_name has 1,087 distinct values
+    // YTD), so every row gets a real bucket, never an "Unknown" catch-all.
+    // Rendered as a grouped bar chart bucketable by Day/Week/Month client-
+    // side (same bucketRows/TrendBucketPills pattern as Executive
+    // Overview's Sales Trend) rather than a single-period share, so this
+    // returns a full daily series per top category, not one aggregate.
+    const [categoryRows, subcategoryRows] = await Promise.all([
       (
         await client.query({
           query: `
-            SELECT category_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            SELECT transaction_date AS d, category_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
               AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0
-            GROUP BY category_name
-            HAVING gmv > 0
-            ORDER BY gmv DESC
+            GROUP BY transaction_date, category_name
           `,
           query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
@@ -300,21 +350,19 @@ export default async function handler(req, res) {
       (
         await client.query({
           query: `
-            SELECT department_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            SELECT transaction_date AS d, sub_category_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
               AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0
-            GROUP BY department_name
-            HAVING gmv > 0
-            ORDER BY gmv DESC
+            GROUP BY transaction_date, sub_category_name
           `,
           query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
       ).json(),
     ]);
-    const categoryContribution = toTopSegments(categoryRows, "label", "gmv", 6, SERIES_COLORS, OTHER_COLOR);
-    const departmentContribution = toTopSegments(departmentRows, "label", "gmv", 6, SERIES_COLORS, OTHER_COLOR);
+    const categoryContribution = buildTopSeriesTrend(categoryRows, current.from, current.to, 6);
+    const subcategoryContribution = buildTopSeriesTrend(subcategoryRows, current.from, current.to, 6);
 
     // Payment Type / Checkout-Fulfillment Method — same canonical-population
     // + LEFT JOIN pattern as Cancellation Rate above (xv3.mart_xv3_order_report,
@@ -396,7 +444,7 @@ export default async function handler(req, res) {
       },
       channelComparison,
       categoryContribution,
-      departmentContribution,
+      subcategoryContribution,
       paymentType,
       fulfillmentMethod,
     });

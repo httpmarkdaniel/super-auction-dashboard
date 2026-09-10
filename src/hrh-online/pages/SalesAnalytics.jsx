@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ShareBar from "../components/ShareBar";
+import { BarComparisonChart, DonutChart } from "../components/Charts";
+import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { formatPeso, formatPct, formatNum } from "../format";
+import { bucketRows } from "../trendBucket";
+import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 
 const CHANNEL_TABLE_COLUMNS = [
   { key: "channel", label: "Channel" },
@@ -29,17 +31,38 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
+// A top-N-by-GMV + "Other" { series, data } contribution trend (see
+// api/hrh-sales-analytics.js's buildTopSeriesTrend) rendered as a grouped
+// bar chart, re-bucketable Day/Week/Month client-side — same pattern as
+// Executive Overview's Sales Trend, just with a dynamic per-category series
+// list instead of a fixed GMV/Orders pair.
+function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucketChange }) {
+  const series = contribution?.series || [];
+  const data = bucketRows(
+    contribution?.data,
+    bucket,
+    series.map((s) => s.key),
+  );
+  return (
+    <Panel title={title} subtitle={subtitle} action={<TrendBucketPills value={bucket} onChange={onBucketChange} />} className="mb-4">
+      <BarComparisonChart data={data} series={series} xKey="dateLabel" valueFormatter={formatCompactPeso} />
+    </Panel>
+  );
+}
+
 // Real ClickHouse-backed Sales Analytics — see api/hrh-sales-analytics.js
 // for the queries (same locked GMV/NMV/Orders/Units/AOV contract as Product
 // Analytics/Executive Overview). Channel Comparison always shows all 3
 // channels (it IS the channel breakdown, so the filter would just hide
-// rows); the 4 contribution/breakdown panels below it respect the page's
-// Channel + Date Range filter like everywhere else on the dashboard.
+// rows); the panels below it respect the page's Channel + Date Range filter
+// like everywhere else on the dashboard.
 export default function SalesAnalytics({ filters }) {
   const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [categoryBucket, setCategoryBucket] = useState("day");
+  const [subcategoryBucket, setSubcategoryBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
 
@@ -84,21 +107,36 @@ export default function SalesAnalytics({ filters }) {
             <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
           </Panel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Panel title="Category Contribution" subtitle="GMV share for the selected period">
-              <ShareBar segments={data.categoryContribution} />
-            </Panel>
-            <Panel title="Department Contribution" subtitle="GMV share for the selected period">
-              <ShareBar segments={data.departmentContribution} />
-            </Panel>
-          </div>
+          <ContributionTrendPanel
+            title="Category Contribution"
+            subtitle="Top categories by GMV, bucketed by day/week/month"
+            contribution={data.categoryContribution}
+            bucket={categoryBucket}
+            onBucketChange={setCategoryBucket}
+          />
+
+          <ContributionTrendPanel
+            title="Subcategory Contribution"
+            subtitle="Top subcategories by GMV, bucketed by day/week/month"
+            contribution={data.subcategoryContribution}
+            bucket={subcategoryBucket}
+            onBucketChange={setSubcategoryBucket}
+          />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}>
-              <ShareBar segments={data.paymentType} />
+              <DonutChart
+                segments={data.paymentType}
+                centerValue={formatNum(data.paymentType.reduce((s, x) => s + x.value, 0))}
+                centerLabel="Orders"
+              />
             </Panel>
             <Panel title="Checkout / Fulfillment Method" subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}>
-              <ShareBar segments={data.fulfillmentMethod} />
+              <DonutChart
+                segments={data.fulfillmentMethod}
+                centerValue={formatNum(data.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
+                centerLabel="Orders"
+              />
               <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
                 A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
               </p>
