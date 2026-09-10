@@ -462,7 +462,12 @@ export async function handleCustomerAnalytics(req, res) {
             trim(replaceRegexpOne(
               arrayElement(splitByChar(',', o.address), length(splitByChar(',', o.address))),
               '\\\\s*[0-9]+\\\\s*$', ''
-            )) AS province_candidate
+            )) AS province_candidate,
+            if(
+              length(splitByChar(',', o.address)) >= 2,
+              trim(arrayElement(splitByChar(',', o.address), length(splitByChar(',', o.address)) - 1)),
+              ''
+            ) AS city_candidate
           FROM hrh_invoices h
           INNER JOIN order_address o ON h.invoice_id = o.invoice_id
         `,
@@ -474,20 +479,63 @@ export async function handleCustomerAnalytics(req, res) {
     for (const r of provinceInvoiceRows) {
       const existing = latestCandidateByCustomer.get(r.customer_id);
       if (!existing || r.transaction_date > existing.date) {
-        latestCandidateByCustomer.set(r.customer_id, { date: r.transaction_date, candidate: r.province_candidate });
+        latestCandidateByCustomer.set(r.customer_id, {
+          date: r.transaction_date,
+          candidate: r.province_candidate,
+          cityCandidate: r.city_candidate,
+        });
       }
     }
+    // Title-cases the extracted city text for display. Splits on spaces
+    // rather than using a \b-based regex — \b is ASCII-only, so it treats
+    // accented letters (Parañaque, Biñan) as non-word characters and fires
+    // spurious extra boundaries around them (e.g. "ParaÑAque").
+    function titleCase(s) {
+      return s
+        .toLowerCase()
+        .split(" ")
+        .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+        .join(" ");
+    }
+    // Merges the two common ways the same city shows up in checkout
+    // addresses ("City of Parañaque" vs official-style prefix, "Taguig
+    // City" vs common-style suffix, "Cebu City (Capital)" vs a trailing
+    // capital-designation note) down to one canonical key, so the same
+    // real city doesn't fragment into 2-3 separate entries.
+    function canonicalizeCity(raw) {
+      return raw
+        .trim()
+        .toUpperCase()
+        .replace(/^CITY OF\s+/, "")
+        .replace(/\s+CITY$/, "")
+        .replace(/\s*\(CAPITAL\)\s*$/, "")
+        .trim();
+    }
     const provinceCounts = new Map();
+    const cityCountsByProvince = new Map(); // province -> Map(canonicalCity -> { city, count })
     let matchedCustomers = 0;
-    for (const { candidate } of latestCandidateByCustomer.values()) {
+    for (const { candidate, cityCandidate } of latestCandidateByCustomer.values()) {
       const province = normalizeProvince(candidate);
-      if (province) {
-        provinceCounts.set(province, (provinceCounts.get(province) || 0) + 1);
-        matchedCustomers += 1;
+      if (!province) continue;
+      provinceCounts.set(province, (provinceCounts.get(province) || 0) + 1);
+      matchedCustomers += 1;
+      const cityKey = canonicalizeCity(cityCandidate || "");
+      if (cityKey) {
+        if (!cityCountsByProvince.has(province)) cityCountsByProvince.set(province, new Map());
+        const cmap = cityCountsByProvince.get(province);
+        const existing = cmap.get(cityKey);
+        if (existing) existing.count += 1;
+        else cmap.set(cityKey, { city: titleCase(cityKey), count: 1 });
       }
     }
     const customersByProvince = [...provinceCounts.entries()]
-      .map(([province, customers]) => ({ province, customers }))
+      .map(([province, customers]) => ({
+        province,
+        customers,
+        cities: [...(cityCountsByProvince.get(province)?.values() || [])]
+          .map(({ city, count }) => ({ city, customers: count }))
+          .sort((a, b) => b.customers - a.customers),
+      }))
       .sort((a, b) => b.customers - a.customers);
 
     const hmrphOnlineTotalRows = await (

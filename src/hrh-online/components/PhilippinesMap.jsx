@@ -85,26 +85,40 @@ function colorFor(count, maxCount) {
   return `rgb(${mix.join(",")})`;
 }
 
-// `data`: [{ province, customers }]. Provinces not present get 0/gray.
-export default function PhilippinesMap({ data, height = 380 }) {
-  const [hovered, setHovered] = useState(null);
+// `data`: [{ province, customers, cities? }]. Provinces not present get
+// 0/gray. Hover state is reported up via `onHoverChange(provinceName |
+// null)` rather than rendered here — the caller shows a larger detail
+// panel right beside the map instead of a small floating tooltip.
+export default function PhilippinesMap({ data, onHoverChange, height = 380 }) {
+  const [hoveredName, setHoveredName] = useState(null);
   const countByProvince = useMemo(() => new Map(data.map((d) => [d.province, d.customers])), [data]);
   const maxCount = useMemo(() => Math.max(0, ...data.map((d) => d.customers)), [data]);
 
+  const handleEnter = (name) => {
+    setHoveredName(name);
+    onHoverChange?.(name);
+  };
+  const handleLeave = (name) => {
+    if (hoveredName !== name) return;
+    setHoveredName(null);
+    onHoverChange?.(null);
+  };
+
   return (
-    <div className="relative" style={{ height }}>
+    <div style={{ height }}>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
         {PROVINCE_PATHS.map((p) => {
           const count = countByProvince.get(p.name) || 0;
+          const isHovered = hoveredName === p.name;
           return (
             <path
               key={p.name}
               d={p.d}
               fill={colorFor(count, maxCount)}
-              stroke={hrh.surface}
-              strokeWidth={0.5}
-              onMouseEnter={() => setHovered({ name: p.name, count })}
-              onMouseLeave={() => setHovered((h) => (h?.name === p.name ? null : h))}
+              stroke={isHovered ? hrh.blueText : hrh.surface}
+              strokeWidth={isHovered ? 1.4 : 0.5}
+              onMouseEnter={() => handleEnter(p.name)}
+              onMouseLeave={() => handleLeave(p.name)}
             >
               <title>
                 {p.name}: {count} {count === 1 ? "customer" : "customers"}
@@ -113,17 +127,6 @@ export default function PhilippinesMap({ data, height = 380 }) {
           );
         })}
       </svg>
-      {hovered && (
-        <div
-          className="absolute top-2 left-2 rounded-md px-2.5 py-1.5 text-[11.5px] pointer-events-none"
-          style={{ background: hrh.navy, color: "#fff" }}
-        >
-          <div className="font-semibold">{hovered.name}</div>
-          <div style={{ color: "#a3adba" }}>
-            {hovered.count} {hovered.count === 1 ? "customer" : "customers"}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { ComboBarLineChart, DonutChart, BarComparisonChart } from "../components/Charts";
+import { ComboBarLineChart, BarComparisonChart } from "../components/Charts";
 import PhilippinesMap from "../components/PhilippinesMap";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
@@ -11,8 +11,6 @@ import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum } from "../format";
 
 const TREND_LABEL_FORMATTER = { day: formatShortDateLabel, week: formatWeekRangeLabel, month: formatMonthLabel };
-
-const SEGMENT_COLOR = { New: hrh.blue, Returning: hrh.accent };
 
 // The 5 KPI scorecards, each paired with the formatter its value/previous
 // need — same shape/order as data.kpis from api/_hrh-customer-analytics.js.
@@ -94,6 +92,7 @@ export default function CustomerAnalytics({ filters }) {
   const [error, setError] = useState(null);
   const [trendBucket, setTrendBucket] = useState("day");
   const [compareTo, setCompareTo] = useState("week");
+  const [hoveredProvince, setHoveredProvince] = useState(null);
 
   const ready = isDateRangeReady(dateRange);
 
@@ -129,14 +128,12 @@ export default function CustomerAnalytics({ filters }) {
       newCustomers: r.newCustomers,
       returningCustomers: r.returningCustomers,
     })) || [];
-  const newVsReturningSegments =
-    data?.newVsReturning.map((s) => ({ label: s.segment, value: s.count, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
-  const valueSegments = data?.valueSegments.map((s) => ({ label: s.segment, value: s.count })) || [];
   const purchaseFrequencyRows = data?.purchaseFrequency.map((r) => ({ label: r.bucket, customers: r.count })) || [];
   const spendDistributionRows = data?.spendDistribution.map((r) => ({ label: r.bucket, customers: r.count })) || [];
-  const totalNewVsReturning = newVsReturningSegments.reduce((s, x) => s + x.value, 0);
   const customersByProvince = data?.customersByProvince || [];
   const totalMappedCustomers = customersByProvince.reduce((s, p) => s + p.customers, 0);
+  const activeProvinceName = hoveredProvince || customersByProvince[0]?.province || null;
+  const activeProvince = customersByProvince.find((p) => p.province === activeProvinceName) || null;
 
   return (
     <div>
@@ -204,23 +201,66 @@ export default function CustomerAnalytics({ filters }) {
             />
           </Panel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Panel title="New vs Returning">
-              <DonutChart segments={newVsReturningSegments} centerValue={formatNum(totalNewVsReturning)} centerLabel="Customers" />
-            </Panel>
-            <Panel title="Customer Value Segments">
-              <div className="space-y-2.5">
-                {valueSegments.map((s) => (
-                  <div key={s.label} className="flex items-center justify-between text-[13px]" style={{ color: hrh.ink2 }}>
-                    <span>{s.label}</span>
-                    <span className="font-semibold" style={{ color: hrh.ink }}>
-                      {formatNum(s.value)} customers
-                    </span>
-                  </div>
-                ))}
+          <Panel title="Customers by Province" subtitle={data.meta?.provinceScopeNote} className="mb-4">
+            {customersByProvince.length === 0 ? (
+              <div className="text-[13px] py-6 text-center" style={{ color: hrh.muted }}>
+                No customers with a matched province in this period.
               </div>
-            </Panel>
-          </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-4">
+                <PhilippinesMap data={customersByProvince} onHoverChange={setHoveredProvince} />
+                <div className="space-y-3">
+                  {activeProvince && (
+                    <div className="rounded-md p-3" style={{ background: hrh.blueSoft, border: `1px solid ${hrh.border}` }}>
+                      <div className="text-[14px] font-bold leading-tight" style={{ color: hrh.ink }}>
+                        {activeProvince.province}
+                      </div>
+                      <div className="font-display text-[30px] leading-none mt-1" style={{ color: hrh.blueText }}>
+                        {formatNum(activeProvince.customers)}
+                      </div>
+                      <div className="text-[11px]" style={{ color: hrh.muted }}>
+                        {activeProvince.customers === 1 ? "customer" : "customers"}
+                      </div>
+                      {activeProvince.cities.length > 0 && (
+                        <div className="mt-2.5 pt-2 space-y-1" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.04em] mb-1" style={{ color: hrh.blueText }}>
+                            Top Cities
+                          </div>
+                          {activeProvince.cities.slice(0, 6).map((c) => (
+                            <div key={c.city} className="flex items-center justify-between text-[12px]" style={{ color: hrh.ink2 }}>
+                              <span className="truncate pr-2">{c.city}</span>
+                              <span className="font-semibold shrink-0" style={{ color: hrh.ink }}>
+                                {formatNum(c.customers)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="space-y-1.5 max-h-[180px] overflow-y-auto">
+                    {customersByProvince.map((p) => (
+                      <div key={p.province} className="flex items-center justify-between text-[12px]" style={{ color: hrh.ink2 }}>
+                        <span className="truncate pr-2">{p.province}</span>
+                        <span className="font-semibold shrink-0" style={{ color: hrh.ink }}>
+                          {formatNum(p.customers)}
+                        </span>
+                      </div>
+                    ))}
+                    <div
+                      className="pt-2 mt-1.5 text-[11.5px] flex items-center justify-between"
+                      style={{ borderTop: `1px solid ${hrh.border}`, color: hrh.muted }}
+                    >
+                      <span>Total mapped</span>
+                      <span className="font-semibold" style={{ color: hrh.ink }}>
+                        {formatNum(totalMappedCustomers)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Panel title="Purchase Frequency">
@@ -244,34 +284,6 @@ export default function CustomerAnalytics({ filters }) {
               />
             </Panel>
           </div>
-
-          <Panel title="Customers by Province" subtitle={data.meta?.provinceScopeNote} className="mb-4">
-            {customersByProvince.length === 0 ? (
-              <div className="text-[13px] py-6 text-center" style={{ color: hrh.muted }}>
-                No customers with a matched province in this period.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4">
-                <PhilippinesMap data={customersByProvince} />
-                <div className="space-y-1.5 max-h-[380px] overflow-y-auto">
-                  {customersByProvince.map((p) => (
-                    <div key={p.province} className="flex items-center justify-between text-[12.5px]" style={{ color: hrh.ink2 }}>
-                      <span className="truncate pr-2">{p.province}</span>
-                      <span className="font-semibold shrink-0" style={{ color: hrh.ink }}>
-                        {formatNum(p.customers)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="pt-2 mt-1.5 text-[11.5px] flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}`, color: hrh.muted }}>
-                    <span>Total mapped</span>
-                    <span className="font-semibold" style={{ color: hrh.ink }}>
-                      {formatNum(totalMappedCustomers)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Panel>
 
           <Panel title="Top Customers" subtitle="Ranked by GMV for the selected period">
             <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />
