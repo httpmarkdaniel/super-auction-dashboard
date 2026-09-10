@@ -350,6 +350,45 @@ export default async function handler(req, res) {
       };
     });
 
+    // Top Sales Drivers — per-product GMV/Units for the current window,
+    // computed for ALL 3 real channels at once (like channelMix in
+    // api/hrh-executive-overview.js) so the page's own channel dropdown for
+    // this panel can switch instantly client-side rather than refetching.
+    // Canonical product key is `ct.item_id` (locked contract, same as
+    // api/hrh-product-analytics.js — the literal dot requires backticks).
+    const salesDriverRows = await (
+      await client.query({
+        query: `
+          SELECT
+            sales_channel AS ch,
+            \`ct.item_id\` AS item_id,
+            argMax(product_name, transaction_date) AS product_name,
+            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+            sumIf(net_quantity, net_sales_amount > 0) AS units
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel IN {allChannels:Array(String)}
+            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            AND \`ct.item_id\` IS NOT NULL
+          GROUP BY sales_channel, \`ct.item_id\`
+          HAVING gmv > 0
+        `,
+        query_params: { store: HRH_STORE, allChannels, curFrom: current.from, curTo: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const TOP_SALES_DRIVERS_SHOWN = 8;
+    const topSalesDrivers = {};
+    for (const ch of allChannels) {
+      const rows = salesDriverRows
+        .filter((r) => r.ch === ch)
+        .map((r) => ({ product: r.product_name, gmv: toNum(r.gmv), units: toNum(r.units) }));
+      topSalesDrivers[ch] = {
+        byValue: [...rows].sort((a, b) => b.gmv - a.gmv).slice(0, TOP_SALES_DRIVERS_SHOWN),
+        byQty: [...rows].sort((a, b) => b.units - a.units).slice(0, TOP_SALES_DRIVERS_SHOWN),
+      };
+    }
+
     // Category / Subcategory Contribution — GMV per day, per category (or
     // sub_category_name), for the CURRENT window and the page's selected
     // channel filter (unlike the table above, these two respect it — each
@@ -590,6 +629,7 @@ export default async function handler(req, res) {
         checkoutCoverageNote,
       },
       channelComparison,
+      topSalesDrivers,
       categoryContribution,
       subcategoryContribution,
       paymentType,

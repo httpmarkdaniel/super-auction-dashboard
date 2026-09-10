@@ -66,29 +66,60 @@ function formatRateWithCount(rate, count) {
   return `${formatPct(rate)} (${formatNum(count)})`;
 }
 
-function maxBy(rows, key) {
-  return rows.reduce((best, r) => (r[key] !== null && r[key] !== undefined && (!best || r[key] > best[key]) ? r : best), null);
-}
+const DRIVER_VALUE_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 220 },
+  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
+];
+const DRIVER_QTY_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 220 },
+  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
+];
+const TOP_DRIVER_CHANNEL_OPTIONS = [
+  { key: "HMRPH ONLINE", label: "HMRPH Online" },
+  { key: "TIKTOK", label: "TikTok" },
+  { key: "SHOPEE", label: "Shopee" },
+];
 
-// Same channelComparison rows the table above already shows, just called
-// out as "which channel wins on what" — real signal the raw table doesn't
-// surface on its own (a reader has to eyeball 3 rows x 7 columns to spot
-// these), not a duplicate visualization of the same numbers.
-function ChannelHighlights({ channelComparison }) {
-  if (!channelComparison || channelComparison.length === 0) return null;
-  const topGmv = maxBy(channelComparison, "gmv");
-  const bestAov = maxBy(channelComparison, "aov");
-  const highestReturn = maxBy(channelComparison, "returnRate");
+// Real per-product GMV/Units for the current window (api/hrh-sales-analytics.js
+// precomputes all 3 real channels at once), with its OWN channel dropdown
+// independent of the page's global Channel filter — this panel is about
+// "what's selling on channel X specifically," a different question than
+// the page-wide filter answers.
+function TopSalesDriversPanel({ topSalesDrivers, channel, onChannelChange }) {
+  const data = topSalesDrivers?.[channel] || { byValue: [], byQty: [] };
   return (
     <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-        Channel Highlights
+      <div className="flex items-center justify-between gap-3 mb-2.5">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
+          Top Sales Drivers
+        </div>
+        <select
+          value={channel}
+          onChange={(e) => onChannelChange(e.target.value)}
+          className="text-[11.5px] rounded px-2 h-6"
+          style={{ border: `1px solid ${hrh.border}`, color: hrh.ink2, background: hrh.surface }}
+        >
+          {TOP_DRIVER_CHANNEL_OPTIONS.map((o) => (
+            <option key={o.key} value={o.key}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
-      <KpiRow>
-        <KpiCard label="Top Channel by GMV" value={topGmv ? formatPeso(topGmv.gmv) : "—"} sub={topGmv?.channel} />
-        <KpiCard label="Best AOV" value={bestAov ? formatPeso(bestAov.aov) : "—"} sub={bestAov?.channel} />
-        <KpiCard label="Highest Return Rate" value={highestReturn ? formatPct(highestReturn.returnRate) : "—"} sub={highestReturn?.channel} />
-      </KpiRow>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div className="text-[11px] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
+            By Value
+          </div>
+          <DataTable columns={DRIVER_VALUE_COLUMNS} rows={data.byValue} emptyLabel="No sales in this window" />
+        </div>
+        <div>
+          <div className="text-[11px] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
+            By Qty
+          </div>
+          <DataTable columns={DRIVER_QTY_COLUMNS} rows={data.byQty} emptyLabel="No sales in this window" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -259,6 +290,7 @@ export default function SalesAnalytics({ filters }) {
   const [categoryBucket, setCategoryBucket] = useState("day");
   const [subcategoryBucket, setSubcategoryBucket] = useState("day");
   const [voucherBucket, setVoucherBucket] = useState("day");
+  const [topDriverChannel, setTopDriverChannel] = useState("HMRPH ONLINE");
 
   const ready = isDateRangeReady(dateRange);
 
@@ -305,7 +337,11 @@ export default function SalesAnalytics({ filters }) {
             <div className="xl:col-span-2">
               <Panel title="Channel Comparison" className="h-full">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-                <ChannelHighlights channelComparison={data.channelComparison} />
+                <TopSalesDriversPanel
+                  topSalesDrivers={data.topSalesDrivers}
+                  channel={topDriverChannel}
+                  onChannelChange={setTopDriverChannel}
+                />
               </Panel>
             </div>
             <div className="flex flex-col gap-4 h-full">
