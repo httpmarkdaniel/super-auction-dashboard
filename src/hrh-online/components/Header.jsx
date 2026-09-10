@@ -11,7 +11,7 @@ import ChannelPills from "./ChannelPills";
 export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange }) {
   return (
     <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
-      <div className="px-5 md:px-6 py-3.5 grid grid-cols-1 md:grid-cols-3 items-center gap-3">
+      <div className="relative px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[19px] font-bold" style={{ color: hrh.ink }}>
             HRH Online
@@ -20,12 +20,17 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
             Executive Commerce Dashboard
           </p>
         </div>
-        <div className="flex justify-center">
+        {/* True horizontal center of the header, on one row, regardless of
+            how wide the title/date-range siblings are — a grid column would
+            constrain this to a third of the header's width and force the
+            4 pills to wrap (Shopee falling to its own line); absolute
+            positioning lets it size to its own content instead. Falls back
+            to a normal centered block (own row, below title/date) on
+            narrow screens where there's no room to float it independently. */}
+        <div className="order-3 w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>
-        <div className="flex justify-end">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-        </div>
+        <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
       </div>
     </div>
   );

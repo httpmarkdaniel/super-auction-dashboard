@@ -10,7 +10,7 @@ const FILTER_FONT = { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.
 
 export default function ChannelPills({ value, onChange }) {
   return (
-    <div className="flex flex-wrap gap-2.5">
+    <div className="flex flex-nowrap gap-2.5">
       {CHANNEL_OPTIONS.map((option) => {
         const active = option === value;
         return (
@@ -21,7 +21,7 @@ export default function ChannelPills({ value, onChange }) {
             className="text-[17px] px-5 h-11 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.04]"
             style={
               active
-                ? { ...FILTER_FONT, background: hrh.accent, color: "#ffffff", border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.4)" }
+                ? { ...FILTER_FONT, background: hrh.accent, color: "#ffffff", border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(235,104,52,0.4)" }
                 : { ...FILTER_FONT, background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
             }
           >

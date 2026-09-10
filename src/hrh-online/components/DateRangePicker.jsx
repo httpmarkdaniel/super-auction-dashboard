@@ -51,7 +51,7 @@ export default function DateRangePicker({ value, onChange }) {
         className="flex items-center gap-2 text-[17px] px-5 h-11 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.03]"
         style={
           open
-            ? { ...FILTER_FONT, background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.25)" }
+            ? { ...FILTER_FONT, background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(235,104,52,0.25)" }
             : { ...FILTER_FONT, background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
         }
       >
