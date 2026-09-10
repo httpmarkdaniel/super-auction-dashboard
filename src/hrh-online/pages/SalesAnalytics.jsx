@@ -66,6 +66,15 @@ function formatRateWithCount(rate, count) {
   return `${formatPct(rate)} (${formatNum(count)})`;
 }
 
+const VOUCHER_TABLE_COLUMNS = [
+  { key: "voucher", label: "Voucher", maxWidth: 260 },
+  { key: "code", label: "Code" },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "orderPrice", label: "Total Order Value", render: (r) => formatPeso(r.orderPrice) },
+  { key: "discountPrice", label: "Total Discount Value", render: (r) => formatPeso(r.discountPrice) },
+  { key: "discountRate", label: "Discount Rate", render: (r) => formatPct(r.discountRate) },
+];
+
 const CHANNEL_TABLE_COLUMNS = [
   { key: "channel", label: "Channel" },
   { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
@@ -168,6 +177,12 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
         lineColor={hrh.accent}
         valueFormatter={formatCompactPeso}
       />
+      <div className="mt-4">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
+          Vouchers Applied
+        </div>
+        <DataTable columns={VOUCHER_TABLE_COLUMNS} rows={voucherAssistedSales?.byVoucher} paginate pageSize={10} />
+      </div>
     </Panel>
   );
 }

@@ -478,7 +478,7 @@ export default async function handler(req, res) {
     // correct per-week/month unique count (the same customer buying twice
     // in one week would be double-counted), so it is computed once, exactly,
     // over the full selected window instead of faked via addition.
-    const [voucherDailyRows, voucherCustomerRows] = await Promise.all([
+    const [voucherDailyRows, voucherCustomerRows, voucherBreakdownRows] = await Promise.all([
       (
         await client.query({
           query: `
@@ -516,6 +516,32 @@ export default async function handler(req, res) {
           format: "JSONEachRow",
         })
       ).json(),
+      // Which specific vouchers were used — voucher_code is 100% populated
+      // (verified), voucher_name is the human-readable campaign name (null
+      // for exactly 1 row store-wide; falls back to the code below).
+      (
+        await client.query({
+          query: `
+            SELECT
+              voucher_code,
+              any(voucher_name) AS voucher_name,
+              count() AS orders,
+              sum(total_order_price) AS order_price,
+              sum(total_discount_price) AS discount_price
+            FROM cms.mart_cms_voucher_report
+            WHERE store_name = {store:String} AND order_status != 'Cancelled'
+              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+            GROUP BY voucher_code
+            ORDER BY orders DESC
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${current.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json(),
     ]);
     const voucherByDate = new Map(voucherDailyRows.map((r) => [r.d, r]));
     const voucherTrend = enumerateDatesISO(current.from, current.to).map((date) => {
@@ -530,6 +556,18 @@ export default async function handler(req, res) {
     const voucherTotalOrders = voucherTrend.reduce((s, r) => s + r.orders, 0);
     const voucherTotalOrderPrice = voucherTrend.reduce((s, r) => s + r.orderPrice, 0);
     const voucherTotalDiscountPrice = voucherTrend.reduce((s, r) => s + r.discountPrice, 0);
+    const byVoucher = voucherBreakdownRows.map((r) => {
+      const orderPrice = toNum(r.order_price);
+      const discountPrice = toNum(r.discount_price);
+      return {
+        voucher: r.voucher_name || r.voucher_code,
+        code: r.voucher_code,
+        orders: toNum(r.orders),
+        orderPrice,
+        discountPrice,
+        discountRate: safeDivide(discountPrice, orderPrice) * 100,
+      };
+    });
     const voucherAssistedSales = {
       totals: {
         orders: voucherTotalOrders,
@@ -539,6 +577,7 @@ export default async function handler(req, res) {
         aov: safeDivide(voucherTotalOrderPrice, voucherTotalOrders),
       },
       trend: voucherTrend,
+      byVoucher,
     };
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
