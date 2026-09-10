@@ -146,15 +146,19 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
   );
 }
 
-// Channel/category comparison bars. series: [{ key, name, color? }]
-export function BarComparisonChart({ data, series, xKey = "label", height = 260, valueFormatter = formatCompactPeso }) {
+// Channel/category comparison bars. series: [{ key, name, color? }].
+// `tooltipContent` lets a caller override the default ChartTooltip (e.g.
+// SalesAnalytics.jsx's OtherBreakdownTooltip, which names the real
+// categories/subcategories hidden behind an "Other" bar).
+export function BarComparisonChart({ data, series, xKey = "label", height = 260, valueFormatter = formatCompactPeso, tooltipContent }) {
+  const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
         <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
         <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
-        <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
+        <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         {series.map((s, i) => (
           <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color || hrh.series[i % hrh.series.length]} radius={[2, 2, 0, 0]} maxBarSize={36} />

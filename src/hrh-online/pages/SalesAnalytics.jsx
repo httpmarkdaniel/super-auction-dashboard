@@ -4,8 +4,61 @@ import DataTable from "../components/DataTable";
 import { BarComparisonChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { bucketRows } from "../trendBucket";
+import { bucketRows, bucketArrayField } from "../trendBucket";
+import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
+
+// How many individual labels to name in the "Other" bar's hover tooltip
+// before collapsing the rest into a "+N more" tail — a specific bucket
+// (one day, or one week/month once summed) rarely has more than a handful
+// of non-top categories actually selling, so this is a display cap, not a
+// data cap (the full per-bucket list is already computed server-side).
+const OTHER_TOOLTIP_SHOWN = 8;
+
+// Default ChartTooltip only shows each series' own number — for the
+// "Other" bar specifically, that's an unexplained lump sum. This variant
+// additionally names the real categories/subcategories collapsed into it
+// for the SPECIFIC bucket being hovered (using the otherDetail array
+// ContributionTrendPanel attaches to each data row via bucketArrayField),
+// not just the whole-period breakdown shown as a footnote under the chart.
+function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className="rounded-md px-3 py-2 text-[12px] max-w-[280px]"
+      style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}
+    >
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => {
+        const otherDetail = p.dataKey === "Other" ? p.payload?.otherDetail || [] : null;
+        return (
+          <div key={p.dataKey} className="mb-1 last:mb-0">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+              <span style={{ color: "#a3adba" }}>{p.name}:</span>
+              <span className="font-semibold">{valueFormatter(p.value)}</span>
+            </div>
+            {otherDetail && otherDetail.length > 0 && (
+              <div className="ml-4 mt-1 pl-2 space-y-0.5" style={{ borderLeft: `1px solid ${hrh.navyBorder}` }}>
+                {otherDetail.slice(0, OTHER_TOOLTIP_SHOWN).map((o) => (
+                  <div key={o.label} className="flex items-center justify-between gap-3" style={{ color: "#a3adba" }}>
+                    <span className="truncate">{o.label}</span>
+                    <span className="shrink-0" style={{ color: "#fff" }}>
+                      {valueFormatter(o.gmv)}
+                    </span>
+                  </div>
+                ))}
+                {otherDetail.length > OTHER_TOOLTIP_SHOWN && (
+                  <div style={{ color: "#a3adba" }}>+{otherDetail.length - OTHER_TOOLTIP_SHOWN} more</div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function formatRateWithCount(rate, count) {
   if (rate === null || rate === undefined) return "—";
@@ -45,16 +98,23 @@ function isDateRangeReady(dateRange) {
 // GMV share) as a single compact line, rather than leaving it a black box.
 function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucketChange }) {
   const series = contribution?.series || [];
+  const otherDetailByBucket = bucketArrayField(contribution?.data, bucket, "otherDetail");
   const data = bucketRows(
     contribution?.data,
     bucket,
     series.map((s) => s.key),
-  );
+  ).map((row) => ({ ...row, otherDetail: otherDetailByBucket.get(row.dateLabel) || [] }));
   const otherBreakdown = contribution?.otherBreakdown || [];
   const otherMoreCount = contribution?.otherMoreCount || 0;
   return (
     <Panel title={title} subtitle={subtitle} action={<TrendBucketPills value={bucket} onChange={onBucketChange} />} className="mb-4">
-      <BarComparisonChart data={data} series={series} xKey="dateLabel" valueFormatter={formatCompactPeso} />
+      <BarComparisonChart
+        data={data}
+        series={series}
+        xKey="dateLabel"
+        valueFormatter={formatCompactPeso}
+        tooltipContent={OtherBreakdownTooltip}
+      />
       {otherBreakdown.length > 0 && (
         <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
           <span style={{ color: "#5b6573", fontWeight: 600 }}>Other</span> includes:{" "}

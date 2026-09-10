@@ -141,15 +141,23 @@ function buildTopSeriesTrend(rows, from, to, topN) {
   const byDate = new Map();
   for (const r of rows) {
     const key = labelToKey.get(r.label) || "Other";
-    const bucket = byDate.get(r.d) || {};
-    bucket[key] = (bucket[key] || 0) + toNum(r.gmv);
+    const bucket = byDate.get(r.d) || { totals: {}, otherDetail: new Map() };
+    const gmv = toNum(r.gmv);
+    bucket.totals[key] = (bucket.totals[key] || 0) + gmv;
+    if (key === "Other" && gmv > 0) bucket.otherDetail.set(r.label, (bucket.otherDetail.get(r.label) || 0) + gmv);
     byDate.set(r.d, bucket);
   }
   const seriesKeys = series.map((s) => s.key);
   const data = enumerateDatesISO(from, to).map((date) => {
-    const bucket = byDate.get(date) || {};
+    const bucket = byDate.get(date);
     const out = { date };
-    for (const key of seriesKeys) out[key] = bucket[key] || 0;
+    for (const key of seriesKeys) out[key] = bucket?.totals[key] || 0;
+    // Per-day breakdown of exactly which labels fed into "Other" that day —
+    // lets the chart's tooltip name real categories/subcategories instead
+    // of leaving "Other" an unexplained number when hovered.
+    if (hasOther) {
+      out.otherDetail = bucket ? Array.from(bucket.otherDetail, ([label, gmv]) => ({ label, gmv })).sort((a, b) => b.gmv - a.gmv) : [];
+    }
     return out;
   });
 
