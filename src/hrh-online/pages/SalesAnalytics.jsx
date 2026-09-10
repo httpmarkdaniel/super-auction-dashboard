@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { KpiCard, KpiRow } from "../components/Kpi";
-import { BarComparisonChart, ComboBarLineChart, DonutChart } from "../components/Charts";
+import { BarComparisonChart, StackedAreaChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows, bucketArrayField } from "../trendBucket";
@@ -141,6 +141,37 @@ function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucke
   );
 }
 
+// Hovering any point shows Orders/Order Value/Discount Value/AOV for that
+// exact bucket — reads off the underlying data row (payload[0].payload)
+// rather than each Area series' own value, so the same 4 metrics show
+// regardless of which stacked layer (Order Value or Discount Value) the
+// cursor happens to be over. AOV is derived here (orderPrice/orders) rather
+// than stored per-bucket, since it can't be summed across days like the
+// other three can.
+function VoucherTrendTooltip({ active, payload, label, valueFormatter }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  const aov = row.orders > 0 ? row.orderPrice / row.orders : 0;
+  const rows = [
+    { label: "Orders", value: formatNum(row.orders) },
+    { label: "Order Value", value: valueFormatter(row.orderPrice) },
+    { label: "Discount Value", value: valueFormatter(row.discountPrice) },
+    { label: "AOV", value: valueFormatter(aov) },
+  ];
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {rows.map((r) => (
+        <div key={r.label} className="flex items-center justify-between gap-4">
+          <span style={{ color: "#a3adba" }}>{r.label}:</span>
+          <span className="font-semibold">{r.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // cms.mart_cms_voucher_report has no sales_channel column and — verified —
 // carries only HMRPH Online orders for this store, so this panel is fixed
 // to HMRPH Online regardless of the page's Channel filter (same convention
@@ -148,7 +179,8 @@ function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucke
 // whole-window number only (see api/hrh-sales-analytics.js's comment on why
 // it can't be correctly summed per bucket); Orders/Order Value/Discount
 // Value/AOV are shown both as whole-window KPIs and as a bucketable
-// Order-Value-vs-Discount-Value trend below.
+// stacked-area trend below (Order Value + Discount Value stacked reads as
+// "original list price before the voucher").
 function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChange }) {
   const totals = voucherAssistedSales?.totals;
   const trendData = bucketRows(voucherAssistedSales?.trend, bucket, ["orders", "orderPrice", "discountPrice"]);
@@ -166,16 +198,15 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
         <KpiCard label="Total Discount Value" value={formatPeso(totals?.discountPrice)} />
         <KpiCard label="Average Order Value" value={formatPeso(totals?.aov)} />
       </KpiRow>
-      <ComboBarLineChart
+      <StackedAreaChart
         data={trendData}
         xKey="dateLabel"
-        barKey="orderPrice"
-        barName="Order Value"
-        barColor="#3f79d1"
-        lineKey="discountPrice"
-        lineName="Discount Value"
-        lineColor={hrh.accent}
+        categories={[
+          { key: "orderPrice", name: "Order Value", color: "#3f79d1" },
+          { key: "discountPrice", name: "Discount Value", color: hrh.accent },
+        ]}
         valueFormatter={formatCompactPeso}
+        tooltipContent={VoucherTrendTooltip}
       />
       <div className="mt-4">
         <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>

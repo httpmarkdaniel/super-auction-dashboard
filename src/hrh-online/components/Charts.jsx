@@ -4,6 +4,8 @@ import {
   Line,
   BarChart,
   Bar,
+  AreaChart,
+  Area,
   ComposedChart,
   XAxis,
   YAxis,
@@ -99,22 +101,35 @@ export function SalesTrendComboChart({ data, height = 260 }) {
   );
 }
 
-// Two same-unit series (both peso amounts, e.g. order value vs. discount
-// cost) on one shared axis — unlike SalesTrendComboChart's GMV/Orders pair,
-// these don't need separate y-axes since they're already the same unit.
-// `data`: [{ [xKey]: label, [barKey]: number, [lineKey]: number }].
-export function ComboBarLineChart({ data, xKey, barKey, barName, barColor, lineKey, lineName, lineColor, height = 260, valueFormatter = formatCompactPeso }) {
+// Stacked area trend — same-unit series stacked on one shared axis (e.g.
+// Order Value + Discount Value, which together read as "original list
+// price before the voucher"). `categories`: [{ key, name, color }].
+// `tooltipContent` lets a caller override the default per-series
+// ChartTooltip (e.g. SalesAnalytics.jsx's VoucherTrendTooltip, which derives
+// AOV from the underlying data row instead of showing raw series values).
+export function StackedAreaChart({ data, categories, xKey = "label", height = 260, valueFormatter = formatCompactPeso, tooltipContent }) {
+  const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
         <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
         <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
-        <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
+        <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey={barKey} name={barName} fill={barColor} radius={[2, 2, 0, 0]} maxBarSize={28} />
-        <Line type="monotone" dataKey={lineKey} name={lineName} stroke={lineColor} strokeWidth={2.5} dot={false} />
-      </ComposedChart>
+        {categories.map((c, i) => (
+          <Area
+            key={c.key}
+            type="monotone"
+            dataKey={c.key}
+            name={c.name}
+            stackId="1"
+            stroke={c.color || hrh.series[i % hrh.series.length]}
+            fill={c.color || hrh.series[i % hrh.series.length]}
+            fillOpacity={0.35}
+          />
+        ))}
+      </AreaChart>
     </ResponsiveContainer>
   );
 }
