@@ -84,7 +84,8 @@ function normalizePaymentType(raw) {
   const key = raw.trim().toLowerCase();
   return PAYMENT_TYPE_DISPLAY[key] || raw.trim();
 }
-const CHECKOUT_METHOD_DISPLAY = { Pickup: "Pickup at Store", Delivery: "Home Delivery" };
+// "Delivery" needs no remapping — falls through to the raw value below.
+const CHECKOUT_METHOD_DISPLAY = { Pickup: "Pickup at Store" };
 
 // Groups raw {label, value} counts into a top-N + "Other" ShareBar segment
 // list, coloring by rank from the shared hrh.series palette.
@@ -317,7 +318,9 @@ export default async function handler(req, res) {
         // always report null ("N/A"), never a fabricated 0%. Denominator is
         // cmsTotalOrders (same table/population as the numerator), not the
         // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
+        cancellations: ch === "HMRPH ONLINE" ? trueCancellations : null,
         cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
+        returns: returnInvoices,
         returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
       };
     });

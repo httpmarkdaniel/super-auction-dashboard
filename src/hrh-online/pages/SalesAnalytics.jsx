@@ -7,6 +7,11 @@ import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows } from "../trendBucket";
 import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 
+function formatRateWithCount(rate, count) {
+  if (rate === null || rate === undefined) return "—";
+  return `${formatPct(rate)} (${formatNum(count)})`;
+}
+
 const CHANNEL_TABLE_COLUMNS = [
   { key: "channel", label: "Channel" },
   { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
@@ -14,8 +19,8 @@ const CHANNEL_TABLE_COLUMNS = [
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
   { key: "units", label: "Units", render: (r) => formatNum(r.units) },
   { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
-  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatPct(r.cancellationRate) },
-  { key: "returnRate", label: "Return Rate", render: (r) => formatPct(r.returnRate) },
+  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatRateWithCount(r.cancellationRate, r.cancellations) },
+  { key: "returnRate", label: "Return Rate", render: (r) => formatRateWithCount(r.returnRate, r.returns) },
 ];
 
 function dateRangeParams(dateRange) {
