@@ -49,11 +49,6 @@ function addDaysISO(iso, days) {
   dt.setUTCDate(dt.getUTCDate() + days);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
-function daysBetweenISO(fromIso, toIso) {
-  const [fy, fm, fd] = fromIso.split("-").map(Number);
-  const [ty, tm, td] = toIso.split("-").map(Number);
-  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
-}
 function mondayOfWeek(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
@@ -74,39 +69,36 @@ function shiftMonthsClampedISO(iso, deltaMonths) {
   const nd = Math.min(d, daysInMonth(ny, nm1));
   return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
-function shiftYearsClampedISO(iso, deltaYears) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const ny = y + deltaYears;
-  const nd = Math.min(d, daysInMonth(ny, m));
-  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
-}
+// Resolves ONLY the current window from the Date Range filter (WTD/MTD/
+// YTD/Custom) — the comparison window is a separate, user-chosen concern,
+// see resolveComparisonWindow below (identical split to
+// api/hrh-executive-overview.js's resolveRange/resolveComparisonWindow).
 function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
   if (range === "custom") {
     if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
     const from = fromParam <= toParam ? fromParam : toParam;
     const to = fromParam <= toParam ? toParam : fromParam;
-    const lengthDays = daysBetweenISO(from, to) + 1;
-    const prevTo = addDaysISO(from, -1);
-    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
-    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+    return { current: { from, to } };
   }
   if (range === "mtd") {
-    const to = today;
-    const from = firstOfMonthISO(to);
-    const prevAnchor = shiftMonthsClampedISO(to, -1);
-    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+    return { current: { from: firstOfMonthISO(today), to: today } };
   }
   if (range === "ytd") {
-    const to = today;
-    const from = `${to.slice(0, 4)}-01-01`;
-    const prevTo = shiftYearsClampedISO(to, -1);
-    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
-    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+    return { current: { from: `${today.slice(0, 4)}-01-01`, to: today } };
   }
-  const to = today;
-  const from = mondayOfWeek(to);
-  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  return { current: { from: mondayOfWeek(today), to: today } };
+}
+
+// "Compare to" — shifts the whole current window back by a fixed amount
+// (1 day / 7 days / 1 calendar month), independent of the Date Range
+// filter's own span or type — same control as Executive Overview's
+// scorecards (api/hrh-executive-overview.js's resolveComparisonWindow).
+function resolveComparisonWindow(current, compareTo) {
+  const { from, to } = current;
+  if (compareTo === "day") return { from: addDaysISO(from, -1), to: addDaysISO(to, -1) };
+  if (compareTo === "month") return { from: shiftMonthsClampedISO(from, -1), to: shiftMonthsClampedISO(to, -1) };
+  return { from: addDaysISO(from, -7), to: addDaysISO(to, -7) }; // "week" (default)
 }
 
 // Which segment/bucket a per-customer window GMV falls into.
@@ -135,14 +127,15 @@ export async function handleCustomerAnalytics(req, res) {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : "week";
 
     let current;
-    let previous;
     try {
-      ({ current, previous } = resolveRange(range, from, to));
+      ({ current } = resolveRange(range, from, to));
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
+    const previous = resolveComparisonWindow(current, compareTo);
 
     // Per-customer window aggregation — ONE query covering previous+current,
     // conditionally aggregated (same pattern as every other api/hrh-*.js
@@ -168,7 +161,8 @@ export async function handleCustomerAnalytics(req, res) {
             uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
             minIf(transaction_date, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_first_txn,
             maxIf(transaction_date, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_last_txn,
-            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders
+            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
+            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
@@ -262,17 +256,18 @@ export async function handleCustomerAnalytics(req, res) {
 
     const curRepeatRate = safeDivide(curRepeat, curUnique) * 100;
     const curSalesPerCustomer = safeDivide(curGmvTotal, curUnique);
-    // Previous-period repeat rate/sales-per-customer aren't derivable from
-    // this query without a second full per-customer pass (prev_gmv wasn't
-    // selected above to keep this a single lean query) — only Unique/New/
-    // Returning get a real previous-period comparison; Repeat Rate and
-    // Sales/Customer show no delta rather than a fabricated one.
+
+    const prevRepeatCount = prevActiveRows.filter((r) => toNum(r.prev_orders) >= 2).length;
+    const prevGmvTotal = prevActiveRows.reduce((s, r) => s + toNum(r.prev_gmv), 0);
+    const prevRepeatRate = safeDivide(prevRepeatCount, prevOrderCount) * 100;
+    const prevSalesPerCustomer = safeDivide(prevGmvTotal, prevOrderCount);
+
     const kpis = {
-      uniqueCustomers: { value: curUnique, delta: pctDelta(curUnique, prevOrderCount) },
-      newCustomers: { value: curNew, delta: pctDelta(curNew, prevNewCount) },
-      returningCustomers: { value: curReturning, delta: pctDelta(curReturning, prevReturningCount) },
-      repeatRate: { value: curRepeatRate, delta: null },
-      salesPerCustomer: { value: curSalesPerCustomer, delta: null },
+      uniqueCustomers: { value: curUnique, previous: prevOrderCount, delta: pctDelta(curUnique, prevOrderCount) },
+      newCustomers: { value: curNew, previous: prevNewCount, delta: pctDelta(curNew, prevNewCount) },
+      returningCustomers: { value: curReturning, previous: prevReturningCount, delta: pctDelta(curReturning, prevReturningCount) },
+      repeatRate: { value: curRepeatRate, previous: prevRepeatRate, delta: pctDelta(curRepeatRate, prevRepeatRate) },
+      salesPerCustomer: { value: curSalesPerCustomer, previous: prevSalesPerCustomer, delta: pctDelta(curSalesPerCustomer, prevSalesPerCustomer) },
     };
 
     const newVsReturning = [
@@ -365,6 +360,7 @@ export async function handleCustomerAnalytics(req, res) {
       meta: {
         channel,
         range,
+        compareTo,
         current,
         previous,
         customerScopeNote:

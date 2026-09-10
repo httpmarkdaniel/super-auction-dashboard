@@ -13,6 +13,42 @@ const TREND_LABEL_FORMATTER = { day: formatShortDateLabel, week: formatWeekRange
 
 const SEGMENT_COLOR = { New: hrh.blue, Returning: hrh.accent };
 
+// The 5 KPI scorecards, each paired with the formatter its value/previous
+// need — same shape/order as data.kpis from api/_hrh-customer-analytics.js.
+const KPI_CARDS = [
+  { key: "uniqueCustomers", label: "Unique Customers", formatter: formatNum },
+  { key: "newCustomers", label: "New Customers", formatter: formatNum, sub: "1 lifetime order" },
+  { key: "returningCustomers", label: "Returning Customers", formatter: formatNum, sub: "2+ lifetime orders" },
+  { key: "repeatRate", label: "Repeat Rate", formatter: formatPct },
+  { key: "salesPerCustomer", label: "Sales / Customer", formatter: formatPeso },
+];
+
+// "Compare to" — an explicit, independent choice of comparison basis for
+// every scorecard's bottom-of-card delta, decoupled from the Date Range
+// filter itself (same control as Executive Overview — see
+// resolveComparisonWindow in api/_hrh-customer-analytics.js): Day shifts
+// the whole selected window back 1 day, Week back 7 days, Month back 1
+// calendar month, regardless of the window's own length or type.
+const COMPARE_OPTIONS = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+];
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatIsoDateLabel(iso) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${SHORT_MONTHS[m - 1]} ${d}, ${y}`;
+}
+function effectivePeriodLabel(period) {
+  if (!period) return null;
+  const from = formatIsoDateLabel(period.from);
+  const to = formatIsoDateLabel(period.to);
+  if (!from || !to) return null;
+  return from === to ? from : `${from} – ${to}`;
+}
+
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
@@ -56,14 +92,15 @@ export default function CustomerAnalytics({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [trendBucket, setTrendBucket] = useState("day");
+  const [compareTo, setCompareTo] = useState("week");
 
   const ready = isDateRangeReady(dateRange);
 
-  const load = useCallback(async (ch, params, signal) => {
+  const load = useCallback(async (ch, params, cmp, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...params, report: "customers" });
+      const qs = new URLSearchParams({ channel: ch, ...params, compareTo: cmp, report: "customers" });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -80,9 +117,9 @@ export default function CustomerAnalytics({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    load(channel, dateRangeParams(dateRange), controller.signal);
+    load(channel, dateRangeParams(dateRange), compareTo, controller.signal);
     return () => controller.abort();
-  }, [channel, dateRange, ready, load]);
+  }, [channel, dateRange, compareTo, ready, load]);
 
   const formatTrendLabel = TREND_LABEL_FORMATTER[trendBucket];
   const customerTrend =
@@ -100,8 +137,27 @@ export default function CustomerAnalytics({ filters }) {
 
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Customer Analytics
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
+          Customer Analytics
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+              Compare to
+            </span>
+            <TrendBucketPills value={compareTo} onChange={setCompareTo} options={COMPARE_OPTIONS} />
+          </div>
+          {data?.meta?.current && (
+            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+              {effectivePeriodLabel(data.meta.current)}
+              <span className="font-normal" style={{ color: hrh.muted }}>
+                {" "}
+                vs {effectivePeriodLabel(data.meta.previous)}
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
@@ -111,11 +167,19 @@ export default function CustomerAnalytics({ filters }) {
       {data && !error && (
         <>
           <KpiRow>
-            <KpiCard label="Unique Customers" value={formatNum(data.kpis.uniqueCustomers.value)} delta={data.kpis.uniqueCustomers.delta} />
-            <KpiCard label="New Customers" value={formatNum(data.kpis.newCustomers.value)} delta={data.kpis.newCustomers.delta} sub="1 lifetime order" />
-            <KpiCard label="Returning Customers" value={formatNum(data.kpis.returningCustomers.value)} delta={data.kpis.returningCustomers.delta} sub="2+ lifetime orders" />
-            <KpiCard label="Repeat Rate" value={formatPct(data.kpis.repeatRate.value)} delta={data.kpis.repeatRate.delta} />
-            <KpiCard label="Sales / Customer" value={formatPeso(data.kpis.salesPerCustomer.value)} delta={data.kpis.salesPerCustomer.delta} />
+            {KPI_CARDS.map((c) => {
+              const k = data.kpis[c.key];
+              return (
+                <KpiCard
+                  key={c.key}
+                  label={c.label}
+                  value={c.formatter(k.value)}
+                  delta={k.delta}
+                  sub={c.sub}
+                  previousLabel={c.formatter(k.previous)}
+                />
+              );
+            })}
           </KpiRow>
 
           <Panel
