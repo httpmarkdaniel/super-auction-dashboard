@@ -120,12 +120,19 @@ function enumerateDatesISO(from, to) {
 // window for every series key — same zero-fill convention as
 // api/hrh-executive-overview.js's Sales Trend, so a day with no sales in a
 // given category doesn't create a gap.
+// How many individual labels to name inline for the "Other" bucket's
+// compact breakdown — the rest collapse into a "+N more" tail rather than
+// listing every one of a potential 1,000+-label long tail.
+const OTHER_BREAKDOWN_SHOWN = 5;
+
 function buildTopSeriesTrend(rows, from, to, topN) {
   const totalsByLabel = new Map();
   for (const r of rows) totalsByLabel.set(r.label, (totalsByLabel.get(r.label) || 0) + toNum(r.gmv));
   const sortedLabels = Array.from(totalsByLabel.entries()).sort((a, b) => b[1] - a[1]);
   const topLabels = sortedLabels.slice(0, topN).map(([label]) => label);
-  const hasOther = sortedLabels.length > topN;
+  const restLabels = sortedLabels.slice(topN);
+  const hasOther = restLabels.length > 0;
+  const grandTotal = sortedLabels.reduce((s, [, gmv]) => s + gmv, 0);
 
   const labelToKey = new Map(topLabels.map((label) => [label, label]));
   const series = topLabels.map((label, i) => ({ key: label, name: label, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
@@ -146,7 +153,17 @@ function buildTopSeriesTrend(rows, from, to, topN) {
     return out;
   });
 
-  return { series, data };
+  // Names what's actually inside the gray "Other" bar — the biggest
+  // contributors by GMV, plus a remainder count — so "Other" isn't a black
+  // box on the chart.
+  const otherBreakdown = restLabels.slice(0, OTHER_BREAKDOWN_SHOWN).map(([label, gmv]) => ({
+    label,
+    gmv,
+    pct: grandTotal > 0 ? (gmv / grandTotal) * 100 : 0,
+  }));
+  const otherMoreCount = Math.max(0, restLabels.length - OTHER_BREAKDOWN_SHOWN);
+
+  return { series, data, otherBreakdown, otherMoreCount };
 }
 
 export default async function handler(req, res) {

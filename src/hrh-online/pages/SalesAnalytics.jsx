@@ -40,7 +40,9 @@ function isDateRangeReady(dateRange) {
 // api/hrh-sales-analytics.js's buildTopSeriesTrend) rendered as a grouped
 // bar chart, re-bucketable Day/Week/Month client-side — same pattern as
 // Executive Overview's Sales Trend, just with a dynamic per-category series
-// list instead of a fixed GMV/Orders pair.
+// list instead of a fixed GMV/Orders pair. `otherBreakdown` names what's
+// actually inside the gray "Other" bar (its biggest real contributors, by
+// GMV share) as a single compact line, rather than leaving it a black box.
 function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucketChange }) {
   const series = contribution?.series || [];
   const data = bucketRows(
@@ -48,9 +50,23 @@ function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucke
     bucket,
     series.map((s) => s.key),
   );
+  const otherBreakdown = contribution?.otherBreakdown || [];
+  const otherMoreCount = contribution?.otherMoreCount || 0;
   return (
     <Panel title={title} subtitle={subtitle} action={<TrendBucketPills value={bucket} onChange={onBucketChange} />} className="mb-4">
       <BarComparisonChart data={data} series={series} xKey="dateLabel" valueFormatter={formatCompactPeso} />
+      {otherBreakdown.length > 0 && (
+        <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
+          <span style={{ color: "#5b6573", fontWeight: 600 }}>Other</span> includes:{" "}
+          {otherBreakdown.map((o, i) => (
+            <span key={o.label}>
+              {i > 0 && ", "}
+              {o.label} ({formatPct(o.pct, 0)})
+            </span>
+          ))}
+          {otherMoreCount > 0 && `, +${otherMoreCount} more`}
+        </p>
+      )}
     </Panel>
   );
 }
