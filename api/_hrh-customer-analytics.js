@@ -501,31 +501,40 @@ export async function handleCustomerAnalytics(req, res) {
     // addresses ("City of Parañaque" vs official-style prefix, "Taguig
     // City" vs common-style suffix, "Cebu City (Capital)" vs a trailing
     // capital-designation note) down to one canonical key, so the same
-    // real city doesn't fragment into 2-3 separate entries.
+    // real city doesn't fragment into 2-3 separate entries. Also reports
+    // whether this specific mention carried a "City" designation — needed
+    // to correctly re-attach "City" on display (see isCity below):
+    // stripping it for the merge key alone would turn "Quezon City" into
+    // the bare word "Quezon", which reads as Quezon PROVINCE instead.
     function canonicalizeCity(raw) {
-      return raw
-        .trim()
-        .toUpperCase()
+      const upper = raw.trim().toUpperCase();
+      const isCity = /^CITY OF\s+/.test(upper) || /\s+CITY$/.test(upper);
+      const key = upper
         .replace(/^CITY OF\s+/, "")
         .replace(/\s+CITY$/, "")
         .replace(/\s*\(CAPITAL\)\s*$/, "")
         .trim();
+      return { key, isCity };
     }
     const provinceCounts = new Map();
-    const cityCountsByProvince = new Map(); // province -> Map(canonicalCity -> { city, count })
+    const cityCountsByProvince = new Map(); // province -> Map(canonicalCity -> { key, isCity, count })
     let matchedCustomers = 0;
     for (const { candidate, cityCandidate } of latestCandidateByCustomer.values()) {
       const province = normalizeProvince(candidate);
       if (!province) continue;
       provinceCounts.set(province, (provinceCounts.get(province) || 0) + 1);
       matchedCustomers += 1;
-      const cityKey = canonicalizeCity(cityCandidate || "");
+      const { key: cityKey, isCity } = canonicalizeCity(cityCandidate || "");
       if (cityKey) {
         if (!cityCountsByProvince.has(province)) cityCountsByProvince.set(province, new Map());
         const cmap = cityCountsByProvince.get(province);
         const existing = cmap.get(cityKey);
-        if (existing) existing.count += 1;
-        else cmap.set(cityKey, { city: titleCase(cityKey), count: 1 });
+        if (existing) {
+          existing.count += 1;
+          existing.isCity = existing.isCity || isCity;
+        } else {
+          cmap.set(cityKey, { key: cityKey, isCity, count: 1 });
+        }
       }
     }
     const customersByProvince = [...provinceCounts.entries()]
@@ -533,7 +542,7 @@ export async function handleCustomerAnalytics(req, res) {
         province,
         customers,
         cities: [...(cityCountsByProvince.get(province)?.values() || [])]
-          .map(({ city, count }) => ({ city, customers: count }))
+          .map(({ key, isCity, count }) => ({ city: titleCase(key) + (isCity ? " City" : ""), customers: count }))
           .sort((a, b) => b.customers - a.customers),
       }))
       .sort((a, b) => b.customers - a.customers);
