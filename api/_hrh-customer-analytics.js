@@ -146,12 +146,7 @@ export async function handleCustomerAnalytics(req, res) {
 
     // Per-customer window aggregation — ONE query covering previous+current,
     // conditionally aggregated (same pattern as every other api/hrh-*.js
-    // KPI query). `first_order_date` is the customer's cross-store,
-    // all-time-first HRH-family order (cust_first_order_date on
-    // xv3.mart_net_sales) — deliberately NOT scoped to this store alone, same
-    // reasoning as Executive Overview's Customer Segments: a customer who's
-    // shopped at a physical branch for years is correctly NOT "new" just
-    // because this is their first HRH Online order.
+    // KPI query).
     //
     // `ct.customer_name` = 'WALK IN' is EXCLUDED — verified this session
     // (Executive Overview's Customer Segments) that every TikTok/Shopee
@@ -168,7 +163,6 @@ export async function handleCustomerAnalytics(req, res) {
           SELECT
             customer_id,
             any(\`ct.customer_name\`) AS customer_name,
-            any(toDate(cust_first_order_date)) AS first_order_date,
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
             sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
             uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
@@ -197,24 +191,71 @@ export async function handleCustomerAnalytics(req, res) {
       })
     ).json();
 
+    // New vs Returning — "one-time buyer status": New = this customer has
+    // placed exactly ONE order ever, across their ENTIRE history with HMR
+    // (any store, any channel, any date) as of right now. Returning = 2+
+    // lifetime orders. Deliberately NOT tied to the selected date range at
+    // all (an earlier "first order fell inside this window" definition was
+    // tried and rejected — it made New shrink to near-zero on a 1-day
+    // filter purely because a customer's literal first-ever-anything-day
+    // rarely lands on any one specific day you happen to be viewing).
+    // A customer's label is fixed as of today: if they were a one-time
+    // buyer last month but ordered again since, they read as Returning
+    // everywhere, including in past periods — this is intentional, not a
+    // bug (see prevNewCount below).
+    //
+    // Lifetime count is computed by `ct.customer_name`, not customer_id —
+    // verified customer_id is NOT a stable cross-store identity (a real
+    // customer active at 4 different stores carried 2 different
+    // customer_ids, split across store groupings, which would have
+    // undercounted her lifetime orders as 3 and 2 instead of 5).
+    // customer_name is the same cross-store key already trusted elsewhere
+    // in this app (cust_first_order_date, Executive Overview's Customer
+    // Segments) — verified it recovers her correct lifetime total of 5.
+    // Known limitation inherited from that same precedent: very common
+    // names (e.g. "Michael Reyes") can collide across genuinely different
+    // people, which would overcount their combined lifetime orders and
+    // misclassify some of them as Returning when they're actually
+    // first-time buyers — a data-quality ceiling, not something fixable
+    // from this table alone.
+    const names = [...new Set(rows.map((r) => r.customer_name).filter(Boolean))];
+    let lifetimeMap = new Map();
+    if (names.length) {
+      const lifetimeRows = await (
+        await client.query({
+          query: `
+            SELECT \`ct.customer_name\` AS name, uniqExactIf(invoice_id, net_sales_amount > 0) AS lifetime_orders
+            FROM xv3.mart_net_sales
+            WHERE \`ct.customer_name\` IN {names:Array(String)}
+            GROUP BY name
+          `,
+          query_params: { names },
+          format: "JSONEachRow",
+        })
+      ).json();
+      lifetimeMap = new Map(lifetimeRows.map((r) => [r.name, toNum(r.lifetime_orders)]));
+    }
+    const isOneTimeBuyer = (name) => lifetimeMap.get(name) === 1;
+
     const curCustomers = rows
       .filter((r) => toNum(r.cur_orders) > 0)
       .map((r) => ({
         customerId: r.customer_id,
         name: r.customer_name || "—",
-        firstOrderDate: r.first_order_date,
+        isNew: isOneTimeBuyer(r.customer_name),
         gmv: toNum(r.cur_gmv),
         units: toNum(r.cur_units),
         orders: toNum(r.cur_orders),
         firstTxn: r.cur_first_txn,
         lastTxn: r.cur_last_txn,
       }));
-    const prevOrderCount = rows.filter((r) => toNum(r.prev_orders) > 0).length;
-    const prevNewCount = rows.filter((r) => toNum(r.prev_orders) > 0 && r.first_order_date && r.first_order_date >= previous.from).length;
+    const prevActiveRows = rows.filter((r) => toNum(r.prev_orders) > 0);
+    const prevOrderCount = prevActiveRows.length;
+    const prevNewCount = prevActiveRows.filter((r) => isOneTimeBuyer(r.customer_name)).length;
     const prevReturningCount = prevOrderCount - prevNewCount;
 
     const curUnique = curCustomers.length;
-    const curNew = curCustomers.filter((c) => c.firstOrderDate && c.firstOrderDate >= current.from).length;
+    const curNew = curCustomers.filter((c) => c.isNew).length;
     const curReturning = curUnique - curNew;
     const curRepeat = curCustomers.filter((c) => c.orders >= 2).length;
     const curGmvTotal = curCustomers.reduce((s, c) => s + c.gmv, 0);
@@ -262,24 +303,17 @@ export async function handleCustomerAnalytics(req, res) {
       }));
 
     // Customer Trend — New/Returning classified per bucket using the SAME
-    // boundary as the whole-window KPI above (first_order_date >= the
-    // window's own start, curFrom) — NOT each bucket's own local start.
-    // Tried bucket-local boundaries first and caught a real inconsistency:
-    // a customer whose absolute first-ever HMR order (any store) fell
-    // inside the selected window still reads "Returning" in whichever
-    // bucket her ONE HRH Online order happens to land in, if that bucket
-    // isn't the exact bucket containing her first-ever order (e.g. first
-    // order at a physical branch in March, first HRH Online order in
-    // April — bucket-local logic called the April bucket "Returning" since
-    // March < April's start, even though she's a "New" customer for the
-    // whole window per the KPI above). Comparing against the fixed window
-    // start instead keeps the two consistent: this is "how many active-in-
-    // this-bucket customers are, overall, new-to-the-window" — a customer
-    // who's new-to-the-window and active in multiple buckets legitimately
-    // shows as "New" in each one (this is a per-bucket ACTIVITY breakdown,
-    // not a re-partition of the whole-window unique count, so its bars
-    // summing higher than the KPI is expected, same as multiple GA4
-    // sessions from one user each counting toward "sessions").
+    // lifetime-order-count definition as the KPIs above (isOneTimeBuyer),
+    // not a per-bucket or per-window boundary — a customer's label is a
+    // fixed, today-as-of fact about them, so it's identical in every
+    // bucket they appear in. This IS a per-bucket ACTIVITY breakdown, not a
+    // re-partition of the whole-window unique count: a customer active in
+    // multiple buckets legitimately shows as "New" (or "Returning") in
+    // each one, so bars can sum higher than the KPI's unique total — same
+    // as multiple GA4 sessions from one user each counting toward
+    // "sessions". Classification happens in JS (not SQL countIf) so it can
+    // share the exact same lifetimeMap lookup as the KPIs, guaranteeing
+    // the two can never drift out of sync.
     // Computed server-side (not via the client-side bucketRows() pattern)
     // since distinct-customer counts can't be safely summed across days the
     // way GMV/Orders sums can. All 3 granularities are precomputed here so
@@ -290,38 +324,34 @@ export async function handleCustomerAnalytics(req, res) {
       const trendRows = await (
         await client.query({
           query: `
-            WITH per_bucket_customer AS (
-              SELECT
-                ${bucketExpr} AS bucket_date,
-                customer_id,
-                any(toDate(cust_first_order_date)) AS first_order_date
-              FROM xv3.mart_net_sales
-              WHERE store_name = {store:String}
-                AND sales_channel IN {channels:Array(String)}
-                AND customer_id IS NOT NULL
-                AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
-                AND match(\`ct.customer_name\`, '[a-zA-Z]')
-                AND net_sales_amount > 0
-                AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-              GROUP BY bucket_date, customer_id
-            )
             SELECT
-              toString(bucket_date) AS bucket,
-              countIf(first_order_date >= {curFrom:String}) AS new_customers,
-              countIf(first_order_date < {curFrom:String} OR first_order_date IS NULL) AS returning_customers
-            FROM per_bucket_customer
-            GROUP BY bucket_date
-            ORDER BY bucket_date
+              toString(${bucketExpr}) AS bucket,
+              customer_id,
+              any(\`ct.customer_name\`) AS customer_name
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND customer_id IS NOT NULL
+              AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
+              AND match(\`ct.customer_name\`, '[a-zA-Z]')
+              AND net_sales_amount > 0
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            GROUP BY bucket, customer_id
           `,
           query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
       ).json();
-      return trendRows.map((r) => ({
-        bucket: r.bucket,
-        newCustomers: toNum(r.new_customers),
-        returningCustomers: toNum(r.returning_customers),
-      }));
+      const byBucket = new Map();
+      for (const r of trendRows) {
+        const entry = byBucket.get(r.bucket) || { newCustomers: 0, returningCustomers: 0 };
+        if (isOneTimeBuyer(r.customer_name)) entry.newCustomers += 1;
+        else entry.returningCustomers += 1;
+        byBucket.set(r.bucket, entry);
+      }
+      return [...byBucket.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([bucket, v]) => ({ bucket, ...v }));
     }
     const [trendDay, trendWeek, trendMonth] = await Promise.all([
       fetchCustomerTrend("toDate(transaction_date)"),
@@ -339,6 +369,8 @@ export async function handleCustomerAnalytics(req, res) {
         previous,
         customerScopeNote:
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
+        newCustomerDefinition:
+          "New = this customer has placed exactly one order ever, across their entire history with HMR (any store, any channel) as of today. Returning = two or more lifetime orders. Not tied to the selected date range — a customer's label stays the same regardless of what period you're viewing.",
         generatedAt: new Date().toISOString(),
       },
       kpis,

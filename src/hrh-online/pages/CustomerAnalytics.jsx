@@ -39,9 +39,12 @@ function isDateRangeReady(dateRange) {
 // Real ClickHouse-backed Customer Analytics — see api/_hrh-customer-analytics.js
 // (dispatched from api/hrh-sales-analytics.js via ?report=customers, co-located
 // only because of the Vercel Hobby plan's 12-function cap) for the queries.
-// New/Returning uses the customer's cross-store, all-time-first HRH order
-// (not scoped to HRH Online alone) — same reasoning as Executive Overview's
-// Customer Segments. Customer Trend's Day/Week/Month toggle switches
+// New/Returning is "one-time buyer status" — New = exactly one lifetime
+// order across all of HMR (any store/channel) as of today, Returning = 2+.
+// Deliberately NOT tied to the selected date range (see
+// api/_hrh-customer-analytics.js's isOneTimeBuyer comment for why an
+// earlier "first order fell inside this window" definition was replaced).
+// Customer Trend's Day/Week/Month toggle switches
 // between 3 PRECOMPUTED server-side series (data.customerTrend.day/week/
 // month), not a client-side re-aggregation of one daily series — distinct-
 // customer counts can't be safely summed across days the way GMV/Orders
@@ -109,8 +112,8 @@ export default function CustomerAnalytics({ filters }) {
         <>
           <KpiRow>
             <KpiCard label="Unique Customers" value={formatNum(data.kpis.uniqueCustomers.value)} delta={data.kpis.uniqueCustomers.delta} />
-            <KpiCard label="New Customers" value={formatNum(data.kpis.newCustomers.value)} delta={data.kpis.newCustomers.delta} />
-            <KpiCard label="Returning Customers" value={formatNum(data.kpis.returningCustomers.value)} delta={data.kpis.returningCustomers.delta} />
+            <KpiCard label="New Customers" value={formatNum(data.kpis.newCustomers.value)} delta={data.kpis.newCustomers.delta} sub="1 lifetime order" />
+            <KpiCard label="Returning Customers" value={formatNum(data.kpis.returningCustomers.value)} delta={data.kpis.returningCustomers.delta} sub="2+ lifetime orders" />
             <KpiCard label="Repeat Rate" value={formatPct(data.kpis.repeatRate.value)} delta={data.kpis.repeatRate.delta} />
             <KpiCard label="Sales / Customer" value={formatPeso(data.kpis.salesPerCustomer.value)} delta={data.kpis.salesPerCustomer.delta} />
           </KpiRow>
