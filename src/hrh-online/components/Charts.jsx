@@ -101,13 +101,17 @@ export function SalesTrendComboChart({ data, height = 260 }) {
   );
 }
 
-// Stacked area trend — same-unit series stacked on one shared axis (e.g.
-// Order Value + Discount Value, which together read as "original list
-// price before the voucher"). `categories`: [{ key, name, color }].
-// `tooltipContent` lets a caller override the default per-series
-// ChartTooltip (e.g. SalesAnalytics.jsx's VoucherTrendTooltip, which derives
-// AOV from the underlying data row instead of showing raw series values).
-export function StackedAreaChart({ data, categories, xKey = "label", height = 260, valueFormatter = formatCompactPeso, tooltipContent }) {
+// Area trend for same-unit series on one shared axis (e.g. Order Value vs.
+// Discount Value). `stacked` (default false) draws each area independently,
+// overlapping with partial opacity so both are readable at once — turn it
+// on only when the series are meant to be read as parts of one whole (e.g.
+// "Order Value + Discount Value = original list price"), since a stack
+// makes each individual series' own shape harder to read.
+// `categories`: [{ key, name, color }]. `tooltipContent` lets a caller
+// override the default per-series ChartTooltip (e.g. SalesAnalytics.jsx's
+// VoucherTrendTooltip, which derives AOV from the underlying data row
+// instead of showing raw series values).
+export function StackedAreaChart({ data, categories, xKey = "label", height = 260, valueFormatter = formatCompactPeso, tooltipContent, stacked = false }) {
   const TooltipContent = tooltipContent || ChartTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -123,10 +127,10 @@ export function StackedAreaChart({ data, categories, xKey = "label", height = 26
             type="monotone"
             dataKey={c.key}
             name={c.name}
-            stackId="1"
+            stackId={stacked ? "1" : undefined}
             stroke={c.color || hrh.series[i % hrh.series.length]}
             fill={c.color || hrh.series[i % hrh.series.length]}
-            fillOpacity={0.35}
+            fillOpacity={0.3}
           />
         ))}
       </AreaChart>
