@@ -79,14 +79,14 @@ function colorFor(count, maxCount) {
   // Metro Manila's count dwarfs every other province (e.g. 216 vs Laguna's
   // 46), so a linear scale left every province but Metro Manila looking
   // almost as pale as the true-zero gray. sqrt compresses that dominance;
-  // the 0.35 floor guarantees ANY nonzero count still reads as visibly
+  // the 0.55 floor guarantees ANY nonzero count still reads as strongly
   // "filled" blue, never a wash of near-gray.
   const ratio = maxCount > 0 ? count / maxCount : 0;
-  const t = 0.35 + 0.65 * Math.sqrt(ratio);
-  // Interpolate between blueSoft (low) and blue (high) — HMR's brand blue,
-  // per request, rather than the orange accent used elsewhere.
-  const from = [232, 240, 251]; // hrh.blueSoft
-  const to = [63, 121, 209]; // hrh.blue
+  const t = 0.55 + 0.45 * Math.sqrt(ratio);
+  // Interpolate between a medium blue (low) and hrh.blueText, a darker
+  // blue than the brand hrh.blue, for stronger emphasis at the high end.
+  const from = [147, 178, 222]; // medium blue, well past blueSoft
+  const to = [42, 93, 163]; // hrh.blueText
   const mix = from.map((c, i) => Math.round(c + (to[i] - c) * t));
   return `rgb(${mix.join(",")})`;
 }
