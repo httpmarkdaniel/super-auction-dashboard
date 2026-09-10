@@ -3,7 +3,11 @@ import { hrh } from "../theme";
 
 // Compact executive KPI card — thin orange top accent, room for a future
 // comparison delta and a short contextual label, per the Phase 2 brief.
-export function KpiCard({ label, value, delta, sub }) {
+// `previousLabel` (an already-formatted string, e.g. formatPeso(previous))
+// renders a "vs {previousLabel}" comparison line at the bottom of the card
+// alongside the delta badge — used by Executive Overview, whose "Compare
+// to" pill selector (Day/Week/Month) changes what "previous" means.
+export function KpiCard({ label, value, delta, sub, previousLabel }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
@@ -23,6 +27,11 @@ export function KpiCard({ label, value, delta, sub }) {
             </span>
           )}
           {sub && <span style={{ color: hrh.muted }}>{sub}</span>}
+        </div>
+      )}
+      {previousLabel && (
+        <div className="mt-1 pt-1.5 text-[11px]" style={{ borderTop: `1px solid ${hrh.border}`, color: hrh.muted }}>
+          vs {previousLabel}
         </div>
       )}
     </div>

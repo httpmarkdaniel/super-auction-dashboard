@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
-import DataTable from "../components/DataTable";
 import { LoadingState, ErrorState } from "../components/States";
 import { SalesTrendComboChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
@@ -9,13 +8,9 @@ import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
 
-// Same 5 metrics as the KPI scorecards above, just rendered as a table row
-// each so current vs previous-period values sit side by side (not just the
-// small delta badge on the card). "Previous period" is whatever the API
-// resolved opposite the current Date Range filter (see meta.previous /
-// resolveRange in api/hrh-executive-overview.js) — a preceding window of
-// the same length, so it's always dynamic to whatever range is selected.
-const KPI_COMPARISON_ROWS = [
+// The 5 KPI scorecards, each paired with the formatter its value/previous
+// need. Same shape/order as data.kpis from api/hrh-executive-overview.js.
+const KPI_CARDS = [
   { key: "gmv", label: "GMV", formatter: formatPeso },
   { key: "nmv", label: "NMV", formatter: formatPeso },
   { key: "aov", label: "AOV", formatter: formatPeso },
@@ -23,21 +18,16 @@ const KPI_COMPARISON_ROWS = [
   { key: "units", label: "Units", formatter: formatNum },
 ];
 
-function DeltaCell({ delta }) {
-  if (delta === null || delta === undefined) return <span style={{ color: hrh.muted }}>—</span>;
-  const positive = delta >= 0;
-  return (
-    <span className="font-semibold" style={{ color: positive ? hrh.good : hrh.bad }}>
-      {positive ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
-    </span>
-  );
-}
-
-const KPI_COMPARISON_COLUMNS = [
-  { key: "metric", label: "Metric" },
-  { key: "current", label: "Current Period" },
-  { key: "previous", label: "Previous Period" },
-  { key: "delta", label: "Change", render: (r) => <DeltaCell delta={r.delta} /> },
+// "Compare to" — an explicit, independent choice of comparison basis for
+// every scorecard's bottom-of-card delta, decoupled from the Date Range
+// filter itself (see resolveComparisonWindow in
+// api/hrh-executive-overview.js): Day shifts the whole selected window
+// back 1 day, Week back 7 days, Month back 1 calendar month — whatever the
+// window's own length or type (a single day, WTD, MTD, a custom span…).
+const COMPARE_OPTIONS = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
 ];
 
 // Real order_status values from xv3.mart_xv3_order_report (verified, not
@@ -111,15 +101,16 @@ export default function ExecutiveOverview({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [trendBucket, setTrendBucket] = useState("day");
+  const [compareTo, setCompareTo] = useState("week");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p, signal) => {
+  const load = useCallback(async (ch, p, cmp, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p });
+      const qs = new URLSearchParams({ channel: ch, ...p, compareTo: cmp });
       const res = await fetch(`/api/hrh-executive-overview?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -136,9 +127,9 @@ export default function ExecutiveOverview({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    load(channel, params, controller.signal);
+    load(channel, params, compareTo, controller.signal);
     return () => controller.abort();
-  }, [channel, params, ready, load]);
+  }, [channel, params, compareTo, ready, load]);
 
   const salesTrend = bucketRows(data?.salesTrend, trendBucket, ["gmv", "orders"]);
   const channelSegments =
@@ -148,18 +139,6 @@ export default function ExecutiveOverview({ filters }) {
   const customerSegments =
     data?.customerSegments.map((s) => ({ label: s.segment, value: s.orders, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
   const totalCustomerSegmentCount = customerSegments.reduce((s, x) => s + x.value, 0);
-  const kpiComparisonRows = data
-    ? KPI_COMPARISON_ROWS.map((r) => {
-        const k = data.kpis[r.key];
-        return {
-          id: r.key,
-          metric: r.label,
-          current: r.formatter(k.value),
-          previous: r.formatter(k.previous),
-          delta: k.delta,
-        };
-      })
-    : [];
 
   return (
     <div>
@@ -172,15 +151,23 @@ export default function ExecutiveOverview({ filters }) {
             Key performance metrics and trends for HRH Online
           </p>
         </div>
-        {data?.meta?.current && (
-          <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
-            {effectivePeriodLabel(data.meta.current)}
-            <span className="font-normal" style={{ color: hrh.muted }}>
-              {" "}
-              vs {effectivePeriodLabel(data.meta.previous)}
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+              Compare to
             </span>
-          </span>
-        )}
+            <TrendBucketPills value={compareTo} onChange={setCompareTo} options={COMPARE_OPTIONS} />
+          </div>
+          {data?.meta?.current && (
+            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+              {effectivePeriodLabel(data.meta.current)}
+              <span className="font-normal" style={{ color: hrh.muted }}>
+                {" "}
+                vs {effectivePeriodLabel(data.meta.previous)}
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
@@ -190,24 +177,19 @@ export default function ExecutiveOverview({ filters }) {
       {data && !error && (
         <>
           <KpiRow>
-            <KpiCard label="GMV" value={formatPeso(data.kpis.gmv.value)} delta={data.kpis.gmv.delta} />
-            <KpiCard label="NMV" value={formatPeso(data.kpis.nmv.value)} delta={data.kpis.nmv.delta} />
-            <KpiCard label="AOV" value={formatPeso(data.kpis.aov.value)} delta={data.kpis.aov.delta} />
-            <KpiCard label="Orders" value={formatNum(data.kpis.orders.value)} delta={data.kpis.orders.delta} />
-            <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
+            {KPI_CARDS.map((c) => {
+              const k = data.kpis[c.key];
+              return (
+                <KpiCard
+                  key={c.key}
+                  label={c.label}
+                  value={c.formatter(k.value)}
+                  delta={k.delta}
+                  previousLabel={c.formatter(k.previous)}
+                />
+              );
+            })}
           </KpiRow>
-
-          <Panel
-            title="Period Comparison"
-            subtitle={
-              data.meta?.current
-                ? `${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`
-                : "Current vs previous period"
-            }
-            className="mb-4"
-          >
-            <DataTable columns={KPI_COMPARISON_COLUMNS} rows={kpiComparisonRows} />
-          </Panel>
 
           <Panel
             title="Sales Trend"

@@ -46,11 +46,6 @@ function addDaysISO(iso, days) {
   dt.setUTCDate(dt.getUTCDate() + days);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
-function daysBetweenISO(fromIso, toIso) {
-  const [fy, fm, fd] = fromIso.split("-").map(Number);
-  const [ty, tm, td] = toIso.split("-").map(Number);
-  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
-}
 function mondayOfWeek(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
@@ -72,39 +67,38 @@ function shiftMonthsClampedISO(iso, deltaMonths) {
   const nd = Math.min(d, daysInMonth(ny, nm1));
   return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
-function shiftYearsClampedISO(iso, deltaYears) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const ny = y + deltaYears;
-  const nd = Math.min(d, daysInMonth(ny, m));
-  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
-}
+// Resolves ONLY the current window from the Date Range filter (WTD/MTD/
+// YTD/Custom) — the comparison window is a separate, user-chosen concern,
+// see resolveComparisonWindow below.
 function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
   if (range === "custom") {
     if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
     const from = fromParam <= toParam ? fromParam : toParam;
     const to = fromParam <= toParam ? toParam : fromParam;
-    const lengthDays = daysBetweenISO(from, to) + 1;
-    const prevTo = addDaysISO(from, -1);
-    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
-    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+    return { current: { from, to } };
   }
   if (range === "mtd") {
-    const to = today;
-    const from = firstOfMonthISO(to);
-    const prevAnchor = shiftMonthsClampedISO(to, -1);
-    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+    return { current: { from: firstOfMonthISO(today), to: today } };
   }
   if (range === "ytd") {
-    const to = today;
-    const from = `${to.slice(0, 4)}-01-01`;
-    const prevTo = shiftYearsClampedISO(to, -1);
-    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
-    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+    return { current: { from: `${today.slice(0, 4)}-01-01`, to: today } };
   }
-  const to = today;
-  const from = mondayOfWeek(to);
-  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  return { current: { from: mondayOfWeek(today), to: today } };
+}
+
+// The "Compare to" scorecard control (Day/Week/Month) — shifts the WHOLE
+// current window back by a fixed amount, independent of the Date Range
+// filter's own span or type. This replaces the old behavior where the
+// comparison window was implicitly tied to the range type (e.g. WTD was
+// always "vs prior week") — now the user picks the comparison basis
+// explicitly, and it applies the same way regardless of what's selected
+// in the Date Range filter (a single day, a week, MTD, a custom span…).
+function resolveComparisonWindow(current, compareTo) {
+  const { from, to } = current;
+  if (compareTo === "day") return { from: addDaysISO(from, -1), to: addDaysISO(to, -1) };
+  if (compareTo === "month") return { from: shiftMonthsClampedISO(from, -1), to: shiftMonthsClampedISO(to, -1) };
+  return { from: addDaysISO(from, -7), to: addDaysISO(to, -7) }; // "week" (default)
 }
 
 function enumerateDatesISO(from, to) {
@@ -122,14 +116,15 @@ export default async function handler(req, res) {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : "week";
 
     let current;
-    let previous;
     try {
-      ({ current, previous } = resolveRange(range, from, to));
+      ({ current } = resolveRange(range, from, to));
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
+    const previous = resolveComparisonWindow(current, compareTo);
 
     // KPIs — identical formula/shape to hrh-product-analytics.js.
     const kpiRows = await (
@@ -394,6 +389,7 @@ export default async function handler(req, res) {
       meta: {
         channel,
         range,
+        compareTo,
         current,
         previous,
         salesAsOf: k.sales_as_of || null,
