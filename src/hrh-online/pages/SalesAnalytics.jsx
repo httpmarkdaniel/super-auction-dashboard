@@ -276,7 +276,7 @@ export default function SalesAnalytics({ filters }) {
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
             <div className="xl:col-span-2">
-              <Panel title="Channel Comparison">
+              <Panel title="Channel Comparison" className="h-full">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
               </Panel>
             </div>
