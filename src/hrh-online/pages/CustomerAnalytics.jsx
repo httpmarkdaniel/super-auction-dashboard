@@ -1,56 +1,154 @@
+import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
-import ShareBar from "../components/ShareBar";
-import DemoBadge from "../components/DemoBadge";
-import { BarComparisonChart } from "../components/Charts";
-import { customerAnalytics } from "../mock/data";
+import DataTable from "../components/DataTable";
+import HorizontalBarList from "../components/HorizontalBarList";
+import { ComboBarLineChart, DonutChart } from "../components/Charts";
+import { LoadingState, ErrorState } from "../components/States";
+import { formatShortDateLabel } from "../trendBucket";
+import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum } from "../format";
 
-export default function CustomerAnalytics() {
-  const { kpis, newVsReturning, purchaseFrequency, customerValueDistribution, customerSegment } = customerAnalytics;
+const SEGMENT_COLOR = { New: hrh.blue, Returning: hrh.accent };
+
+const TOP_CUSTOMER_COLUMNS = [
+  { key: "customer", label: "Customer", maxWidth: 200 },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
+  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
+  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
+  { key: "firstPurchase", label: "First Purchase" },
+  { key: "lastBuy", label: "Last Buy" },
+];
+
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
+function isDateRangeReady(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return Boolean(dateRange.from && dateRange.to && dateRange.from <= dateRange.to);
+  }
+  return Boolean(dateRange);
+}
+
+// Real ClickHouse-backed Customer Analytics — see api/_hrh-customer-analytics.js
+// (dispatched from api/hrh-sales-analytics.js via ?report=customers, co-located
+// only because of the Vercel Hobby plan's 12-function cap) for the queries.
+// New/Returning uses the customer's cross-store, all-time-first HRH order
+// (not scoped to HRH Online alone) — same reasoning as Executive Overview's
+// Customer Segments. Customer Trend is bucketed server-side (day, or week
+// once the range exceeds 60 days) since distinct-customer counts can't be
+// safely re-aggregated client-side the way GMV/Orders sums can.
+export default function CustomerAnalytics({ filters }) {
+  const { channel, dateRange } = filters;
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const ready = isDateRangeReady(dateRange);
+
+  const load = useCallback(async (ch, params, signal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ channel: ch, ...params, report: "customers" });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setData(json);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    load(channel, dateRangeParams(dateRange), controller.signal);
+    return () => controller.abort();
+  }, [channel, dateRange, ready, load]);
+
+  const customerTrend = data?.customerTrend.map((r) => ({ dateLabel: formatShortDateLabel(r.bucket), newCustomers: r.newCustomers, returningCustomers: r.returningCustomers })) || [];
+  const newVsReturningSegments =
+    data?.newVsReturning.map((s) => ({ label: s.segment, value: s.count, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
+  const valueSegments = data?.valueSegments.map((s) => ({ label: s.segment, value: s.count })) || [];
+  const purchaseFrequencyRows = data?.purchaseFrequency.map((r) => ({ label: r.bucket, value: r.count })) || [];
+  const spendDistributionRows = data?.spendDistribution.map((r) => ({ label: r.bucket, value: r.count })) || [];
+  const totalNewVsReturning = newVsReturningSegments.reduce((s, x) => s + x.value, 0);
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Customer Analytics
-        </div>
-        <DemoBadge />
+      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
+        Customer Analytics
       </div>
 
-      <KpiRow>
-        <KpiCard label="Unique Customers" value={formatNum(kpis.uniqueCustomers.value)} delta={kpis.uniqueCustomers.delta} />
-        <KpiCard label="New Customers" value={formatNum(kpis.newCustomers.value)} delta={kpis.newCustomers.delta} />
-        <KpiCard label="Returning Customers" value={formatNum(kpis.returningCustomers.value)} delta={kpis.returningCustomers.delta} />
-        <KpiCard label="Repeat Purchase Rate" value={formatPct(kpis.repeatPurchaseRate.value)} delta={kpis.repeatPurchaseRate.delta} />
-        <KpiCard label="Customer AOV" value={formatPeso(kpis.customerAOV.value)} delta={kpis.customerAOV.delta} />
-      </KpiRow>
+      {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
+      {ready && loading && !data && <LoadingState label="Loading Customer Analytics…" />}
+      {error && <ErrorState label={`Couldn't load Customer Analytics: ${error}`} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <Panel title="New vs Returning">
-          <ShareBar segments={newVsReturning} />
-        </Panel>
-        <Panel title="Customer Type / Segment">
-          <ShareBar segments={customerSegment} />
-        </Panel>
-      </div>
+      {data && !error && (
+        <>
+          <KpiRow>
+            <KpiCard label="Unique Customers" value={formatNum(data.kpis.uniqueCustomers.value)} delta={data.kpis.uniqueCustomers.delta} />
+            <KpiCard label="New Customers" value={formatNum(data.kpis.newCustomers.value)} delta={data.kpis.newCustomers.delta} />
+            <KpiCard label="Returning Customers" value={formatNum(data.kpis.returningCustomers.value)} delta={data.kpis.returningCustomers.delta} />
+            <KpiCard label="Repeat Rate" value={formatPct(data.kpis.repeatRate.value)} delta={data.kpis.repeatRate.delta} />
+            <KpiCard label="Sales / Customer" value={formatPeso(data.kpis.salesPerCustomer.value)} delta={data.kpis.salesPerCustomer.delta} />
+          </KpiRow>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Panel title="Purchase Frequency">
-          <BarComparisonChart
-            data={purchaseFrequency}
-            series={[{ key: "value", name: "Customers" }]}
-            valueFormatter={(v) => formatNum(v)}
-          />
-        </Panel>
-        <Panel title="Customer Value Distribution">
-          <BarComparisonChart
-            data={customerValueDistribution}
-            series={[{ key: "value", name: "Customers", color: "#d99a3d" }]}
-            valueFormatter={(v) => formatNum(v)}
-          />
-        </Panel>
-      </div>
+          <Panel title="Customer Trend" subtitle="New vs Returning customers over time" className="mb-4">
+            <ComboBarLineChart
+              data={customerTrend}
+              xKey="dateLabel"
+              barKey="newCustomers"
+              barName="New"
+              barColor={hrh.blue}
+              lineKey="returningCustomers"
+              lineName="Returning"
+              lineColor={hrh.accent}
+              valueFormatter={formatNum}
+            />
+          </Panel>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <Panel title="New vs Returning">
+              <DonutChart segments={newVsReturningSegments} centerValue={formatNum(totalNewVsReturning)} centerLabel="Customers" />
+            </Panel>
+            <Panel title="Customer Value Segments">
+              <div className="space-y-2.5">
+                {valueSegments.map((s) => (
+                  <div key={s.label} className="flex items-center justify-between text-[13px]" style={{ color: hrh.ink2 }}>
+                    <span>{s.label}</span>
+                    <span className="font-semibold" style={{ color: hrh.ink }}>
+                      {formatNum(s.value)} customers
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <Panel title="Purchase Frequency">
+              <HorizontalBarList rows={purchaseFrequencyRows} />
+            </Panel>
+            <Panel title="Customer Spend Distribution">
+              <HorizontalBarList rows={spendDistributionRows} />
+            </Panel>
+          </div>
+
+          <Panel title="Top Customers" subtitle="Ranked by GMV for the selected period">
+            <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />
+          </Panel>
+        </>
+      )}
     </div>
   );
 }
