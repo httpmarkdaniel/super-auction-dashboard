@@ -12,7 +12,7 @@ export function KpiCard({ label, value, delta, sub }) {
       <div className="text-[11px] uppercase tracking-[0.06em] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
         {label}
       </div>
-      <div className="text-[19px] font-bold tabular-nums" style={{ color: hrh.ink }}>
+      <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
         {value}
       </div>
       {(hasDelta || sub) && (
