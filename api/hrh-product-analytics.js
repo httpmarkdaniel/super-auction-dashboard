@@ -344,7 +344,6 @@ export default async function handler(req, res) {
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
-            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_units,
             coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
@@ -454,10 +453,11 @@ export default async function handler(req, res) {
         sku: r.barcode,
         product: r.product_name,
         category: r.category_name || null,
-        priorSales: wk3Gmv,
-        priorUnits: toNum(r.wk3_units),
-        currentSales: wk4Gmv,
-        currentUnits: toNum(r.wk4_units),
+        wk1Sales: wk1Gmv,
+        wk2Sales: wk2Gmv,
+        wk3Sales: wk3Gmv,
+        wk4Sales: wk4Gmv,
+        units: toNum(r.wk4_units),
         trend,
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,

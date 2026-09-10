@@ -48,17 +48,23 @@ function trendCell(trend) {
   );
 }
 
-// Column labels say "Week"/"Month" per the bucket granularity toggle, so
-// build the list fresh for whichever is selected rather than a fixed array.
-function repeatSellerColumns(granularity) {
-  const unit = granularity === "month" ? "Month" : "Week";
+// All 4 buckets shown as their own column (not just a prior/current pair),
+// each header naming its actual date range — e.g. "Wk1 (Aug 14–20)" — so
+// the qualifying window is visible right in the table, not just the
+// subtitle. `periodBuckets` (data.meta.periodBuckets) has the same
+// {wk1,wk2,wk3,wk4} shape regardless of week/month granularity.
+function repeatSellerColumns(granularity, periodBuckets) {
+  const prefix = granularity === "month" ? "Mo" : "Wk";
+  const bucketColumns = ["wk1", "wk2", "wk3", "wk4"].map((key, i) => ({
+    key: `${key}Sales`,
+    label: periodBuckets?.[key] ? `${prefix}${i + 1} (${formatCompactRange(periodBuckets[key])})` : `${prefix}${i + 1}`,
+    render: (r) => formatPeso(r[`${key}Sales`]),
+  }));
   return [
     { key: "sku", label: "SKU" },
     { key: "product", label: "Product", maxWidth: 130 },
-    { key: "priorSales", label: `Prior-${unit} Sales`, render: (r) => formatPeso(r.priorSales) },
-    { key: "priorUnits", label: `Prior-${unit} Units`, render: (r) => formatNum(r.priorUnits) },
-    { key: "currentSales", label: `Current-${unit} Sales`, render: (r) => formatPeso(r.currentSales) },
-    { key: "currentUnits", label: `Current-${unit} Units`, render: (r) => formatNum(r.currentUnits) },
+    ...bucketColumns,
+    { key: "units", label: "Units", render: (r) => formatNum(r.units) },
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
@@ -221,15 +227,12 @@ export default function ProductAnalytics({ filters }) {
         <>
           <Panel
             title="Repeat Sellers"
-            subtitle={
-              data.meta?.periodBuckets &&
-              `Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"}: ${formatCompactRange(data.meta.periodBuckets.wk1)} · ${formatCompactRange(data.meta.periodBuckets.wk2)} · ${formatCompactRange(data.meta.periodBuckets.wk3)} · ${formatCompactRange(data.meta.periodBuckets.wk4)}`
-            }
+            subtitle={`Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"} — independent of the Date Range filter above`}
             action={<TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />}
             className="mb-4"
           >
             <DataTable
-              columns={repeatSellerColumns(bucketGranularity)}
+              columns={repeatSellerColumns(bucketGranularity, data.meta?.periodBuckets)}
               rows={data.repeatSellers}
               paginate
               pageSize={10}
