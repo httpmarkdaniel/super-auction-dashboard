@@ -4,6 +4,7 @@ import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { ComboBarLineChart, DonutChart, BarComparisonChart } from "../components/Charts";
+import PhilippinesMap from "../components/PhilippinesMap";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
 import { hrh } from "../theme";
@@ -134,6 +135,8 @@ export default function CustomerAnalytics({ filters }) {
   const purchaseFrequencyRows = data?.purchaseFrequency.map((r) => ({ label: r.bucket, customers: r.count })) || [];
   const spendDistributionRows = data?.spendDistribution.map((r) => ({ label: r.bucket, customers: r.count })) || [];
   const totalNewVsReturning = newVsReturningSegments.reduce((s, x) => s + x.value, 0);
+  const customersByProvince = data?.customersByProvince || [];
+  const totalMappedCustomers = customersByProvince.reduce((s, p) => s + p.customers, 0);
 
   return (
     <div>
@@ -241,6 +244,34 @@ export default function CustomerAnalytics({ filters }) {
               />
             </Panel>
           </div>
+
+          <Panel title="Customers by Province" subtitle={data.meta?.provinceScopeNote} className="mb-4">
+            {customersByProvince.length === 0 ? (
+              <div className="text-[13px] py-6 text-center" style={{ color: hrh.muted }}>
+                No customers with a matched province in this period.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4">
+                <PhilippinesMap data={customersByProvince} />
+                <div className="space-y-1.5 max-h-[380px] overflow-y-auto">
+                  {customersByProvince.map((p) => (
+                    <div key={p.province} className="flex items-center justify-between text-[12.5px]" style={{ color: hrh.ink2 }}>
+                      <span className="truncate pr-2">{p.province}</span>
+                      <span className="font-semibold shrink-0" style={{ color: hrh.ink }}>
+                        {formatNum(p.customers)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="pt-2 mt-1.5 text-[11.5px] flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}`, color: hrh.muted }}>
+                    <span>Total mapped</span>
+                    <span className="font-semibold" style={{ color: hrh.ink }}>
+                      {formatNum(totalMappedCustomers)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Panel>
 
           <Panel title="Top Customers" subtitle="Ranked by GMV for the selected period">
             <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />

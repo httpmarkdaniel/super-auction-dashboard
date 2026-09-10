@@ -28,6 +28,42 @@ function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+
+// Same 82 province boundaries bundled for src/hrh-online/components/
+// PhilippinesMap.jsx (2011 PSA shapes, merged from faeldon/philippines-json-
+// maps) — duplicated here as a plain name list (not the geometry) purely to
+// validate/normalize parsed address text against real province names.
+const PH_PROVINCES = [
+  "Abra", "Agusan del Norte", "Agusan del Sur", "Aklan", "Albay", "Antique", "Apayao", "Aurora", "Basilan", "Bataan",
+  "Batanes", "Batangas", "Benguet", "Biliran", "Bohol", "Bukidnon", "Bulacan", "Cagayan", "Camarines Norte",
+  "Camarines Sur", "Camiguin", "Capiz", "Catanduanes", "Cavite", "Cebu", "Compostela Valley", "Davao Oriental",
+  "Davao del Norte", "Davao del Sur", "Dinagat Islands", "Eastern Samar", "Guimaras", "Ifugao", "Ilocos Norte",
+  "Ilocos Sur", "Iloilo", "Isabela", "Kalinga", "La Union", "Laguna", "Lanao del Norte", "Lanao del Sur", "Leyte",
+  "Maguindanao", "Marinduque", "Masbate", "Metropolitan Manila", "Misamis Occidental", "Misamis Oriental",
+  "Mountain Province", "Negros Occidental", "Negros Oriental", "North Cotabato", "Northern Samar", "Nueva Ecija",
+  "Nueva Vizcaya", "Occidental Mindoro", "Oriental Mindoro", "Palawan", "Pampanga", "Pangasinan", "Quezon", "Quirino",
+  "Rizal", "Romblon", "Samar", "Sarangani", "Shariff Kabunsuan", "Siquijor", "Sorsogon", "South Cotabato",
+  "Southern Leyte", "Sultan Kudarat", "Sulu", "Surigao del Norte", "Surigao del Sur", "Tarlac", "Tawi-Tawi",
+  "Zambales", "Zamboanga Sibugay", "Zamboanga del Norte", "Zamboanga del Sur",
+];
+const PH_PROVINCE_BY_UPPER = new Map(PH_PROVINCES.map((p) => [p.toUpperCase(), p]));
+// Real-world province names/spellings that don't match this (2011 PSA)
+// dataset's names — renames, splits, and common shorthand seen in actual
+// checkout addresses.
+const PROVINCE_ALIASES = {
+  "METRO MANILA": "Metropolitan Manila",
+  "METRO MLA": "Metropolitan Manila",
+  NCR: "Metropolitan Manila",
+  "DAVAO DE ORO": "Compostela Valley", // renamed 2019; dataset predates the rename
+  COTABATO: "North Cotabato",
+  "MAGUINDANAO DEL NORTE": "Maguindanao", // province split 2022; dataset predates the split
+  "MAGUINDANAO DEL SUR": "Maguindanao",
+};
+function normalizeProvince(candidate) {
+  if (!candidate) return null;
+  const upper = candidate.trim().toUpperCase();
+  return PROVINCE_ALIASES[upper] || PH_PROVINCE_BY_UPPER.get(upper) || null;
+}
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
@@ -355,6 +391,111 @@ export async function handleCustomerAnalytics(req, res) {
     ]);
     const customerTrend = { day: trendDay, week: trendWeek, month: trendMonth };
 
+    // Customers by Province — HARD-CODED to HMRPH Online regardless of the
+    // page's Channel filter, same precedent as Executive Overview's
+    // Customer Segments: TikTok/Shopee orders never carry a real shipping
+    // address in HMR's own systems (verified: 4 of 1,912 active TikTok
+    // customers vs 81 of 809 HMRPH Online customers have ANY location data
+    // at all), so including them would just add channel-shaped noise, not
+    // real geographic signal.
+    //
+    // Source: xv3.sales_orders.address (the actual checkout shipping
+    // address, e.g. "419 Ambuklao, New Alabang Village, CITY OF
+    // MUNTINLUPA, METRO MANILA 1780") — NOT xv3.customers.customer_city or
+    // cms.mart_cms_customer_profile.province, both investigated first and
+    // rejected for coverage: customer_city was null for 99.4% of HRH
+    // Online customers, and the CMS profile's province field only covered
+    // ~3% (83 of 2,778) lifetime customers. The checkout address covers
+    // ~42% of HMRPH Online invoices instead.
+    //
+    // Province is extracted as the LAST comma-separated segment of the
+    // address with its trailing zip code stripped — verified against 80
+    // real addresses, this segment is reliably the province name (Philippine
+    // checkout addresses consistently end "..., City, Province Zip").
+    // Extracted text is then normalized against PH_PROVINCES/
+    // PROVINCE_ALIASES; anything that doesn't match a real province
+    // (typos, missing province, non-PH addresses) is silently dropped from
+    // the map rather than guessed at — coverage is reported in meta so this
+    // is never presented as more complete than it is.
+    // One province per customer = their MOST RECENT order's address in the
+    // selected window (argMax by transaction_date) — customers usually ship
+    // to the same home address, and this avoids double-counting a customer
+    // who ordered from two different addresses within the window.
+    const provinceInvoiceRows = await (
+      await client.query({
+        query: `
+          WITH hrh_invoices AS (
+            SELECT DISTINCT customer_id, invoice_id, transaction_date
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel = 'HMRPH ONLINE'
+              AND net_sales_amount > 0
+              AND invoice_id IS NOT NULL
+              AND customer_id IS NOT NULL
+              AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
+              AND match(\`ct.customer_name\`, '[a-zA-Z]')
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+          ),
+          order_address AS (
+            SELECT invoice_id, argMax(coalesce(address, ''), _airbyte_extracted_at) AS address
+            FROM xv3.sales_orders
+            WHERE invoice_id IN (SELECT invoice_id FROM hrh_invoices)
+            GROUP BY invoice_id
+            HAVING address != ''
+          )
+          SELECT
+            h.customer_id AS customer_id,
+            h.transaction_date AS transaction_date,
+            trim(replaceRegexpOne(
+              arrayElement(splitByChar(',', o.address), length(splitByChar(',', o.address))),
+              '\\\\s*[0-9]+\\\\s*$', ''
+            )) AS province_candidate
+          FROM hrh_invoices h
+          INNER JOIN order_address o ON h.invoice_id = o.invoice_id
+        `,
+        query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const latestCandidateByCustomer = new Map();
+    for (const r of provinceInvoiceRows) {
+      const existing = latestCandidateByCustomer.get(r.customer_id);
+      if (!existing || r.transaction_date > existing.date) {
+        latestCandidateByCustomer.set(r.customer_id, { date: r.transaction_date, candidate: r.province_candidate });
+      }
+    }
+    const provinceCounts = new Map();
+    let matchedCustomers = 0;
+    for (const { candidate } of latestCandidateByCustomer.values()) {
+      const province = normalizeProvince(candidate);
+      if (province) {
+        provinceCounts.set(province, (provinceCounts.get(province) || 0) + 1);
+        matchedCustomers += 1;
+      }
+    }
+    const customersByProvince = [...provinceCounts.entries()]
+      .map(([province, customers]) => ({ province, customers }))
+      .sort((a, b) => b.customers - a.customers);
+
+    const hmrphOnlineTotalRows = await (
+      await client.query({
+        query: `
+          SELECT uniqExact(customer_id) AS n
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel = 'HMRPH ONLINE'
+            AND net_sales_amount > 0
+            AND customer_id IS NOT NULL
+            AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
+            AND match(\`ct.customer_name\`, '[a-zA-Z]')
+            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+        `,
+        query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const hmrphOnlineTotalCustomers = toNum(hmrphOnlineTotalRows[0]?.n);
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -367,6 +508,7 @@ export async function handleCustomerAnalytics(req, res) {
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
         newCustomerDefinition:
           "New = this customer has placed exactly one order ever, across their entire history with HMR (any store, any channel) as of today. Returning = two or more lifetime orders. Not tied to the selected date range — a customer's label stays the same regardless of what period you're viewing.",
+        provinceScopeNote: `HMRPH Online only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems. Based on ${matchedCustomers} of ${hmrphOnlineTotalCustomers} HMRPH Online customers in this period whose checkout address could be matched to a province; the rest either placed no HMRPH Online order this period or didn't have a usable address on file.`,
         generatedAt: new Date().toISOString(),
       },
       kpis,
@@ -375,6 +517,7 @@ export async function handleCustomerAnalytics(req, res) {
       spendDistribution: Object.entries(spendBuckets).map(([bucket, count]) => ({ bucket, count })),
       purchaseFrequency: Object.entries(frequencyBuckets).map(([bucket, count]) => ({ bucket, count })),
       customerTrend,
+      customersByProvince,
       topCustomers,
     });
   } catch (err) {
