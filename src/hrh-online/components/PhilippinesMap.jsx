@@ -76,7 +76,13 @@ const PROVINCE_PATHS = VALID_FEATURES.map((f) => ({
 
 function colorFor(count, maxCount) {
   if (!count) return hrh.border;
-  const t = maxCount > 0 ? count / maxCount : 0;
+  // Metro Manila's count dwarfs every other province (e.g. 216 vs Laguna's
+  // 46), so a linear scale left every province but Metro Manila looking
+  // almost as pale as the true-zero gray. sqrt compresses that dominance;
+  // the 0.35 floor guarantees ANY nonzero count still reads as visibly
+  // "filled" blue, never a wash of near-gray.
+  const ratio = maxCount > 0 ? count / maxCount : 0;
+  const t = 0.35 + 0.65 * Math.sqrt(ratio);
   // Interpolate between blueSoft (low) and blue (high) — HMR's brand blue,
   // per request, rather than the orange accent used elsewhere.
   const from = [232, 240, 251]; // hrh.blueSoft
