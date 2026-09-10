@@ -351,11 +351,17 @@ export default async function handler(req, res) {
     });
 
     // Top Sales Drivers — per-product GMV/Units for the current window,
-    // computed for ALL 3 real channels at once (like channelMix in
-    // api/hrh-executive-overview.js) so the page's own channel dropdown for
-    // this panel can switch instantly client-side rather than refetching.
-    // Canonical product key is `ct.item_id` (locked contract, same as
-    // api/hrh-product-analytics.js — the literal dot requires backticks).
+    // keyed by the SAME display strings the page's global Channel filter
+    // already uses ("All Channels"/"HMRPH Online"/"TikTok"/"Shopee") so the
+    // frontend can look it up directly with `channel` from the shared
+    // filter bar — no separate dropdown for this panel. Computed for every
+    // key at once (like channelMix in api/hrh-executive-overview.js), so
+    // switching the global filter doesn't need a refetch. "All Channels" is
+    // a genuine merge by item_id (not per-channel rows just concatenated),
+    // so a product sold on multiple channels shows its combined total
+    // rather than 3 separate near-duplicate entries. Canonical product key
+    // is `ct.item_id` (locked contract, same as api/hrh-product-analytics.js
+    // — the literal dot requires backticks).
     const salesDriverRows = await (
       await client.query({
         query: `
@@ -378,15 +384,25 @@ export default async function handler(req, res) {
       })
     ).json();
     const TOP_SALES_DRIVERS_SHOWN = 8;
-    const topSalesDrivers = {};
+    function topSalesDriversFor(rows) {
+      return {
+        byValue: [...rows].sort((a, b) => b.gmv - a.gmv).slice(0, TOP_SALES_DRIVERS_SHOWN),
+        byQty: [...rows].sort((a, b) => b.units - a.units).slice(0, TOP_SALES_DRIVERS_SHOWN),
+      };
+    }
+    const byItemAllChannels = new Map();
+    for (const r of salesDriverRows) {
+      const cur = byItemAllChannels.get(r.item_id) || { product: r.product_name, gmv: 0, units: 0 };
+      cur.gmv += toNum(r.gmv);
+      cur.units += toNum(r.units);
+      byItemAllChannels.set(r.item_id, cur);
+    }
+    const topSalesDrivers = { "All Channels": topSalesDriversFor(Array.from(byItemAllChannels.values())) };
     for (const ch of allChannels) {
       const rows = salesDriverRows
         .filter((r) => r.ch === ch)
         .map((r) => ({ product: r.product_name, gmv: toNum(r.gmv), units: toNum(r.units) }));
-      topSalesDrivers[ch] = {
-        byValue: [...rows].sort((a, b) => b.gmv - a.gmv).slice(0, TOP_SALES_DRIVERS_SHOWN),
-        byQty: [...rows].sort((a, b) => b.units - a.units).slice(0, TOP_SALES_DRIVERS_SHOWN),
-      };
+      topSalesDrivers[CHANNEL_DISPLAY[ch] || ch] = topSalesDriversFor(rows);
     }
 
     // Category / Subcategory Contribution — GMV per day, per category (or

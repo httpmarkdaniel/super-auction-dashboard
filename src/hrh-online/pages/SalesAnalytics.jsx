@@ -74,37 +74,16 @@ const DRIVER_QTY_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 220 },
   { key: "units", label: "Units", render: (r) => formatNum(r.units) },
 ];
-const TOP_DRIVER_CHANNEL_OPTIONS = [
-  { key: "HMRPH ONLINE", label: "HMRPH Online" },
-  { key: "TIKTOK", label: "TikTok" },
-  { key: "SHOPEE", label: "Shopee" },
-];
-
 // Real per-product GMV/Units for the current window (api/hrh-sales-analytics.js
-// precomputes all 3 real channels at once), with its OWN channel dropdown
-// independent of the page's global Channel filter — this panel is about
-// "what's selling on channel X specifically," a different question than
-// the page-wide filter answers.
-function TopSalesDriversPanel({ topSalesDrivers, channel, onChannelChange }) {
+// precomputes every channel at once, keyed by the same display strings the
+// page's global Channel filter uses), so this just reads off `channel` from
+// the shared filter bar — no separate dropdown to keep in sync.
+function TopSalesDriversPanel({ topSalesDrivers, channel }) {
   const data = topSalesDrivers?.[channel] || { byValue: [], byQty: [] };
   return (
     <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
-      <div className="flex items-center justify-between gap-3 mb-2.5">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
-          Top Sales Drivers
-        </div>
-        <select
-          value={channel}
-          onChange={(e) => onChannelChange(e.target.value)}
-          className="text-[11.5px] rounded px-2 h-6"
-          style={{ border: `1px solid ${hrh.border}`, color: hrh.ink2, background: hrh.surface }}
-        >
-          {TOP_DRIVER_CHANNEL_OPTIONS.map((o) => (
-            <option key={o.key} value={o.key}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2.5" style={{ color: hrh.ink2 }}>
+        Top Sales Drivers
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -290,7 +269,6 @@ export default function SalesAnalytics({ filters }) {
   const [categoryBucket, setCategoryBucket] = useState("day");
   const [subcategoryBucket, setSubcategoryBucket] = useState("day");
   const [voucherBucket, setVoucherBucket] = useState("day");
-  const [topDriverChannel, setTopDriverChannel] = useState("HMRPH ONLINE");
 
   const ready = isDateRangeReady(dateRange);
 
@@ -337,11 +315,7 @@ export default function SalesAnalytics({ filters }) {
             <div className="xl:col-span-2">
               <Panel title="Channel Comparison" className="h-full">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-                <TopSalesDriversPanel
-                  topSalesDrivers={data.topSalesDrivers}
-                  channel={topDriverChannel}
-                  onChannelChange={setTopDriverChannel}
-                />
+                <TopSalesDriversPanel topSalesDrivers={data.topSalesDrivers} channel={channel} />
               </Panel>
             </div>
             <div className="flex flex-col gap-4 h-full">
