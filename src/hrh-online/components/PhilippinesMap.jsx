@@ -13,6 +13,14 @@ const WIDTH = 320;
 const HEIGHT = 420;
 const PADDING = 6;
 
+// A couple of small island provinces (Batanes, Camiguin) come back with
+// geometry: null from the source dataset at this simplification level —
+// dropped entirely rather than simplified to nothing. Filtered out here so
+// a null geometry can never reach .type/.coordinates access below; this
+// crashed the ENTIRE app on load, not just this component, since these are
+// module-level computations that run as soon as the bundle evaluates.
+const VALID_FEATURES = phProvinces.features.filter((f) => f.geometry);
+
 function computeBounds(features) {
   let minLon = Infinity;
   let maxLon = -Infinity;
@@ -34,7 +42,7 @@ function computeBounds(features) {
   return { minLon, maxLon, minLat, maxLat };
 }
 
-const BOUNDS = computeBounds(phProvinces.features);
+const BOUNDS = computeBounds(VALID_FEATURES);
 // Longitude degrees cover less ground than latitude degrees away from the
 // equator — scale longitude by cos(mean latitude) so provinces keep their
 // real proportions instead of looking horizontally stretched.
@@ -61,7 +69,7 @@ function featureToPath(feature) {
   return polys.map((poly) => poly.map(ringToPath).join(" ")).join(" ");
 }
 
-const PROVINCE_PATHS = phProvinces.features.map((f) => ({
+const PROVINCE_PATHS = VALID_FEATURES.map((f) => ({
   name: f.properties.PROVINCE,
   d: featureToPath(f),
 }));
