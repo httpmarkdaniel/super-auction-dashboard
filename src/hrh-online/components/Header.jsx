@@ -11,19 +11,19 @@ import ChannelPills from "./ChannelPills";
 export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange }) {
   return (
     <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
-      <div className="px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <h1 className="text-[19px] font-bold" style={{ color: hrh.ink }}>
-              HRH Online
-            </h1>
-            <p className="text-[12.5px]" style={{ color: hrh.ink2 }}>
-              Executive Commerce Dashboard
-            </p>
-          </div>
+      <div className="px-5 md:px-6 py-3.5 grid grid-cols-1 md:grid-cols-3 items-center gap-3">
+        <div>
+          <h1 className="text-[19px] font-bold" style={{ color: hrh.ink }}>
+            HRH Online
+          </h1>
+          <p className="text-[12.5px]" style={{ color: hrh.ink2 }}>
+            Executive Commerce Dashboard
+          </p>
+        </div>
+        <div className="flex justify-center">
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>
-        <div className="mr-0 md:mr-10 lg:mr-20">
+        <div className="flex justify-end">
           <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
         </div>
       </div>
