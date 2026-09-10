@@ -229,8 +229,8 @@ export default function CustomerAnalytics({ filters }) {
                 xKey="label"
                 series={[{ key: "customers", name: "Customers", color: hrh.blue }]}
                 valueFormatter={formatNum}
-                xAxisLabel="Orders per Customer"
-                yAxisLabel="Customers"
+                xAxisLabel="Customers"
+                horizontal
               />
             </Panel>
             <Panel title="Customer Spend Distribution">
@@ -239,8 +239,8 @@ export default function CustomerAnalytics({ filters }) {
                 xKey="label"
                 series={[{ key: "customers", name: "Customers", color: hrh.accent }]}
                 valueFormatter={formatNum}
-                xAxisLabel="Spend Range"
-                yAxisLabel="Customers"
+                xAxisLabel="Customers"
+                horizontal
               />
             </Panel>
           </div>

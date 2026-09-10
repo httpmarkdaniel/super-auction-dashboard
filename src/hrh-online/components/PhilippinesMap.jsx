@@ -77,10 +77,10 @@ const PROVINCE_PATHS = VALID_FEATURES.map((f) => ({
 function colorFor(count, maxCount) {
   if (!count) return hrh.border;
   const t = maxCount > 0 ? count / maxCount : 0;
-  // Interpolate between accentSoft (low) and accent (high), matching the
-  // rest of HRH Online's orange brand accent rather than an unrelated hue.
-  const from = [253, 236, 226]; // hrh.accentSoft
-  const to = [235, 104, 52]; // hrh.accent
+  // Interpolate between blueSoft (low) and blue (high) — HMR's brand blue,
+  // per request, rather than the orange accent used elsewhere.
+  const from = [232, 240, 251]; // hrh.blueSoft
+  const to = [63, 121, 209]; // hrh.blue
   const mix = from.map((c, i) => Math.round(c + (to[i] - c) * t));
   return `rgb(${mix.join(",")})`;
 }

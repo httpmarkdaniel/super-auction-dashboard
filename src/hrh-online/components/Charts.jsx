@@ -251,6 +251,12 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
 // `tooltipContent` lets a caller override the default ChartTooltip (e.g.
 // SalesAnalytics.jsx's OtherBreakdownTooltip, which names the real
 // categories/subcategories hidden behind an "Other" bar).
+// `horizontal` (default false) lays the bars on their side — category
+// names run down the Y axis (self-explanatory as tick labels, so no
+// separate axis title needed there) and the value axis moves to the
+// bottom. In that mode `xAxisLabel` describes the bottom (value) axis,
+// since ChartWithAxisTitles is purely positional (bottom/left), not aware
+// of which axis holds which meaning.
 export function BarComparisonChart({
   data,
   series,
@@ -260,8 +266,35 @@ export function BarComparisonChart({
   tooltipContent,
   xAxisLabel,
   yAxisLabel,
+  horizontal = false,
 }) {
   const TooltipContent = tooltipContent || ChartTooltip;
+  if (horizontal) {
+    const categoryWidth = Math.max(72, ...data.map((d) => String(d[xKey] ?? "").length * 6 + 16));
+    return (
+      <ChartWithAxisTitles xAxisLabel={xAxisLabel}>
+        <ResponsiveContainer width="100%" height={height}>
+          <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke={hrh.border} horizontal={false} />
+            <XAxis type="number" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} />
+            <YAxis
+              type="category"
+              dataKey={xKey}
+              tick={{ fontSize: 11, fill: hrh.ink2 }}
+              axisLine={{ stroke: hrh.border }}
+              tickLine={false}
+              width={categoryWidth}
+            />
+            <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            {series.map((s, i) => (
+              <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color || hrh.series[i % hrh.series.length]} radius={[0, 2, 2, 0]} maxBarSize={22} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartWithAxisTitles>
+    );
+  }
   return (
     <ChartWithAxisTitles xAxisLabel={xAxisLabel} yAxisLabel={yAxisLabel}>
       <ResponsiveContainer width="100%" height={height}>

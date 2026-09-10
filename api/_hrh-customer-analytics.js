@@ -421,6 +421,16 @@ export async function handleCustomerAnalytics(req, res) {
     // selected window (argMax by transaction_date) — customers usually ship
     // to the same home address, and this avoids double-counting a customer
     // who ordered from two different addresses within the window.
+    //
+    // checkout_method = 'Delivery' is an EXPLICIT filter, not an incidental
+    // one — verified xv3.sales_orders.checkout_method is only 'Pickup' or
+    // 'Delivery', and every single one of the 643 HMRPH Online orders that
+    // had a usable address was already 'Delivery' (Pickup orders never
+    // populate an address at all, since there's nothing to ship). Filtering
+    // on it explicitly rather than relying on that correlation means this
+    // can never silently start including in-store pickup orders (whose
+    // address, if ever populated, would be meaningless for a customer
+    // location map) if the data behind that correlation ever changes.
     const provinceInvoiceRows = await (
       await client.query({
         query: `
@@ -437,11 +447,14 @@ export async function handleCustomerAnalytics(req, res) {
               AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
           ),
           order_address AS (
-            SELECT invoice_id, argMax(coalesce(address, ''), _airbyte_extracted_at) AS address
+            SELECT
+              invoice_id,
+              argMax(coalesce(address, ''), _airbyte_extracted_at) AS address,
+              argMax(coalesce(checkout_method, ''), _airbyte_extracted_at) AS checkout_method
             FROM xv3.sales_orders
             WHERE invoice_id IN (SELECT invoice_id FROM hrh_invoices)
             GROUP BY invoice_id
-            HAVING address != ''
+            HAVING address != '' AND checkout_method = 'Delivery'
           )
           SELECT
             h.customer_id AS customer_id,
@@ -508,7 +521,7 @@ export async function handleCustomerAnalytics(req, res) {
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
         newCustomerDefinition:
           "New = this customer has placed exactly one order ever, across their entire history with HMR (any store, any channel) as of today. Returning = two or more lifetime orders. Not tied to the selected date range — a customer's label stays the same regardless of what period you're viewing.",
-        provinceScopeNote: `HMRPH Online only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems. Based on ${matchedCustomers} of ${hmrphOnlineTotalCustomers} HMRPH Online customers in this period whose checkout address could be matched to a province; the rest either placed no HMRPH Online order this period or didn't have a usable address on file.`,
+        provinceScopeNote: `HMRPH Online Delivery orders only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems, and Pickup orders have no delivery address to map. Based on ${matchedCustomers} of ${hmrphOnlineTotalCustomers} HMRPH Online customers in this period whose checkout address could be matched to a province; the rest either placed no HMRPH Online delivery order this period or didn't have a usable address on file.`,
         generatedAt: new Date().toISOString(),
       },
       kpis,
