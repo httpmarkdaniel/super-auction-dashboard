@@ -3,11 +3,14 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import HorizontalBarList from "../components/HorizontalBarList";
+import TrendBucketPills from "../components/TrendBucketPills";
 import { ComboBarLineChart, DonutChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
-import { formatShortDateLabel } from "../trendBucket";
+import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum } from "../format";
+
+const TREND_LABEL_FORMATTER = { day: formatShortDateLabel, week: formatWeekRangeLabel, month: formatMonthLabel };
 
 const SEGMENT_COLOR = { New: hrh.blue, Returning: hrh.accent };
 
@@ -39,14 +42,18 @@ function isDateRangeReady(dateRange) {
 // only because of the Vercel Hobby plan's 12-function cap) for the queries.
 // New/Returning uses the customer's cross-store, all-time-first HRH order
 // (not scoped to HRH Online alone) — same reasoning as Executive Overview's
-// Customer Segments. Customer Trend is bucketed server-side (day, or week
-// once the range exceeds 60 days) since distinct-customer counts can't be
-// safely re-aggregated client-side the way GMV/Orders sums can.
+// Customer Segments. Customer Trend's Day/Week/Month toggle switches
+// between 3 PRECOMPUTED server-side series (data.customerTrend.day/week/
+// month), not a client-side re-aggregation of one daily series — distinct-
+// customer counts can't be safely summed across days the way GMV/Orders
+// sums can (bucketRows() would double-count a customer active on 2+ days
+// within the same week/month bucket).
 export default function CustomerAnalytics({ filters }) {
   const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [trendBucket, setTrendBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
 
@@ -75,7 +82,13 @@ export default function CustomerAnalytics({ filters }) {
     return () => controller.abort();
   }, [channel, dateRange, ready, load]);
 
-  const customerTrend = data?.customerTrend.map((r) => ({ dateLabel: formatShortDateLabel(r.bucket), newCustomers: r.newCustomers, returningCustomers: r.returningCustomers })) || [];
+  const formatTrendLabel = TREND_LABEL_FORMATTER[trendBucket];
+  const customerTrend =
+    data?.customerTrend[trendBucket].map((r) => ({
+      dateLabel: formatTrendLabel(r.bucket),
+      newCustomers: r.newCustomers,
+      returningCustomers: r.returningCustomers,
+    })) || [];
   const newVsReturningSegments =
     data?.newVsReturning.map((s) => ({ label: s.segment, value: s.count, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
   const valueSegments = data?.valueSegments.map((s) => ({ label: s.segment, value: s.count })) || [];
@@ -103,7 +116,12 @@ export default function CustomerAnalytics({ filters }) {
             <KpiCard label="Sales / Customer" value={formatPeso(data.kpis.salesPerCustomer.value)} delta={data.kpis.salesPerCustomer.delta} />
           </KpiRow>
 
-          <Panel title="Customer Trend" subtitle="New vs Returning customers over time" className="mb-4">
+          <Panel
+            title="Customer Trend"
+            subtitle="New vs Returning customers over time"
+            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
+            className="mb-4"
+          >
             <ComboBarLineChart
               data={customerTrend}
               xKey="dateLabel"

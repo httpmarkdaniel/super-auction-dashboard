@@ -261,50 +261,74 @@ export async function handleCustomerAnalytics(req, res) {
         lastBuy: c.lastTxn,
       }));
 
-    // Customer Trend — New/Returning classified PER BUCKET (a customer's
-    // first-ever order falling within THAT bucket's own date span = New for
-    // that bucket), computed server-side via SQL grouping rather than
-    // client-side day-bucket summing — distinct-customer counts don't sum
-    // across days the way GMV/Orders do (the same customer buying on two
-    // different days in one week must count once, not twice), so this can't
-    // reuse the client-side bucketRows() pattern other trend panels use.
-    const bucketUnit = daysBetweenISO(current.from, current.to) + 1 > 60 ? "week" : "day";
-    const bucketExpr = bucketUnit === "week" ? "toStartOfWeek(transaction_date, 1)" : "toDate(transaction_date)";
-    const trendRows = await (
-      await client.query({
-        query: `
-          WITH per_bucket_customer AS (
+    // Customer Trend — New/Returning classified per bucket using the SAME
+    // boundary as the whole-window KPI above (first_order_date >= the
+    // window's own start, curFrom) — NOT each bucket's own local start.
+    // Tried bucket-local boundaries first and caught a real inconsistency:
+    // a customer whose absolute first-ever HMR order (any store) fell
+    // inside the selected window still reads "Returning" in whichever
+    // bucket her ONE HRH Online order happens to land in, if that bucket
+    // isn't the exact bucket containing her first-ever order (e.g. first
+    // order at a physical branch in March, first HRH Online order in
+    // April — bucket-local logic called the April bucket "Returning" since
+    // March < April's start, even though she's a "New" customer for the
+    // whole window per the KPI above). Comparing against the fixed window
+    // start instead keeps the two consistent: this is "how many active-in-
+    // this-bucket customers are, overall, new-to-the-window" — a customer
+    // who's new-to-the-window and active in multiple buckets legitimately
+    // shows as "New" in each one (this is a per-bucket ACTIVITY breakdown,
+    // not a re-partition of the whole-window unique count, so its bars
+    // summing higher than the KPI is expected, same as multiple GA4
+    // sessions from one user each counting toward "sessions").
+    // Computed server-side (not via the client-side bucketRows() pattern)
+    // since distinct-customer counts can't be safely summed across days the
+    // way GMV/Orders sums can. All 3 granularities are precomputed here so
+    // the page's Day/Week/Month toggle just switches between them
+    // client-side, same "already fetched, no refetch on toggle" feel as
+    // every other bucketed panel.
+    async function fetchCustomerTrend(bucketExpr) {
+      const trendRows = await (
+        await client.query({
+          query: `
+            WITH per_bucket_customer AS (
+              SELECT
+                ${bucketExpr} AS bucket_date,
+                customer_id,
+                any(toDate(cust_first_order_date)) AS first_order_date
+              FROM xv3.mart_net_sales
+              WHERE store_name = {store:String}
+                AND sales_channel IN {channels:Array(String)}
+                AND customer_id IS NOT NULL
+                AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
+                AND match(\`ct.customer_name\`, '[a-zA-Z]')
+                AND net_sales_amount > 0
+                AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+              GROUP BY bucket_date, customer_id
+            )
             SELECT
-              ${bucketExpr} AS bucket_date,
-              customer_id,
-              any(toDate(cust_first_order_date)) AS first_order_date
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String}
-              AND sales_channel IN {channels:Array(String)}
-              AND customer_id IS NOT NULL
-              AND trim(\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
-              AND match(\`ct.customer_name\`, '[a-zA-Z]')
-              AND net_sales_amount > 0
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-            GROUP BY bucket_date, customer_id
-          )
-          SELECT
-            toString(bucket_date) AS bucket,
-            countIf(first_order_date >= bucket_date) AS new_customers,
-            countIf(first_order_date < bucket_date OR first_order_date IS NULL) AS returning_customers
-          FROM per_bucket_customer
-          GROUP BY bucket_date
-          ORDER BY bucket_date
-        `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const customerTrend = trendRows.map((r) => ({
-      bucket: r.bucket,
-      newCustomers: toNum(r.new_customers),
-      returningCustomers: toNum(r.returning_customers),
-    }));
+              toString(bucket_date) AS bucket,
+              countIf(first_order_date >= {curFrom:String}) AS new_customers,
+              countIf(first_order_date < {curFrom:String} OR first_order_date IS NULL) AS returning_customers
+            FROM per_bucket_customer
+            GROUP BY bucket_date
+            ORDER BY bucket_date
+          `,
+          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+      ).json();
+      return trendRows.map((r) => ({
+        bucket: r.bucket,
+        newCustomers: toNum(r.new_customers),
+        returningCustomers: toNum(r.returning_customers),
+      }));
+    }
+    const [trendDay, trendWeek, trendMonth] = await Promise.all([
+      fetchCustomerTrend("toDate(transaction_date)"),
+      fetchCustomerTrend("toStartOfWeek(transaction_date, 1)"),
+      fetchCustomerTrend("toStartOfMonth(transaction_date)"),
+    ]);
+    const customerTrend = { day: trendDay, week: trendWeek, month: trendMonth };
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
@@ -313,7 +337,6 @@ export async function handleCustomerAnalytics(req, res) {
         range,
         current,
         previous,
-        bucketUnit,
         customerScopeNote:
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
         generatedAt: new Date().toISOString(),

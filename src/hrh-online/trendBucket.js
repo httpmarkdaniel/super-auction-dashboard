@@ -28,7 +28,7 @@ function mondayOfWeekISO(iso) {
   return addDaysISOLocal(iso, dow === 0 ? -6 : 1 - dow);
 }
 
-function formatWeekRangeLabel(weekStartIso) {
+export function formatWeekRangeLabel(weekStartIso) {
   const weekEndIso = addDaysISOLocal(weekStartIso, 6);
   const [, sm, sd] = weekStartIso.split("-").map(Number);
   const [, em, ed] = weekEndIso.split("-").map(Number);
@@ -37,7 +37,7 @@ function formatWeekRangeLabel(weekStartIso) {
   return `${start}–${end}`;
 }
 
-function formatMonthLabel(yyyyMm) {
+export function formatMonthLabel(yyyyMm) {
   const [y, m] = yyyyMm.split("-").map(Number);
   return `${SHORT_MONTHS[m - 1]} ${y}`;
 }
