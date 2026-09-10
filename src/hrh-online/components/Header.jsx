@@ -8,7 +8,16 @@ import ChannelPills from "./ChannelPills";
 // Product Analytics refetches its real API on change; other (still mock)
 // pages that have a channel dimension filter their existing rows by it —
 // see each page's own comment.
-export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange }) {
+//
+// `hideChannelFilter` (Traffic & Conversion only): the global Channel
+// filter is a SALES-channel concept (HMRPH Online/TikTok/Shopee) — GA4's
+// acquisition-channel dimension (Direct/Organic Search/Paid Social/...) is
+// a genuinely different thing with no verified mapping between the two
+// (investigated: no GA4 dimension/custom parameter ties a session to one
+// of those 3 commerce channels), so showing the sales-channel pills on
+// that page would silently do nothing (or worse, look like it should
+// filter GA4 data and quietly not). Date Range still applies everywhere.
+export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange, hideChannelFilter = false }) {
   return (
     <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
       <div className="relative px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
@@ -27,9 +36,11 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
             positioning lets it size to its own content instead. Falls back
             to a normal centered block (own row, below title/date) on
             narrow screens where there's no room to float it independently. */}
-        <div className="order-3 w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
-          <ChannelPills value={channel} onChange={onChannelChange} />
-        </div>
+        {!hideChannelFilter && (
+          <div className="order-3 w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
+            <ChannelPills value={channel} onChange={onChannelChange} />
+          </div>
+        )}
         <div className="mr-0 md:mr-10 lg:mr-20">
           <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
         </div>

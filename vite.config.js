@@ -29,6 +29,7 @@ export default defineConfig({
       '/api/hrh-product-analytics': 'http://localhost:8080',
       '/api/hrh-executive-overview': 'http://localhost:8080',
       '/api/hrh-sales-analytics': 'http://localhost:8080',
+      '/api/hrh-traffic-analytics': 'http://localhost:8080',
     },
   },
 })

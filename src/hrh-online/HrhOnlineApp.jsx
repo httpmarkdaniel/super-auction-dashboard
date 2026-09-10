@@ -59,7 +59,13 @@ export default function HrhOnlineApp() {
     <div className="min-h-screen flex" style={{ background: hrh.bg }}>
       <Sidebar active={page} onNavigate={setPage} />
       <div className="flex-1 min-w-0 flex flex-col">
-        <Header channel={channel} onChannelChange={setChannel} dateRange={dateRange} onDateRangeChange={setDateRange} />
+        <Header
+          channel={channel}
+          onChannelChange={setChannel}
+          dateRange={dateRange}
+          onDateRangeChange={setDateRange}
+          hideChannelFilter={page === "traffic"}
+        />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />
         </main>

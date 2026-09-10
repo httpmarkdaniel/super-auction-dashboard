@@ -20,6 +20,7 @@ import biddingPace from "../api/bidding-pace.js";
 import hrhProductAnalytics from "../api/hrh-product-analytics.js";
 import hrhExecutiveOverview from "../api/hrh-executive-overview.js";
 import hrhSalesAnalytics from "../api/hrh-sales-analytics.js";
+import hrhTrafficAnalytics from "../api/hrh-traffic-analytics.js";
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.get("/api/bidding-pace", biddingPace);
 app.get("/api/hrh-product-analytics", hrhProductAnalytics);
 app.get("/api/hrh-executive-overview", hrhExecutiveOverview);
 app.get("/api/hrh-sales-analytics", hrhSalesAnalytics);
+app.get("/api/hrh-traffic-analytics", hrhTrafficAnalytics);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));
 
