@@ -46,15 +46,27 @@ export default function DateRangePicker({ value, onChange }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[12.5px] font-semibold px-3 h-8 rounded-md whitespace-nowrap"
-        style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
+        className="flex items-center gap-1.5 text-[13px] font-semibold px-3.5 h-9 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.03]"
+        style={
+          open
+            ? { background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.25)" }
+            : { background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
+        }
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
           <rect x="3" y="5" width="18" height="16" rx="2" />
           <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
         </svg>
         {current.label}
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0">
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
+        >
           <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
@@ -64,20 +76,27 @@ export default function DateRangePicker({ value, onChange }) {
           className="absolute left-0 mt-1.5 w-64 rounded-md py-2 z-30"
           style={{ background: hrh.surface, border: `1px solid ${hrh.border}`, boxShadow: "0 4px 16px rgba(15,22,34,.12)" }}
         >
-          {RANGE_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              onClick={() => {
-                onChange(p.key);
-                setOpen(false);
-              }}
-              className="w-full text-left px-3.5 py-1.5 text-[13.5px]"
-              style={{ color: !isCustom && p.key === value ? hrh.navy : hrh.ink, fontWeight: !isCustom && p.key === value ? 600 : 400 }}
-            >
-              {p.label}
-            </button>
-          ))}
+          {RANGE_PRESETS.map((p) => {
+            const selected = !isCustom && p.key === value;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => {
+                  onChange(p.key);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3.5 py-1.5 text-[13.5px] transition-colors duration-150"
+                style={{
+                  color: selected ? hrh.accentText : hrh.ink,
+                  fontWeight: selected ? 600 : 400,
+                  background: selected ? hrh.accentSoft : "transparent",
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
 
           <div className="mt-1.5 pt-2.5 px-3.5 pb-1" style={{ borderTop: `1px solid ${hrh.border}` }}>
             <div className="text-[11px] tracking-[0.06em] uppercase font-semibold mb-2" style={{ color: hrh.muted }}>
@@ -108,8 +127,8 @@ export default function DateRangePicker({ value, onChange }) {
               type="button"
               onClick={applyCustom}
               disabled={!draftFrom || !draftTo}
-              className="w-full text-center text-[13.5px] font-semibold rounded-md px-2 py-1.5 disabled:opacity-40"
-              style={{ background: hrh.navy, color: "#ffffff" }}
+              className="w-full text-center text-[13.5px] font-semibold rounded-md px-2 py-1.5 disabled:opacity-40 transition-transform duration-150 hover:scale-[1.02]"
+              style={{ background: hrh.accent, color: "#ffffff" }}
             >
               Apply
             </button>

@@ -15,10 +15,10 @@ export default function ChannelPills({ value, onChange }) {
             key={option}
             type="button"
             onClick={() => onChange(option)}
-            className="text-[12.5px] font-semibold px-3 h-8 rounded-md whitespace-nowrap"
+            className="text-[13px] font-semibold px-3.5 h-9 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.04]"
             style={
               active
-                ? { background: hrh.navy, color: "#ffffff", border: `1px solid ${hrh.navy}` }
+                ? { background: hrh.accent, color: "#ffffff", border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(217,154,61,0.4)" }
                 : { background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
             }
           >
