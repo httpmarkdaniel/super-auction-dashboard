@@ -3,7 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { ComboBarLineChart, DonutChart, StackedAreaChart } from "../components/Charts";
+import { ComboBarLineChart, DonutChart, BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
 import { hrh } from "../theme";
@@ -154,20 +154,20 @@ export default function CustomerAnalytics({ filters }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Panel title="Purchase Frequency">
-              <StackedAreaChart
+              <BarComparisonChart
                 data={purchaseFrequencyRows}
                 xKey="label"
-                categories={[{ key: "customers", name: "Customers", color: hrh.blue }]}
+                series={[{ key: "customers", name: "Customers", color: hrh.blue }]}
                 valueFormatter={formatNum}
                 xAxisLabel="Orders per Customer"
                 yAxisLabel="Customers"
               />
             </Panel>
             <Panel title="Customer Spend Distribution">
-              <StackedAreaChart
+              <BarComparisonChart
                 data={spendDistributionRows}
                 xKey="label"
-                categories={[{ key: "customers", name: "Customers", color: hrh.accent }]}
+                series={[{ key: "customers", name: "Customers", color: hrh.accent }]}
                 valueFormatter={formatNum}
                 xAxisLabel="Spend Range"
                 yAxisLabel="Customers"
