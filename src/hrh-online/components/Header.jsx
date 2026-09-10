@@ -23,7 +23,9 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
           </div>
           <ChannelPills value={channel} onChange={onChannelChange} />
         </div>
-        <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+        <div className="mr-0 md:mr-10 lg:mr-20">
+          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+        </div>
       </div>
     </div>
   );
