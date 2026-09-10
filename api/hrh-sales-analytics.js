@@ -163,13 +163,16 @@ function buildTopSeriesTrend(rows, from, to, topN) {
 
   // Names what's actually inside the gray "Other" bar — the biggest
   // contributors by GMV, plus a remainder count — so "Other" isn't a black
-  // box on the chart.
-  const otherBreakdown = restLabels.slice(0, OTHER_BREAKDOWN_SHOWN).map(([label, gmv]) => ({
+  // box on the chart. Zero/negative-net labels (fully offset by returns
+  // across the window) are excluded from the named list — nothing useful
+  // to call out about a category with no net sales.
+  const restLabelsPositive = restLabels.filter(([, gmv]) => gmv > 0);
+  const otherBreakdown = restLabelsPositive.slice(0, OTHER_BREAKDOWN_SHOWN).map(([label, gmv]) => ({
     label,
     gmv,
     pct: grandTotal > 0 ? (gmv / grandTotal) * 100 : 0,
   }));
-  const otherMoreCount = Math.max(0, restLabels.length - OTHER_BREAKDOWN_SHOWN);
+  const otherMoreCount = Math.max(0, restLabelsPositive.length - OTHER_BREAKDOWN_SHOWN);
 
   return { series, data, otherBreakdown, otherMoreCount };
 }

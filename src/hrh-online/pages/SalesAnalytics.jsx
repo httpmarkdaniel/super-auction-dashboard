@@ -14,7 +14,7 @@ import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 // (one day, or one week/month once summed) rarely has more than a handful
 // of non-top categories actually selling, so this is a display cap, not a
 // data cap (the full per-bucket list is already computed server-side).
-const OTHER_TOOLTIP_SHOWN = 8;
+const OTHER_TOOLTIP_SHOWN = 5;
 
 // Default ChartTooltip only shows each series' own number — for the
 // "Other" bar specifically, that's an unexplained lump sum. This variant
@@ -39,7 +39,7 @@ function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
     >
       <div className="font-semibold mb-1">{label}</div>
       {sorted.map((p) => {
-        const otherDetail = p.dataKey === "Other" ? p.payload?.otherDetail || [] : null;
+        const otherDetail = p.dataKey === "Other" ? (p.payload?.otherDetail || []).filter((o) => o.gmv > 0) : null;
         return (
           <div key={p.dataKey} className="mb-1 last:mb-0">
             <div className="flex items-center gap-2">
