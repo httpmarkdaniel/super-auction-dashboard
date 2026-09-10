@@ -2,12 +2,21 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import SeverityBadge from "../components/SeverityBadge";
+import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
 
+const BUCKET_GRANULARITY_OPTIONS = [
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+];
+
 const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
 const TREND_COLOR = { up: hrh.good, down: hrh.bad, flat: hrh.muted };
+// Color alone (a red/green arrow) isn't accessible or self-explanatory on
+// its own — spell the trend out too.
+const TREND_LABEL = { up: "Increasing", down: "Declining", flat: "Steady" };
 // OUT OF STOCK is the "explained, nothing to do" case (green). The two HAS
 // STOCK variants both need a human to look at it (sold out despite stock
 // on hand) — "warning" (orange), not "good". UNKNOWN STOCK means the
@@ -31,24 +40,30 @@ function changeCell(pct) {
   );
 }
 
-const REPEAT_SELLER_COLUMNS = [
-  { key: "sku", label: "SKU" },
-  { key: "product", label: "Product", maxWidth: 130 },
-  { key: "priorSales", label: "Prior-Period Sales", render: (r) => formatPeso(r.priorSales) },
-  { key: "currentSales", label: "Current-Period Sales", render: (r) => formatPeso(r.currentSales) },
-  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
-  {
-    key: "trend",
-    label: "Trend",
-    render: (r) => (
-      <span className="font-semibold" style={{ color: TREND_COLOR[r.trend] || hrh.muted }}>
-        {TREND_GLYPH[r.trend] || "—"}
-      </span>
-    ),
-  },
-  { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
-];
+function trendCell(trend) {
+  return (
+    <span className="font-semibold whitespace-nowrap" style={{ color: TREND_COLOR[trend] || hrh.muted }}>
+      {TREND_GLYPH[trend] || "—"} {TREND_LABEL[trend] || "—"}
+    </span>
+  );
+}
+
+// Column labels say "Week"/"Month" per the bucket granularity toggle, so
+// build the list fresh for whichever is selected rather than a fixed array.
+function repeatSellerColumns(granularity) {
+  const unit = granularity === "month" ? "Month" : "Week";
+  return [
+    { key: "sku", label: "SKU" },
+    { key: "product", label: "Product", maxWidth: 130 },
+    { key: "priorSales", label: `Prior-${unit} Sales`, render: (r) => formatPeso(r.priorSales) },
+    { key: "priorUnits", label: `Prior-${unit} Units`, render: (r) => formatNum(r.priorUnits) },
+    { key: "currentSales", label: `Current-${unit} Sales`, render: (r) => formatPeso(r.currentSales) },
+    { key: "currentUnits", label: `Current-${unit} Units`, render: (r) => formatNum(r.currentUnits) },
+    { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
+    { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
+    { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+  ];
+}
 
 const TOP_PRODUCT_COLUMNS = [
   { key: "sku", label: "SKU" },
@@ -138,15 +153,16 @@ export default function ProductAnalytics({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [bucketGranularity, setBucketGranularity] = useState("week");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p) => {
+  const load = useCallback(async (ch, p, gran) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p });
+      const qs = new URLSearchParams({ channel: ch, ...p, bucketGranularity: gran });
       const res = await fetch(`/api/hrh-product-analytics?${qs.toString()}`);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -161,8 +177,8 @@ export default function ProductAnalytics({ filters }) {
 
   useEffect(() => {
     if (!ready) return;
-    load(channel, params);
-  }, [channel, params, ready, load]);
+    load(channel, params, bucketGranularity);
+  }, [channel, params, bucketGranularity, ready, load]);
 
   return (
     <div>
@@ -187,7 +203,7 @@ export default function ProductAnalytics({ filters }) {
           )}
           <button
             type="button"
-            onClick={() => ready && load(channel, params)}
+            onClick={() => ready && load(channel, params, bucketGranularity)}
             disabled={loading || !ready}
             className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
             style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
@@ -206,17 +222,18 @@ export default function ProductAnalytics({ filters }) {
           <Panel
             title="Repeat Sellers"
             subtitle={
-              data.meta?.weeklyBuckets &&
-              `Positive sales in 2+ of the last 4 weeks: ${formatCompactRange(data.meta.weeklyBuckets.wk1)} · ${formatCompactRange(data.meta.weeklyBuckets.wk2)} · ${formatCompactRange(data.meta.weeklyBuckets.wk3)} · ${formatCompactRange(data.meta.weeklyBuckets.wk4)}`
+              data.meta?.periodBuckets &&
+              `Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"}: ${formatCompactRange(data.meta.periodBuckets.wk1)} · ${formatCompactRange(data.meta.periodBuckets.wk2)} · ${formatCompactRange(data.meta.periodBuckets.wk3)} · ${formatCompactRange(data.meta.periodBuckets.wk4)}`
             }
+            action={<TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />}
             className="mb-4"
           >
             <DataTable
-              columns={REPEAT_SELLER_COLUMNS}
+              columns={repeatSellerColumns(bucketGranularity)}
               rows={data.repeatSellers}
               paginate
               pageSize={10}
-              emptyLabel="No repeat-selling products found for the selected 4-week window."
+              emptyLabel={`No repeat-selling products found for the selected 4-${bucketGranularity === "month" ? "month" : "week"} window.`}
             />
           </Panel>
 

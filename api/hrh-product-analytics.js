@@ -173,6 +173,29 @@ function weeklyBucketsEndingAt(to) {
   return [wk1, wk2, wk3, wk4];
 }
 
+// Same shape as weeklyBucketsEndingAt but 4 calendar MONTHS instead of
+// 4×7-day weeks — the Repeat Sellers "bucket granularity" toggle. The most
+// recent bucket runs from the 1st of the month containing `to` through
+// `to` itself (a partial month unless `to` is month-end, same "always ends
+// today" behavior as the weekly buckets); the 3 before it are full
+// calendar months.
+function monthlyBucketsEndingAt(to) {
+  function monthBucket(anchorIso, endIso) {
+    return { from: firstOfMonthISO(anchorIso), to: endIso };
+  }
+  const mo4 = monthBucket(to, to);
+  const mo3Anchor = shiftMonthsClampedISO(to, -1);
+  const [y3, m3] = mo3Anchor.split("-").map(Number);
+  const mo3 = monthBucket(mo3Anchor, `${y3}-${String(m3).padStart(2, "0")}-${String(daysInMonth(y3, m3)).padStart(2, "0")}`);
+  const mo2Anchor = shiftMonthsClampedISO(to, -2);
+  const [y2, m2] = mo2Anchor.split("-").map(Number);
+  const mo2 = monthBucket(mo2Anchor, `${y2}-${String(m2).padStart(2, "0")}-${String(daysInMonth(y2, m2)).padStart(2, "0")}`);
+  const mo1Anchor = shiftMonthsClampedISO(to, -3);
+  const [y1, m1] = mo1Anchor.split("-").map(Number);
+  const mo1 = monthBucket(mo1Anchor, `${y1}-${String(m1).padStart(2, "0")}-${String(daysInMonth(y1, m1)).padStart(2, "0")}`);
+  return [mo1, mo2, mo3, mo4];
+}
+
 // Inventory — joined on the numeric canonical key (item_id -> product_id),
 // never barcode/product_name text. Physical stock (item_qty/total_current_srp)
 // and HMRPH CMS-posted stock (cms_hmrph_posting_quantity/cms_posting_total_value)
@@ -230,6 +253,7 @@ export default async function handler(req, res) {
     // links) behaves as "custom"; otherwise default to Week to Date.
     const range = req.query.range || (from && to ? "custom" : "wtd");
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
+    const bucketGranularity = req.query.bucketGranularity === "month" ? "month" : "week";
 
     let current;
     let previous;
@@ -238,7 +262,8 @@ export default async function handler(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const [wk1, wk2, wk3, wk4] = weeklyBucketsEndingAt(current.to);
+    const [wk1, wk2, wk3, wk4] =
+      bucketGranularity === "month" ? monthlyBucketsEndingAt(current.to) : weeklyBucketsEndingAt(current.to);
 
     // KPIs — one bounded scan covering both windows, conditionally
     // aggregated. GMV = SUM(net_sales_amount) where net_sales_amount > 0
@@ -290,13 +315,14 @@ export default async function handler(req, res) {
     const prevAov = safeDivide(prevGmv, prevOrders);
 
     // Repeat Sellers — canonical key `ct.item_id` (the literal dot requires
-    // backticks) with positive GMV in >= 2 of the last 4 weekly buckets
-    // (see weeklyBucketsEndingAt — always real 7-day weeks ending "today",
-    // independent of the page's selected range preset). Prior/Current-
-    // Period Sales and Units are Wk3/Wk4 directly, NOT the page-level
-    // current/previous window (which for MTD/YTD can span months and
-    // wouldn't mean anything as a "weekly" figure). product_name/
-    // category_name/barcode picked via argMax/any — display only, never
+    // backticks) with positive GMV in >= 2 of the last 4 buckets, either 4
+    // real 7-day weeks or 4 calendar months ending "today" per the
+    // bucketGranularity toggle (see weeklyBucketsEndingAt/
+    // monthlyBucketsEndingAt) — independent of the page's selected range
+    // preset either way. Prior/Current-Period Sales and Units are Wk3/Wk4
+    // directly, NOT the page-level current/previous window (which for
+    // MTD/YTD can span months and wouldn't mean anything as a per-bucket
+    // figure). product_name/category_name/barcode picked via argMax/any — display only, never
     // the join/group key.
     //
     // coalesce(sumIf(...), 0) is load-bearing, not decoration: sumIf over a
@@ -318,6 +344,7 @@ export default async function handler(req, res) {
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_units,
             coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
@@ -428,8 +455,9 @@ export default async function handler(req, res) {
         product: r.product_name,
         category: r.category_name || null,
         priorSales: wk3Gmv,
+        priorUnits: toNum(r.wk3_units),
         currentSales: wk4Gmv,
-        units: toNum(r.wk4_units),
+        currentUnits: toNum(r.wk4_units),
         trend,
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,
@@ -493,7 +521,8 @@ export default async function handler(req, res) {
         range,
         current,
         previous,
-        weeklyBuckets: { wk1, wk2, wk3, wk4 },
+        bucketGranularity,
+        periodBuckets: { wk1, wk2, wk3, wk4 },
         salesAsOf: k.sales_as_of || null,
         inventoryAsOf: (invMetaRows[0] && invMetaRows[0].inventory_as_of) || null,
         generatedAt: new Date().toISOString(),
