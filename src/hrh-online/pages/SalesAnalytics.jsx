@@ -272,9 +272,13 @@ export default function SalesAnalytics({ filters }) {
 
       {data && !error && (
         <>
+          <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
+
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4 items-start">
             <div className="xl:col-span-2">
-              <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
+              <Panel title="Channel Comparison">
+                <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
+              </Panel>
             </div>
             <div className="flex flex-col gap-4">
               <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}>
@@ -296,10 +300,6 @@ export default function SalesAnalytics({ filters }) {
               </Panel>
             </div>
           </div>
-
-          <Panel title="Channel Comparison" className="mb-4">
-            <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-          </Panel>
 
           <ContributionTrendPanel
             title="Category Contribution"
