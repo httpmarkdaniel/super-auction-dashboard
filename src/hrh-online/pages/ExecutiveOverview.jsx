@@ -1,12 +1,44 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
+import DataTable from "../components/DataTable";
 import { LoadingState, ErrorState } from "../components/States";
 import { SalesTrendComboChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
+
+// Same 5 metrics as the KPI scorecards above, just rendered as a table row
+// each so current vs previous-period values sit side by side (not just the
+// small delta badge on the card). "Previous period" is whatever the API
+// resolved opposite the current Date Range filter (see meta.previous /
+// resolveRange in api/hrh-executive-overview.js) — a preceding window of
+// the same length, so it's always dynamic to whatever range is selected.
+const KPI_COMPARISON_ROWS = [
+  { key: "gmv", label: "GMV", formatter: formatPeso },
+  { key: "nmv", label: "NMV", formatter: formatPeso },
+  { key: "aov", label: "AOV", formatter: formatPeso },
+  { key: "orders", label: "Orders", formatter: formatNum },
+  { key: "units", label: "Units", formatter: formatNum },
+];
+
+function DeltaCell({ delta }) {
+  if (delta === null || delta === undefined) return <span style={{ color: hrh.muted }}>—</span>;
+  const positive = delta >= 0;
+  return (
+    <span className="font-semibold" style={{ color: positive ? hrh.good : hrh.bad }}>
+      {positive ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
+    </span>
+  );
+}
+
+const KPI_COMPARISON_COLUMNS = [
+  { key: "metric", label: "Metric" },
+  { key: "current", label: "Current Period" },
+  { key: "previous", label: "Previous Period" },
+  { key: "delta", label: "Change", render: (r) => <DeltaCell delta={r.delta} /> },
+];
 
 // Real order_status values from xv3.mart_xv3_order_report (verified, not
 // assumed), plus a per-channel "Unmapped (Channel)" bucket the API assigns
@@ -116,6 +148,18 @@ export default function ExecutiveOverview({ filters }) {
   const customerSegments =
     data?.customerSegments.map((s) => ({ label: s.segment, value: s.orders, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
   const totalCustomerSegmentCount = customerSegments.reduce((s, x) => s + x.value, 0);
+  const kpiComparisonRows = data
+    ? KPI_COMPARISON_ROWS.map((r) => {
+        const k = data.kpis[r.key];
+        return {
+          id: r.key,
+          metric: r.label,
+          current: r.formatter(k.value),
+          previous: r.formatter(k.previous),
+          delta: k.delta,
+        };
+      })
+    : [];
 
   return (
     <div>
@@ -152,6 +196,18 @@ export default function ExecutiveOverview({ filters }) {
             <KpiCard label="Orders" value={formatNum(data.kpis.orders.value)} delta={data.kpis.orders.delta} />
             <KpiCard label="Units" value={formatNum(data.kpis.units.value)} delta={data.kpis.units.delta} />
           </KpiRow>
+
+          <Panel
+            title="Period Comparison"
+            subtitle={
+              data.meta?.current
+                ? `${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`
+                : "Current vs previous period"
+            }
+            className="mb-4"
+          >
+            <DataTable columns={KPI_COMPARISON_COLUMNS} rows={kpiComparisonRows} />
+          </Panel>
 
           <Panel
             title="Sales Trend"
