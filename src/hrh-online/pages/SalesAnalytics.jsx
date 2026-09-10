@@ -274,31 +274,37 @@ export default function SalesAnalytics({ filters }) {
         <>
           <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4 items-start">
-            <div className="xl:col-span-2">
-              <Panel title="Channel Comparison">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+            <Panel title="Channel Comparison" className="h-full flex flex-col">
+              <div className="flex-1 flex items-center">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-              </Panel>
-            </div>
-            <div className="flex flex-col gap-4">
-              <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}>
+              </div>
+            </Panel>
+            <Panel title="Payment Type" subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"} className="h-full flex flex-col">
+              <div className="flex-1 flex items-center">
                 <DonutChart
                   segments={data.paymentType}
                   centerValue={formatNum(data.paymentType.reduce((s, x) => s + x.value, 0))}
                   centerLabel="Orders"
                 />
-              </Panel>
-              <Panel title="Checkout / Fulfillment Method" subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}>
+              </div>
+            </Panel>
+            <Panel
+              title="Checkout / Fulfillment Method"
+              subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}
+              className="h-full flex flex-col"
+            >
+              <div className="flex-1 flex items-center">
                 <DonutChart
                   segments={data.fulfillmentMethod}
                   centerValue={formatNum(data.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
                   centerLabel="Orders"
                 />
-                <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
-                  A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
-                </p>
-              </Panel>
-            </div>
+              </div>
+              <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
+                A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
+              </p>
+            </Panel>
           </div>
 
           <ContributionTrendPanel
