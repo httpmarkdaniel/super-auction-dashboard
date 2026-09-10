@@ -94,7 +94,7 @@ export function SalesTrendComboChart({ data, height = 260 }) {
         {/* hrh.series[1] is the same orange as hrh.accent — using it here
             made the Orders bars visually indistinguishable from the GMV
             line. Blue bars / orange line instead, clearly distinct. */}
-        <Bar yAxisId="orders" dataKey="orders" name="Orders" fill="#3f79d1" radius={[2, 2, 0, 0]} maxBarSize={24} />
+        <Bar yAxisId="orders" dataKey="orders" name="Orders" fill={hrh.blue} radius={[2, 2, 0, 0]} maxBarSize={24} />
         <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>

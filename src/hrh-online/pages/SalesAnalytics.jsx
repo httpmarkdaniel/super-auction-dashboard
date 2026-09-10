@@ -251,7 +251,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
         data={trendData}
         xKey="dateLabel"
         categories={[
-          { key: "orderPrice", name: "Order Value", color: "#3f79d1" },
+          { key: "orderPrice", name: "Order Value", color: hrh.blue },
           { key: "discountPrice", name: "Discount Value", color: hrh.accent },
         ]}
         valueFormatter={formatCompactPeso}

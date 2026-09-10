@@ -9,6 +9,11 @@ export const hrh = {
   accent: "#d99a3d",
   accentSoft: "#faf1df",
   accentText: "#b07514",
+  // HMR's brand blue — the third color in the white/orange/blue triad the
+  // filter bar (and Sales Analytics' Order Value bar/area) sticks to.
+  blue: "#3f79d1",
+  blueSoft: "#e8f0fb",
+  blueText: "#2a5da3",
   bg: "#f4f6fa",
   surface: "#ffffff",
   border: "#e7eaf0",
