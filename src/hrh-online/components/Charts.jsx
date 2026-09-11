@@ -130,26 +130,6 @@ export function SalesTrendComboChart({ data, height = 260 }) {
   );
 }
 
-// Bar + line on one shared axis for two same-unit series (e.g. New vs
-// Returning customer counts) — unlike SalesTrendComboChart's GMV/Orders
-// pair, these don't need separate y-axes since they're already the same
-// unit (a plain count).
-export function ComboBarLineChart({ data, xKey, barKey, barName, barColor, lineKey, lineName, lineColor, height = 260, valueFormatter = formatCompactPeso }) {
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke={hrh.border} vertical={false} />
-        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
-        <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={48} allowDecimals={false} />
-        <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey={barKey} name={barName} fill={barColor} radius={[2, 2, 0, 0]} maxBarSize={28} />
-        <Line type="monotone" dataKey={lineKey} name={lineName} stroke={lineColor} strokeWidth={2.5} dot={false} />
-      </ComposedChart>
-    </ResponsiveContainer>
-  );
-}
-
 // Area trend for same-unit series on one shared axis (e.g. Order Value vs.
 // Discount Value). `stacked` (default false) draws each area independently,
 // overlapping with partial opacity so both are readable at once — turn it

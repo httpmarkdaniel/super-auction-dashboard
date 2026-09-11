@@ -3,7 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { ComboBarLineChart, BarComparisonChart } from "../components/Charts";
+import { BarComparisonChart } from "../components/Charts";
 import PhilippinesMap from "../components/PhilippinesMap";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
@@ -190,15 +190,13 @@ export default function CustomerAnalytics({ filters }) {
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
-            <ComboBarLineChart
+            <BarComparisonChart
               data={customerTrend}
               xKey="dateLabel"
-              barKey="newCustomers"
-              barName="New"
-              barColor={hrh.blue}
-              lineKey="returningCustomers"
-              lineName="Returning"
-              lineColor={hrh.accent}
+              series={[
+                { key: "newCustomers", name: "New", color: hrh.blue },
+                { key: "returningCustomers", name: "Returning", color: hrh.accent },
+              ]}
               valueFormatter={formatNum}
             />
           </Panel>
