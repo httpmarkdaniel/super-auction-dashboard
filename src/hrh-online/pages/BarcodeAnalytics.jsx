@@ -111,7 +111,7 @@ export default function BarcodeAnalytics() {
             />
           </Panel>
 
-          <Panel title="Product Performance" subtitle="Highest stock value first" className="mb-4">
+          <Panel title="Product Performance" subtitle="Highest current stock first" className="mb-4">
             <DataTable columns={PRODUCT_COLUMNS} rows={data.productTable} paginate pageSize={10} />
           </Panel>
 

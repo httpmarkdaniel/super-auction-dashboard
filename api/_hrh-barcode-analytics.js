@@ -149,9 +149,8 @@ export async function handleBarcodeAnalytics(req, res) {
 
     // Product table — capped at 500 (safety net, not a "top N"
     // truncation), same pattern as every other api/hrh-*.js detail table;
-    // the frontend paginates the full list it receives. Sorted by SRP
-    // value descending so the highest-value unposted/posted items surface
-    // first rather than an arbitrary DB order.
+    // the frontend paginates the full list it receives. Sorted by current
+    // stock (item_qty) descending so the highest-stock items surface first.
     const productRows = await (
       await client.query({
         query: `
@@ -164,7 +163,7 @@ export async function handleBarcodeAnalytics(req, res) {
             coalesce(nullIf(inventory_aging, ''), 'Unknown') AS aging_bucket
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
-          ORDER BY total_current_srp DESC
+          ORDER BY item_qty DESC
           LIMIT 500
         `,
         query_params: { store: HRH_STORE },
