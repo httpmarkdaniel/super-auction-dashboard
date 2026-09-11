@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ShareBar from "../components/ShareBar";
 import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
@@ -15,6 +14,13 @@ const OLDEST_COLUMNS = [
   { key: "units", label: "Current Stock", render: (r) => formatNum(r.units) },
   { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
   { key: "status", label: "Status" },
+];
+
+const TOP_ITEM_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 200 },
+  { key: "category", label: "Category" },
+  { key: "units", label: "Current Stock", render: (r) => formatNum(r.units) },
+  { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
 ];
 
 // Real ClickHouse-backed Inventory Aging — see api/_hrh-inventory-aging.js
@@ -51,7 +57,8 @@ export default function InventoryAging() {
     return () => controller.abort();
   }, [load]);
 
-  const agingDistribution = data?.agingDistribution || [];
+  const topSlowMovingItems = data?.topSlowMovingItems || [];
+  const topNonMovingItems = data?.topNonMovingItems || [];
   const agedByCategory = data?.agedByCategory || [];
   const agedBySupplier = data?.agedBySupplier || [];
 
@@ -77,16 +84,21 @@ export default function InventoryAging() {
             <KpiCard label="Non-Moving Value" value={formatPeso(data.kpis.nonMovingValue.value)} />
           </KpiRow>
 
-          <Panel title="Aging Distribution (days)" subtitle="Items with real stock on hand" className="mb-4">
-            <BarComparisonChart data={agingDistribution} series={[{ key: "value", name: "SKUs" }]} valueFormatter={formatNum} />
-          </Panel>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <Panel title="Top 10 Slow-Moving Items by Value" subtitle="61+ days, has sold before">
+              <DataTable columns={TOP_ITEM_COLUMNS} rows={topSlowMovingItems} emptyLabel="No slow-moving items right now." />
+            </Panel>
+            <Panel title="Top 10 Non-Moving Items by Value" subtitle="61+ days, never sold">
+              <DataTable columns={TOP_ITEM_COLUMNS} rows={topNonMovingItems} emptyLabel="No non-moving items right now." />
+            </Panel>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <Panel title="Aged Inventory Value by Category" subtitle="61+ days, real stock on hand">
-              <ShareBar segments={agedByCategory} />
+              <BarComparisonChart data={agedByCategory} series={[{ key: "value", name: "Aged Value" }]} valueFormatter={formatPeso} horizontal />
             </Panel>
             <Panel title="Aged Inventory Value by Supplier" subtitle="61+ days, real stock on hand">
-              <BarComparisonChart data={agedBySupplier} series={[{ key: "value", name: "Aged Value", color: hrh.accent }]} valueFormatter={formatPeso} />
+              <BarComparisonChart data={agedBySupplier} series={[{ key: "value", name: "Aged Value", color: hrh.accent }]} valueFormatter={formatPeso} horizontal />
             </Panel>
           </div>
 

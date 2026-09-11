@@ -26,8 +26,6 @@ function toNum(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-const AGING_ORDER = ["1-30", "31-60", "61-90", "91-120", "121+"];
-
 export async function handleInventoryAging(req, res) {
   try {
     // Scoped to item_qty > 0 throughout this endpoint — same "genuinely on
@@ -63,23 +61,49 @@ export async function handleInventoryAging(req, res) {
     ).json();
     const k = kpiRows[0] || {};
 
-    // Aging Distribution — every item_qty > 0 row (not just the 61+ aged
-    // ones above), so the chart shows the full 1-30 through 121+ spread,
-    // not just the tail this page's KPIs focus on.
-    const distRows = await (
+    // Top 10 Slow-Moving / Non-Moving Items by Value — same 61+ day, real-
+    // stock population as the KPIs above, split the same way (sold before
+    // vs never sold), sorted by SRP value descending so the biggest-money
+    // items needing action surface first in each list.
+    const topSlowMovingRows = await (
       await client.query({
         query: `
-          SELECT inventory_aging AS bucket, count() AS n
+          SELECT product_name, category_name, item_qty, total_current_srp
           FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ({buckets:Array(String)})
-          GROUP BY bucket
+          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold > 0
+          ORDER BY total_current_srp DESC
+          LIMIT 10
         `,
-        query_params: { store: HRH_STORE, buckets: AGING_ORDER },
+        query_params: { store: HRH_STORE },
         format: "JSONEachRow",
       })
     ).json();
-    const distMap = new Map(distRows.map((r) => [r.bucket, toNum(r.n)]));
-    const agingDistribution = AGING_ORDER.map((label) => ({ label, value: distMap.get(label) || 0 }));
+    const topSlowMovingItems = topSlowMovingRows.map((r) => ({
+      product: r.product_name || "—",
+      category: r.category_name || "Uncategorized",
+      units: toNum(r.item_qty),
+      value: toNum(r.total_current_srp),
+    }));
+
+    const topNonMovingRows = await (
+      await client.query({
+        query: `
+          SELECT product_name, category_name, item_qty, total_current_srp
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold = 0
+          ORDER BY total_current_srp DESC
+          LIMIT 10
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const topNonMovingItems = topNonMovingRows.map((r) => ({
+      product: r.product_name || "—",
+      category: r.category_name || "Uncategorized",
+      units: toNum(r.item_qty),
+      value: toNum(r.total_current_srp),
+    }));
 
     // Aged Inventory Value by Category — same 61+ day population as the
     // KPIs, top 8 categories by value.
@@ -97,8 +121,7 @@ export async function handleInventoryAging(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const CATEGORY_COLORS = ["#22304f", "#d99a3d", "#1baf7a", "#4a3aa7", "#e34948", "#2f7fbf", "#8a5a2f", "#6b6f76"];
-    const agedByCategory = categoryRows.map((r, i) => ({ label: r.category, value: toNum(r.value), color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }));
+    const agedByCategory = categoryRows.map((r) => ({ label: r.category, value: toNum(r.value) }));
 
     // Aged Inventory Value by Supplier — same population, top 8 suppliers
     // by value. Verified coverage first (100%, 5,538 of 5,538 rows).
@@ -158,7 +181,8 @@ export async function handleInventoryAging(req, res) {
         nonMovingSkus: { value: toNum(k.non_moving_skus) },
         nonMovingValue: { value: toNum(k.non_moving_value) },
       },
-      agingDistribution,
+      topSlowMovingItems,
+      topNonMovingItems,
       agedByCategory,
       agedBySupplier,
       oldestInventoryTable,
