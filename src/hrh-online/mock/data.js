@@ -139,42 +139,6 @@ export const customerAnalytics = {
 };
 
 // ---------------------------------------------------------------------
-// Product & Merchandising
-// ---------------------------------------------------------------------
-// Not wired to a real data source yet — zeroed rather than left with demo
-// numbers that could be mistaken for real ones. Category/branch labels are
-// kept (so the charts still show their real axis structure), but every
-// count/value is 0 and per-record detail tables are empty rather than
-// showing fabricated product names/orders at $0.
-export const merchandising = {
-  kpis: {
-    barcodedItems: { value: 0, delta: null },
-    postedItems: { value: 0, delta: null },
-    postingRate: { value: 0, delta: null },
-    unpostedBacklog: { value: 0, delta: null },
-    avgBarcodeToPostTime: { value: 0, sub: "days" },
-  },
-  publishingFunnel: [
-    { label: "Received / Barcoded", value: 0 },
-    { label: "Posted", value: 0 },
-    { label: "Sold", value: 0 },
-  ],
-  postingPerformanceByBranch: [
-    { label: "Manila", posted: 0 },
-    { label: "Cebu", posted: 0 },
-    { label: "Davao", posted: 0 },
-    { label: "Pampanga", posted: 0 },
-  ],
-  unpostedBacklogAging: [
-    { label: "1–7 days", value: 0 },
-    { label: "8–14 days", value: 0 },
-    { label: "15–30 days", value: 0 },
-    { label: "31+ days", value: 0 },
-  ],
-  productTable: [],
-};
-
-// ---------------------------------------------------------------------
 // Inventory Aging — thresholds not yet defined, see DemoBadge on the page.
 // ---------------------------------------------------------------------
 export const inventoryAging = {

@@ -1,6 +1,7 @@
 import { createClient } from "@clickhouse/client";
 import { handleTrafficAnalytics } from "./_hrh-traffic-analytics.js";
 import { handleCustomerAnalytics } from "./_hrh-customer-analytics.js";
+import { handleMerchandising } from "./_hrh-merchandising.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -190,6 +191,7 @@ function buildTopSeriesTrend(rows, from, to, topN) {
 export default async function handler(req, res) {
   if (req.query.report === "traffic") return handleTrafficAnalytics(req, res);
   if (req.query.report === "customers") return handleCustomerAnalytics(req, res);
+  if (req.query.report === "merchandising") return handleMerchandising(req, res);
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
