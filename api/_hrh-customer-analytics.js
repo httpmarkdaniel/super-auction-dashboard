@@ -573,17 +573,17 @@ export async function handleCustomerAnalytics(req, res) {
     // TikTok/Shopee customer_ids resolve fine here too). Same WALK IN
     // exclusion as everywhere else on this page.
     //
-    // "Preferred category/subcategory/product" per gender is NOT read off
-    // the single highest (gender, category, subcategory, product) row —
-    // that would only surface the best single product-within-subcategory-
-    // within-category slice and undercount a category/subcategory whose
-    // sales are spread across several subcategories/products. Category,
-    // subcategory, and product totals are each rolled up independently in
-    // JS from the same per-row GMV data, then each gender's best of each
-    // is picked separately — verified against real data: Male's top
-    // category (Clothing, ~238K) correctly sums MEN'S TOP (~188K) plus its
-    // other subcategories, rather than just reporting the single top
-    // pairing.
+    // "Preferred category/subcategory/product" (top 3 each) per gender is
+    // NOT read off the single highest (gender, category, subcategory,
+    // product) row — that would only surface the best single product-
+    // within-subcategory-within-category slice and undercount a category/
+    // subcategory whose sales are spread across several subcategories/
+    // products. Category, subcategory, and product totals are each rolled
+    // up independently in JS from the same per-row GMV data, then each
+    // gender's top 3 of each are picked separately — verified against real
+    // data: Male's top category (Clothing, ~238K) correctly sums MEN'S TOP
+    // (~188K) plus its other subcategories, rather than just reporting the
+    // single top pairing.
     const genderCategoryRows = await (
       await client.query({
         query: `
@@ -637,28 +637,36 @@ export async function handleCustomerAnalytics(req, res) {
       const pk = `${r.gender}|${r.product}`;
       productGmvByGender.set(pk, (productGmvByGender.get(pk) || 0) + gmv);
     }
-    function topPerGender(map) {
-      const best = {};
+    // Top 3 (not just the single best) per gender, for category, subcategory,
+    // and product independently — same "gender|name" key split as before,
+    // just grouped and sorted per gender instead of keeping only the max.
+    function topNPerGender(map, n) {
+      const byGender = {};
       for (const [key, gmv] of map) {
         const sep = key.indexOf("|");
         const gender = key.slice(0, sep);
         const name = key.slice(sep + 1);
-        if (!best[gender] || gmv > best[gender].gmv) best[gender] = { name, gmv };
+        if (!byGender[gender]) byGender[gender] = [];
+        byGender[gender].push({ name, gmv });
       }
-      return best;
+      for (const gender of Object.keys(byGender)) {
+        byGender[gender].sort((a, b) => b.gmv - a.gmv);
+        byGender[gender] = byGender[gender].slice(0, n);
+      }
+      return byGender;
     }
-    const topCategory = topPerGender(categoryGmvByGender);
-    const topSubcategory = topPerGender(subcategoryGmvByGender);
-    const topProduct = topPerGender(productGmvByGender);
+    const topCategories = topNPerGender(categoryGmvByGender, 3);
+    const topSubcategories = topNPerGender(subcategoryGmvByGender, 3);
+    const topProducts = topNPerGender(productGmvByGender, 3);
     const customerDemographics = {
       byGender: [...genderCustomers.keys()]
         .map((gender) => ({
           gender,
           customers: genderCustomers.get(gender).size,
           gmv: genderGmv.get(gender) || 0,
-          preferredCategory: topCategory[gender]?.name || null,
-          preferredSubcategory: topSubcategory[gender]?.name || null,
-          preferredProduct: topProduct[gender]?.name || null,
+          preferredCategories: topCategories[gender] || [],
+          preferredSubcategories: topSubcategories[gender] || [],
+          preferredProducts: topProducts[gender] || [],
         }))
         .sort((a, b) => b.customers - a.customers),
     };

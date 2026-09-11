@@ -231,12 +231,16 @@ export default function CustomerAnalytics({ filters }) {
                           <div className="text-[10.5px]" style={{ color: hrh.muted }}>
                             {formatPct(share)} · {formatPeso(g.gmv)}
                           </div>
-                          <div className="text-[11px] mt-1 truncate" style={{ color: hrh.ink2 }} title={g.preferredProduct || undefined}>
-                            <span style={{ color: hrh.muted }}>Prefers: </span>
-                            {g.preferredProduct || "—"}
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.04em] mt-1.5" style={{ color: hrh.muted }}>
+                            Top 3 Products
                           </div>
-                          <div className="text-[10.5px] truncate" style={{ color: hrh.muted }}>
-                            {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
+                          {(g.preferredProducts?.length ? g.preferredProducts : [{ name: "—" }]).map((p, i) => (
+                            <div key={p.name + i} className="text-[11px] truncate" style={{ color: hrh.ink2 }} title={p.name || undefined}>
+                              {i + 1}. {p.name || "—"}
+                            </div>
+                          ))}
+                          <div className="text-[10.5px] truncate mt-1" style={{ color: hrh.muted }}>
+                            {g.preferredCategories?.[0]?.name || "—"} › {g.preferredSubcategories?.[0]?.name || "—"}
                           </div>
                         </div>
                       );
