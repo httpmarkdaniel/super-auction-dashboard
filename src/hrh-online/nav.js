@@ -26,10 +26,6 @@ export const NAV_GROUPS = [
       { key: "pickup", label: "Pickup at Store" },
     ],
   },
-  {
-    label: "Channels",
-    items: [{ key: "channelPerformance", label: "Channel Performance" }],
-  },
 ];
 
 export const OPERATIONAL_FLAGS_KEY = "operationalFlags";

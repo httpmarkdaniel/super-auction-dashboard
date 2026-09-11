@@ -102,40 +102,6 @@ export const salesAnalytics = {
 };
 
 // ---------------------------------------------------------------------
-// Traffic & Conversion — GA4 reconciliation pending, demo data only.
-// ---------------------------------------------------------------------
-export const trafficConversion = {
-  kpis: {
-    sessions: { value: 486_200, delta: 5.2 },
-    users: { value: 312_400, delta: 3.9 },
-    engagedSessions: { value: 201_600, delta: 2.1 },
-    conversionRate: { value: 2.64, delta: -0.3 },
-    revenuePerSession: { value: 37.9, delta: 1.6 },
-  },
-  funnel: [
-    { label: "Sessions", value: 486_200 },
-    { label: "Engaged", value: 201_600 },
-    { label: "Product View", value: 96_400 },
-    { label: "Add to Cart", value: 38_900 },
-    { label: "Order", value: 12_840 },
-    { label: "Paid", value: 11_260 },
-  ],
-  conversionTrend: WEEKS.map((label, i) => ({ label, conversionRate: 2.2 + Math.sin(i / 2) * 0.3 + i * 0.03 })),
-  trafficByChannel: [
-    { label: "HMRPH Online", value: 210_400, color: "#22304f" },
-    { label: "TikTok", value: 186_300, color: "#d99a3d" },
-    { label: "Shopee", value: 89_500, color: "#1baf7a" },
-  ],
-  sourceMedium: [
-    { id: "sm1", source: "tiktok / social", sessions: 154_200, users: 98_400, conversionRate: 2.1 },
-    { id: "sm2", source: "google / organic", sessions: 121_800, users: 87_600, conversionRate: 3.4 },
-    { id: "sm3", source: "shopee / marketplace", sessions: 89_500, users: 61_200, conversionRate: 2.9 },
-    { id: "sm4", source: "facebook / paid", sessions: 68_300, users: 42_100, conversionRate: 1.8 },
-    { id: "sm5", source: "direct / none", sessions: 52_400, users: 23_100, conversionRate: 4.2 },
-  ],
-};
-
-// ---------------------------------------------------------------------
 // Customer Analytics — demo data only.
 // ---------------------------------------------------------------------
 export const customerAnalytics = {
@@ -175,38 +141,37 @@ export const customerAnalytics = {
 // ---------------------------------------------------------------------
 // Product & Merchandising
 // ---------------------------------------------------------------------
+// Not wired to a real data source yet — zeroed rather than left with demo
+// numbers that could be mistaken for real ones. Category/branch labels are
+// kept (so the charts still show their real axis structure), but every
+// count/value is 0 and per-record detail tables are empty rather than
+// showing fabricated product names/orders at $0.
 export const merchandising = {
   kpis: {
-    barcodedItems: { value: 48_200, delta: 3.1 },
-    postedItems: { value: 41_600, delta: 4.4 },
-    postingRate: { value: 86.3, delta: 1.2 },
-    unpostedBacklog: { value: 6_600, delta: -2.8 },
-    avgBarcodeToPostTime: { value: 2.4, sub: "days" },
+    barcodedItems: { value: 0, delta: null },
+    postedItems: { value: 0, delta: null },
+    postingRate: { value: 0, delta: null },
+    unpostedBacklog: { value: 0, delta: null },
+    avgBarcodeToPostTime: { value: 0, sub: "days" },
   },
   publishingFunnel: [
-    { label: "Received / Barcoded", value: 48_200 },
-    { label: "Posted", value: 41_600 },
-    { label: "Sold", value: 21_530 },
+    { label: "Received / Barcoded", value: 0 },
+    { label: "Posted", value: 0 },
+    { label: "Sold", value: 0 },
   ],
   postingPerformanceByBranch: [
-    { label: "Manila", posted: 14_200 },
-    { label: "Cebu", posted: 9_800 },
-    { label: "Davao", posted: 8_100 },
-    { label: "Pampanga", posted: 6_400 },
+    { label: "Manila", posted: 0 },
+    { label: "Cebu", posted: 0 },
+    { label: "Davao", posted: 0 },
+    { label: "Pampanga", posted: 0 },
   ],
   unpostedBacklogAging: [
-    { label: "1–7 days", value: 3_200 },
-    { label: "8–14 days", value: 1_900 },
-    { label: "15–30 days", value: 980 },
-    { label: "31+ days", value: 520 },
+    { label: "1–7 days", value: 0 },
+    { label: "8–14 days", value: 0 },
+    { label: "15–30 days", value: 0 },
+    { label: "31+ days", value: 0 },
   ],
-  productTable: [
-    { id: "pm1", product: "Denim Jacket – Classic Wash", category: "Apparel", branch: "Manila", units: 340, gmv: 412_000, nmv: 366_000, age: 6, status: "Posted" },
-    { id: "pm2", product: "Structured Tote", category: "Bags", branch: "Cebu", units: 190, gmv: 274_800, nmv: 241_600, age: 11, status: "Posted" },
-    { id: "pm3", product: "Wool Blend Coat", category: "Apparel", branch: "Davao", units: 0, gmv: 0, nmv: 0, age: 24, status: "Unposted" },
-    { id: "pm4", product: "Suede Ankle Boots", category: "Footwear", branch: "Pampanga", units: 58, gmv: 92_400, nmv: 81_200, age: 3, status: "Posted" },
-    { id: "pm5", product: "Woven Belt Set", category: "Accessories", branch: "Manila", units: 0, gmv: 0, nmv: 0, age: 33, status: "Unposted" },
-  ],
+  productTable: [],
 };
 
 // ---------------------------------------------------------------------
@@ -214,37 +179,31 @@ export const merchandising = {
 // ---------------------------------------------------------------------
 export const inventoryAging = {
   kpis: {
-    slowMovingSkus: { value: 3_840 },
-    slowMovingValue: { value: 5_120_000 },
-    nonMovingSkus: { value: 1_260 },
-    nonMovingValue: { value: 2_640_000 },
+    slowMovingSkus: { value: 0 },
+    slowMovingValue: { value: 0 },
+    nonMovingSkus: { value: 0 },
+    nonMovingValue: { value: 0 },
   },
   agingDistribution: [
-    { label: "1–30", value: 12_400 },
-    { label: "31–60", value: 8_100 },
-    { label: "61–90", value: 4_820 },
-    { label: "91–120", value: 2_310 },
-    { label: "121+", value: 1_260 },
+    { label: "1–30", value: 0 },
+    { label: "31–60", value: 0 },
+    { label: "61–90", value: 0 },
+    { label: "91–120", value: 0 },
+    { label: "121+", value: 0 },
   ],
   agedByCategory: [
-    { label: "Apparel", value: 3_120_000, color: "#22304f" },
-    { label: "Footwear", value: 1_980_000, color: "#d99a3d" },
-    { label: "Bags", value: 1_540_000, color: "#1baf7a" },
-    { label: "Home", value: 1_120_000, color: "#4a3aa7" },
+    { label: "Apparel", value: 0, color: "#22304f" },
+    { label: "Footwear", value: 0, color: "#d99a3d" },
+    { label: "Bags", value: 0, color: "#1baf7a" },
+    { label: "Home", value: 0, color: "#4a3aa7" },
   ],
   agedByBranch: [
-    { label: "Manila", value: 2_640_000 },
-    { label: "Cebu", value: 1_980_000 },
-    { label: "Davao", value: 1_420_000 },
-    { label: "Pampanga", value: 1_720_000 },
+    { label: "Manila", value: 0 },
+    { label: "Cebu", value: 0 },
+    { label: "Davao", value: 0 },
+    { label: "Pampanga", value: 0 },
   ],
-  oldestInventoryTable: [
-    { id: "oi1", product: "Wool Blend Coat", category: "Apparel", branch: "Davao", ageDays: 214, value: 8_400 },
-    { id: "oi2", product: "Ceramic Table Vase", category: "Home", branch: "Manila", ageDays: 198, value: 3_100 },
-    { id: "oi3", product: "Beaded Anklet Set", category: "Accessories", branch: "Cebu", ageDays: 176, value: 2_650 },
-    { id: "oi4", product: "Canvas Espadrilles", category: "Footwear", branch: "Pampanga", ageDays: 161, value: 4_200 },
-    { id: "oi5", product: "Linen Throw Pillow", category: "Home", branch: "Manila", ageDays: 154, value: 1_980 },
-  ],
+  oldestInventoryTable: [],
 };
 
 // ---------------------------------------------------------------------
@@ -252,36 +211,31 @@ export const inventoryAging = {
 // ---------------------------------------------------------------------
 export const markdownAnalytics = {
   kpis: {
-    itemsMarkedDown: { value: 5_420 },
-    avgMarkdownPct: { value: 22.6 },
-    markedDownGmv: { value: 1_860_000 },
-    agedMarkedUnsold: { value: 940 },
+    itemsMarkedDown: { value: 0 },
+    avgMarkdownPct: { value: 0 },
+    markedDownGmv: { value: 0 },
+    agedMarkedUnsold: { value: 0 },
   },
   markdownDepthDistribution: [
-    { label: "1–10%", value: 1_820 },
-    { label: "11–20%", value: 1_640 },
-    { label: "21–30%", value: 1_120 },
-    { label: "31–40%", value: 560 },
-    { label: "41%+", value: 280 },
+    { label: "1–10%", value: 0 },
+    { label: "11–20%", value: 0 },
+    { label: "21–30%", value: 0 },
+    { label: "31–40%", value: 0 },
+    { label: "41%+", value: 0 },
   ],
   markdownPerformance: [
-    { label: "Apparel", preMarkdownGmv: 1_240_000, postMarkdownGmv: 860_000 },
-    { label: "Footwear", preMarkdownGmv: 780_000, postMarkdownGmv: 540_000 },
-    { label: "Bags", preMarkdownGmv: 610_000, postMarkdownGmv: 460_000 },
-    { label: "Home", preMarkdownGmv: 340_000, postMarkdownGmv: 260_000 },
+    { label: "Apparel", preMarkdownGmv: 0, postMarkdownGmv: 0 },
+    { label: "Footwear", preMarkdownGmv: 0, postMarkdownGmv: 0 },
+    { label: "Bags", preMarkdownGmv: 0, postMarkdownGmv: 0 },
+    { label: "Home", preMarkdownGmv: 0, postMarkdownGmv: 0 },
   ],
   agedVsMarkdown: [
-    { label: "Apparel", agedValue: 3_120_000, markedDownValue: 860_000 },
-    { label: "Footwear", agedValue: 1_980_000, markedDownValue: 540_000 },
-    { label: "Bags", agedValue: 1_540_000, markedDownValue: 460_000 },
-    { label: "Home", agedValue: 1_120_000, markedDownValue: 260_000 },
+    { label: "Apparel", agedValue: 0, markedDownValue: 0 },
+    { label: "Footwear", agedValue: 0, markedDownValue: 0 },
+    { label: "Bags", agedValue: 0, markedDownValue: 0 },
+    { label: "Home", agedValue: 0, markedDownValue: 0 },
   ],
-  markdownProductTable: [
-    { id: "md1", product: "Wool Blend Coat", category: "Apparel", markdownPct: 38, ageDays: 214, status: "Aged + Marked, Unsold" },
-    { id: "md2", product: "Canvas Espadrilles", category: "Footwear", markdownPct: 25, ageDays: 161, status: "Aged + Marked, Unsold" },
-    { id: "md3", product: "Structured Tote", category: "Bags", markdownPct: 15, ageDays: 42, status: "Marked, Selling" },
-    { id: "md4", product: "Ceramic Table Vase", category: "Home", markdownPct: 30, ageDays: 198, status: "Aged + Marked, Unsold" },
-  ],
+  markdownProductTable: [],
 };
 
 // ---------------------------------------------------------------------
@@ -289,37 +243,31 @@ export const markdownAnalytics = {
 // ---------------------------------------------------------------------
 export const fulfillment = {
   kpis: {
-    ordersRequiringPick: { value: 12_840, delta: 4.1 },
-    pickRate: { value: 91.4, delta: 1.6 },
-    pendingPicks: { value: 780, delta: -6.2 },
-    avgPickTime: { value: 3.2, sub: "hours" },
-    fulfillmentRate: { value: 94.8, delta: 0.9 },
+    ordersRequiringPick: { value: 0, delta: null },
+    pickRate: { value: 0, delta: null },
+    pendingPicks: { value: 0, delta: null },
+    avgPickTime: { value: 0, sub: "hours" },
+    fulfillmentRate: { value: 0, delta: null },
   },
   funnel: [
-    { label: "Order", value: 12_840 },
-    { label: "Pick", value: 11_740 },
-    { label: "Dispatch", value: 11_260 },
-    { label: "Complete", value: 10_980 },
+    { label: "Order", value: 0 },
+    { label: "Pick", value: 0 },
+    { label: "Dispatch", value: 0 },
+    { label: "Complete", value: 0 },
   ],
-  pendingPickQueue: [
-    { id: "pk1", order: "HRH-100234", store: "Manila", ageHours: 28, status: "Awaiting Pick" },
-    { id: "pk2", order: "HRH-100261", store: "Cebu", ageHours: 22, status: "Awaiting Pick" },
-    { id: "pk3", order: "HRH-100299", store: "Davao", ageHours: 19, status: "Picking" },
-    { id: "pk4", order: "HRH-100312", store: "Pampanga", ageHours: 14, status: "Awaiting Pick" },
-    { id: "pk5", order: "HRH-100340", store: "Manila", ageHours: 9, status: "Picking" },
-  ],
+  pendingPickQueue: [],
   performanceByStore: [
-    { label: "Manila", fulfillmentRate: 96.2 },
-    { label: "Cebu", fulfillmentRate: 94.8 },
-    { label: "Davao", fulfillmentRate: 92.1 },
-    { label: "Pampanga", fulfillmentRate: 93.6 },
+    { label: "Manila", fulfillmentRate: 0 },
+    { label: "Cebu", fulfillmentRate: 0 },
+    { label: "Davao", fulfillmentRate: 0 },
+    { label: "Pampanga", fulfillmentRate: 0 },
   ],
   pickDispatchTimeDistribution: [
-    { label: "< 1h", value: 3_140 },
-    { label: "1–4h", value: 5_620 },
-    { label: "4–12h", value: 2_310 },
-    { label: "12–24h", value: 980 },
-    { label: "24h+", value: 400 },
+    { label: "< 1h", value: 0 },
+    { label: "1–4h", value: 0 },
+    { label: "4–12h", value: 0 },
+    { label: "12–24h", value: 0 },
+    { label: "24h+", value: 0 },
   ],
 };
 
@@ -328,77 +276,41 @@ export const fulfillment = {
 // ---------------------------------------------------------------------
 export const pickupAtStore = {
   kpis: {
-    pickupOrders: { value: 2_740, delta: 5.8 },
-    pickupGmv: { value: 3_920_000, delta: 6.4 },
-    pickupNmv: { value: 3_410_000, delta: 5.1 },
-    pickupShare: { value: 21.3, delta: 2.5 },
-    pickupAov: { value: 1_431, delta: 0.6 },
+    pickupOrders: { value: 0, delta: null },
+    pickupGmv: { value: 0, delta: null },
+    pickupNmv: { value: 0, delta: null },
+    pickupShare: { value: 0, delta: null },
+    pickupAov: { value: 0, delta: null },
   },
   pickupVsDelivery: [
-    { label: "Pickup at Store", value: 3_920_000, color: "#d99a3d" },
-    { label: "Home Delivery", value: 14_500_000, color: "#22304f" },
+    { label: "Pickup at Store", value: 0, color: "#d99a3d" },
+    { label: "Home Delivery", value: 0, color: "#22304f" },
   ],
   // Payment type WITHIN pickup orders only — still a separate dimension
   // from the fulfillment method itself (see the top-level comment in this
   // file and PickupAtStore.jsx).
   paymentTypeWithinPickup: [
-    { label: "GCash", value: 1_460_000, color: "#22304f" },
-    { label: "Store Cash", value: 1_180_000, color: "#d99a3d" },
-    { label: "Credit/Debit Card", value: 860_000, color: "#1baf7a" },
-    { label: "Bank Transfer", value: 420_000, color: "#4a3aa7" },
+    { label: "GCash", value: 0, color: "#22304f" },
+    { label: "Store Cash", value: 0, color: "#d99a3d" },
+    { label: "Credit/Debit Card", value: 0, color: "#1baf7a" },
+    { label: "Bank Transfer", value: 0, color: "#4a3aa7" },
   ],
   pickupByRedemptionStore: [
-    { label: "Manila", value: 1_420_000 },
-    { label: "Cebu", value: 980_000 },
-    { label: "Davao", value: 810_000 },
-    { label: "Pampanga", value: 710_000 },
+    { label: "Manila", value: 0 },
+    { label: "Cebu", value: 0 },
+    { label: "Davao", value: 0 },
+    { label: "Pampanga", value: 0 },
   ],
   pickupByCategory: [
-    { label: "Apparel", value: 1_680_000, color: "#22304f" },
-    { label: "Footwear", value: 980_000, color: "#d99a3d" },
-    { label: "Bags", value: 740_000, color: "#1baf7a" },
-    { label: "Home", value: 520_000, color: "#4a3aa7" },
+    { label: "Apparel", value: 0, color: "#22304f" },
+    { label: "Footwear", value: 0, color: "#d99a3d" },
+    { label: "Bags", value: 0, color: "#1baf7a" },
+    { label: "Home", value: 0, color: "#4a3aa7" },
   ],
   pickupLifecycle: [
-    { label: "Ordered", value: 2_740 },
-    { label: "Ready for Pickup", value: 2_580 },
-    { label: "Picked Up", value: 2_390 },
-  ],
-};
-
-// ---------------------------------------------------------------------
-// Channel Performance
-// ---------------------------------------------------------------------
-export const channelPerformance = {
-  scorecards: [
-    { channel: "HMRPH Online", gmv: 9_850_000, orders: 6_120, conversionRate: 3.4, cancellationRate: 3.8 },
-    { channel: "TikTok", gmv: 5_120_000, orders: 4_380, conversionRate: 2.1, cancellationRate: 6.1 },
-    { channel: "Shopee", gmv: 3_450_000, orders: 2_340, conversionRate: 2.9, cancellationRate: 4.4 },
-  ],
-  comparisonTable: [
-    {
-      channel: "HMRPH Online", gmv: 9_850_000, nmv: 8_620_000, orders: 6_120, units: 10_340, aov: 1_609,
-      traffic: 210_400, conversionRate: 3.4, cancellationRate: 3.8, returnRate: 1.4, fulfillmentRate: 96.1, customers: 4_680,
-    },
-    {
-      channel: "TikTok", gmv: 5_120_000, nmv: 4_330_000, orders: 4_380, units: 7_260, aov: 1_169,
-      traffic: 186_300, conversionRate: 2.1, cancellationRate: 6.1, returnRate: 2.2, fulfillmentRate: 92.4, customers: 3_120,
-    },
-    {
-      channel: "Shopee", gmv: 3_450_000, nmv: 3_010_000, orders: 2_340, units: 3_930, aov: 1_474,
-      traffic: 89_500, conversionRate: 2.9, cancellationRate: 4.4, returnRate: 1.8, fulfillmentRate: 94.8, customers: 1_840,
-    },
-  ],
-  salesTrend: WEEKS.map((label, i) => ({
-    label,
-    "HMRPH Online": 1_050_000 + i * 60_000,
-    TikTok: 560_000 + i * 45_000 + (i % 2 === 0 ? 40_000 : 0),
-    Shopee: 380_000 + i * 20_000,
-  })),
-  diagnostics: [
-    { channel: "HMRPH Online", note: "Highest AOV and lowest cancellation rate — primary conversion channel." },
-    { channel: "TikTok", note: "Strong traffic, higher cancellation rate — checkout friction under review." },
-    { channel: "Shopee", note: "Smallest volume, stable fulfillment — steady secondary channel." },
+    { label: "Ordered", value: 0 },
+    { label: "Ready for Pickup", value: 0 },
+    { label: "Picked Up", value: 0 },
   ],
 };
 

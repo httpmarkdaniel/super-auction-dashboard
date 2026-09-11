@@ -11,7 +11,6 @@ import InventoryAging from "./pages/InventoryAging";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
 import OrdersFulfillment from "./pages/OrdersFulfillment";
 import PickupAtStore from "./pages/PickupAtStore";
-import ChannelPerformance from "./pages/ChannelPerformance";
 import OperationalFlags from "./pages/OperationalFlags";
 import { OPERATIONAL_FLAGS_KEY } from "./nav";
 import { hrh } from "./theme";
@@ -28,7 +27,6 @@ const PAGES = {
   markdown: MarkdownAnalytics,
   fulfillment: OrdersFulfillment,
   pickup: PickupAtStore,
-  channelPerformance: ChannelPerformance,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,
 };
 
