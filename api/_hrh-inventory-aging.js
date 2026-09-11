@@ -39,38 +39,95 @@ export async function handleInventoryAging(req, res) {
     // "Threshold definition pending" placeholder. Population: item_qty > 0
     // AND inventory_aging in (61-90, 91-120, 121+) — 61+ days old, past the
     // point where "hasn't sold yet" is still just normal turnover time.
-    // Within that: Non-Moving = total_qty_sold = 0 (zero sales ever, despite
-    // sitting 61+ days) — genuinely dead stock. Slow-Moving = total_qty_sold
-    // > 0 — it has sold before, just not fast enough to clear a 61+ day-old
-    // batch. Verified real, meaningful split: 4,787 non-moving SKUs (₱17.2M)
-    // vs 751 slow-moving SKUs (₱3.7M) for HRH Online.
-    const kpiRows = await (
+    // Non-Moving = total_qty_sold = 0 (zero sales ever, despite sitting
+    // 61+ days) — genuinely dead stock, computed straight from
+    // xv3.mart_level_of_inventory's own cumulative counter.
+    //
+    // Slow-Moving needed a real recency cutoff — total_qty_sold alone is
+    // lifetime-to-date, so an item sold once 3 years ago would count as
+    // "moving" forever. xv3.mart_net_sales has a genuine per-sale
+    // transaction_date (joined via `ct.item_id` = product_id, same key
+    // Barcode Analytics' Sold funnel uses); verified 100% of items with
+    // total_qty_sold > 0 have a matching sale row there. Slow-Moving =
+    // has sold before AND last sale was more than 30 days ago. Of the 752
+    // items that were "Slow-Moving" under the old (recency-less)
+    // definition, 243 had actually sold within the last 30 days and are
+    // now correctly excluded from both buckets (they're moving normally,
+    // not stuck) — leaving 509 genuinely slow-moving.
+    const THIRTY_DAYS_MS = 30 * 86400000;
+    const recencyCutoff = new Date(Date.now() - THIRTY_DAYS_MS);
+
+    const lastSaleRows = await (
       await client.query({
         query: `
-          SELECT
-            countIf(total_qty_sold = 0) AS non_moving_skus,
-            sumIf(total_current_srp, total_qty_sold = 0) AS non_moving_value,
-            countIf(total_qty_sold > 0) AS slow_moving_skus,
-            sumIf(total_current_srp, total_qty_sold > 0) AS slow_moving_value
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+')
+          SELECT \`ct.item_id\` AS product_id, max(transaction_date) AS last_sale_date
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND net_sales_amount > 0 AND \`ct.item_id\` IS NOT NULL
+          GROUP BY product_id
         `,
         query_params: { store: HRH_STORE },
         format: "JSONEachRow",
       })
     ).json();
-    const k = kpiRows[0] || {};
+    const lastSaleByProduct = new Map(lastSaleRows.map((r) => [String(r.product_id), new Date(r.last_sale_date)]));
+    const soldRecently = (productId) => {
+      const lastSale = lastSaleByProduct.get(String(productId));
+      return !!lastSale && lastSale >= recencyCutoff;
+    };
 
-    // Top 10 Slow-Moving / Non-Moving Items by Value — same 61+ day, real-
-    // stock population as the KPIs above, split the same way (sold before
-    // vs never sold). Fetched pre-sorted both ways (by value and by qty)
-    // so the frontend's Value/Qty toggle just swaps which array it shows,
-    // rather than re-querying on toggle.
-    const topItemsQuery = (extraWhere, orderBy) => ({
+    const nonMovingRows = await (
+      await client.query({
+        query: `
+          SELECT count() AS non_moving_skus, sum(total_current_srp) AS non_moving_value
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold = 0
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const nk = nonMovingRows[0] || {};
+
+    // Slow-Moving candidates — everything in the aged, real-stock
+    // population that has sold at least once; classified against
+    // lastSaleByProduct in JS since "sold in the last 30 days" isn't a
+    // column on this table. Population is small (~750 rows), so fetching
+    // it all and filtering here is cheap.
+    const slowCandidateRows = await (
+      await client.query({
+        query: `
+          SELECT product_id, product_name, category_name, item_qty, total_current_srp
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold > 0
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const slowMovingItems = slowCandidateRows
+      .filter((r) => !soldRecently(r.product_id))
+      .map((r) => ({
+        product: r.product_name || "—",
+        category: r.category_name || "Uncategorized",
+        units: toNum(r.item_qty),
+        value: toNum(r.total_current_srp),
+      }));
+    const slowMovingSkus = slowMovingItems.length;
+    const slowMovingValue = slowMovingItems.reduce((sum, r) => sum + r.value, 0);
+
+    const topByValue = (rows) => [...rows].sort((a, b) => b.value - a.value).slice(0, 10);
+    const topByQty = (rows) => [...rows].sort((a, b) => b.units - a.units).slice(0, 10);
+    const topSlowMovingItemsByValue = topByValue(slowMovingItems);
+    const topSlowMovingItemsByQty = topByQty(slowMovingItems);
+
+    // Top 10 Non-Moving Items by Value/Qty — unaffected by the recency
+    // change (never sold, so there's no "last sale" to check), fetched
+    // pre-sorted both ways same as before.
+    const topNonMovingQuery = (orderBy) => ({
       query: `
         SELECT product_name, category_name, item_qty, total_current_srp
         FROM xv3.mart_level_of_inventory
-        WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND ${extraWhere}
+        WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold = 0
         ORDER BY ${orderBy} DESC
         LIMIT 10
       `,
@@ -84,15 +141,10 @@ export async function handleInventoryAging(req, res) {
         units: toNum(r.item_qty),
         value: toNum(r.total_current_srp),
       }));
-
-    const [slowByValue, slowByQty, nonByValue, nonByQty] = await Promise.all([
-      client.query(topItemsQuery("total_qty_sold > 0", "total_current_srp")).then((r) => r.json()),
-      client.query(topItemsQuery("total_qty_sold > 0", "item_qty")).then((r) => r.json()),
-      client.query(topItemsQuery("total_qty_sold = 0", "total_current_srp")).then((r) => r.json()),
-      client.query(topItemsQuery("total_qty_sold = 0", "item_qty")).then((r) => r.json()),
+    const [nonByValue, nonByQty] = await Promise.all([
+      client.query(topNonMovingQuery("total_current_srp")).then((r) => r.json()),
+      client.query(topNonMovingQuery("item_qty")).then((r) => r.json()),
     ]);
-    const topSlowMovingItemsByValue = mapTopItems(slowByValue);
-    const topSlowMovingItemsByQty = mapTopItems(slowByQty);
     const topNonMovingItemsByValue = mapTopItems(nonByValue);
     const topNonMovingItemsByQty = mapTopItems(nonByQty);
 
@@ -139,7 +191,7 @@ export async function handleInventoryAging(req, res) {
     const oldestRows = await (
       await client.query({
         query: `
-          SELECT product_name, category_name, item_qty, total_current_srp, date_received, total_qty_sold
+          SELECT product_id, product_name, category_name, item_qty, total_current_srp, date_received, total_qty_sold
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String} AND item_qty > 0 AND date_received IS NOT NULL
           ORDER BY date_received ASC, total_current_srp DESC
@@ -155,7 +207,7 @@ export async function handleInventoryAging(req, res) {
       ageDays: r.date_received ? Math.round((Date.now() - new Date(r.date_received).getTime()) / 86400000) : null,
       units: toNum(r.item_qty),
       value: toNum(r.total_current_srp),
-      status: toNum(r.total_qty_sold) === 0 ? "Non-Moving" : "Slow-Moving",
+      status: toNum(r.total_qty_sold) === 0 ? "Non-Moving" : soldRecently(r.product_id) ? "Recently Sold" : "Slow-Moving",
     }));
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
@@ -163,14 +215,15 @@ export async function handleInventoryAging(req, res) {
       meta: {
         snapshotNote:
           "Live inventory snapshot for HRH Online — not affected by the Date Range or Channel filter above, since xv3.mart_level_of_inventory has no transaction date or sales-channel dimension.",
-        thresholdNote: "Slow-Moving / Non-Moving are scoped to items aged 61+ days with real stock on hand (item_qty > 0).",
+        thresholdNote:
+          "Slow-Moving / Non-Moving are scoped to items aged 61+ days with real stock on hand (item_qty > 0). Slow-Moving additionally requires no sale in the last 30 days — items that sold before but not that recently.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        slowMovingSkus: { value: toNum(k.slow_moving_skus) },
-        slowMovingValue: { value: toNum(k.slow_moving_value) },
-        nonMovingSkus: { value: toNum(k.non_moving_skus) },
-        nonMovingValue: { value: toNum(k.non_moving_value) },
+        slowMovingSkus: { value: slowMovingSkus },
+        slowMovingValue: { value: slowMovingValue },
+        nonMovingSkus: { value: toNum(nk.non_moving_skus) },
+        nonMovingValue: { value: toNum(nk.non_moving_value) },
       },
       topSlowMovingItemsByValue,
       topSlowMovingItemsByQty,

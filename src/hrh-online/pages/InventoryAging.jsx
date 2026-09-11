@@ -85,7 +85,7 @@ export default function InventoryAging() {
           </div>
 
           <KpiRow>
-            <KpiCard label="Slow-Moving SKUs" value={formatNum(data.kpis.slowMovingSkus.value)} sub="61+ days, has sold before" />
+            <KpiCard label="Slow-Moving SKUs" value={formatNum(data.kpis.slowMovingSkus.value)} sub="61+ days, sold before, not in last 30 days" />
             <KpiCard label="Slow-Moving Value" value={formatPeso(data.kpis.slowMovingValue.value)} />
             <KpiCard label="Non-Moving SKUs" value={formatNum(data.kpis.nonMovingSkus.value)} sub="61+ days, never sold" />
             <KpiCard label="Non-Moving Value" value={formatPeso(data.kpis.nonMovingValue.value)} />
@@ -95,7 +95,7 @@ export default function InventoryAging() {
             <TrendBucketPills value={topItemsSortBy} onChange={setTopItemsSortBy} options={SORT_BY_OPTIONS} />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Panel title={`Top 10 Slow-Moving Items by ${topItemsSortBy === "qty" ? "Qty" : "Value"}`} subtitle="61+ days, has sold before">
+            <Panel title={`Top 10 Slow-Moving Items by ${topItemsSortBy === "qty" ? "Qty" : "Value"}`} subtitle="61+ days, sold before, not in last 30 days">
               <DataTable columns={TOP_ITEM_COLUMNS} rows={topSlowMovingItems} stickyColumns={2} emptyLabel="No slow-moving items right now." />
             </Panel>
             <Panel title={`Top 10 Non-Moving Items by ${topItemsSortBy === "qty" ? "Qty" : "Value"}`} subtitle="61+ days, never sold">
