@@ -3,6 +3,7 @@ import { handleTrafficAnalytics } from "./_hrh-traffic-analytics.js";
 import { handleCustomerAnalytics } from "./_hrh-customer-analytics.js";
 import { handleBarcodeAnalytics } from "./_hrh-barcode-analytics.js";
 import { handleInventoryAging } from "./_hrh-inventory-aging.js";
+import { handleMarkdownAnalytics } from "./_hrh-markdown-analytics.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -194,6 +195,7 @@ export default async function handler(req, res) {
   if (req.query.report === "customers") return handleCustomerAnalytics(req, res);
   if (req.query.report === "barcodeAnalytics") return handleBarcodeAnalytics(req, res);
   if (req.query.report === "inventoryAging") return handleInventoryAging(req, res);
+  if (req.query.report === "markdownAnalytics") return handleMarkdownAnalytics(req, res);
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");

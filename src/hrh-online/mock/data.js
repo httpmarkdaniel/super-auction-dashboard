@@ -139,38 +139,6 @@ export const customerAnalytics = {
 };
 
 // ---------------------------------------------------------------------
-// Markdown Analytics — price-history integration pending, demo data only.
-// ---------------------------------------------------------------------
-export const markdownAnalytics = {
-  kpis: {
-    itemsMarkedDown: { value: 0 },
-    avgMarkdownPct: { value: 0 },
-    markedDownGmv: { value: 0 },
-    agedMarkedUnsold: { value: 0 },
-  },
-  markdownDepthDistribution: [
-    { label: "1–10%", value: 0 },
-    { label: "11–20%", value: 0 },
-    { label: "21–30%", value: 0 },
-    { label: "31–40%", value: 0 },
-    { label: "41%+", value: 0 },
-  ],
-  markdownPerformance: [
-    { label: "Apparel", preMarkdownGmv: 0, postMarkdownGmv: 0 },
-    { label: "Footwear", preMarkdownGmv: 0, postMarkdownGmv: 0 },
-    { label: "Bags", preMarkdownGmv: 0, postMarkdownGmv: 0 },
-    { label: "Home", preMarkdownGmv: 0, postMarkdownGmv: 0 },
-  ],
-  agedVsMarkdown: [
-    { label: "Apparel", agedValue: 0, markedDownValue: 0 },
-    { label: "Footwear", agedValue: 0, markedDownValue: 0 },
-    { label: "Bags", agedValue: 0, markedDownValue: 0 },
-    { label: "Home", agedValue: 0, markedDownValue: 0 },
-  ],
-  markdownProductTable: [],
-};
-
-// ---------------------------------------------------------------------
 // Orders & Fulfillment — timestamp completeness not yet validated.
 // ---------------------------------------------------------------------
 export const fulfillment = {
