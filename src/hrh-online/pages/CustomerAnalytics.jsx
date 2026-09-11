@@ -48,6 +48,21 @@ function effectivePeriodLabel(period) {
   return from === to ? from : `${from} – ${to}`;
 }
 
+// "Preferred Category/Subcategory" per gender is the single highest-GMV
+// category/subcategory for that gender in the selected window — computed
+// server-side from independently-rolled-up totals (not just the single
+// best category+subcategory pairing, which would undercount a category
+// whose sales spread across several subcategories — see
+// api/_hrh-customer-analytics.js's comment for the reconciliation).
+const DEMOGRAPHICS_COLUMNS = [
+  { key: "gender", label: "Gender" },
+  { key: "customers", label: "Customers", render: (r) => formatNum(r.customers) },
+  { key: "share", label: "% of Total", render: (r) => formatPct(r.share) },
+  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
+  { key: "preferredCategory", label: "Preferred Category", render: (r) => r.preferredCategory || "—" },
+  { key: "preferredSubcategory", label: "Preferred Subcategory", render: (r) => r.preferredSubcategory || "—" },
+];
+
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
@@ -134,6 +149,9 @@ export default function CustomerAnalytics({ filters }) {
   const totalMappedCustomers = customersByProvince.reduce((s, p) => s + p.customers, 0);
   const activeProvinceName = hoveredProvince || customersByProvince[0]?.province || null;
   const activeProvince = customersByProvince.find((p) => p.province === activeProvinceName) || null;
+  const byGender = data?.customerDemographics?.byGender || [];
+  const totalGenderCustomers = byGender.reduce((s, g) => s + g.customers, 0);
+  const demographicsRows = byGender.map((g) => ({ ...g, share: totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0 }));
 
   return (
     <div>
@@ -260,6 +278,10 @@ export default function CustomerAnalytics({ filters }) {
                 </div>
               </div>
             )}
+          </Panel>
+
+          <Panel title="Customer Demographics" subtitle="By gender, with each segment's top-selling category and subcategory" className="mb-4">
+            <DataTable columns={DEMOGRAPHICS_COLUMNS} rows={demographicsRows} emptyLabel="No customers with a matched gender in this period." />
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

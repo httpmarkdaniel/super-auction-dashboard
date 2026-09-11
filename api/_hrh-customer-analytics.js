@@ -566,6 +566,96 @@ export async function handleCustomerAnalytics(req, res) {
     ).json();
     const hmrphOnlineTotalCustomers = toNum(hmrphOnlineTotalRows[0]?.n);
 
+    // Customer Demographics (Gender) — respects the page's Channel filter
+    // (unlike the province map, gender isn't a checkout-time field scoped
+    // to HMRPH Online's own system; it's a customer-profile attribute in
+    // xv3.customers, verified populated for every real customer, so
+    // TikTok/Shopee customer_ids resolve fine here too). Same WALK IN
+    // exclusion as everywhere else on this page.
+    //
+    // "Preferred category/subcategory" per gender is NOT read off the
+    // single highest (gender, category, subcategory) row — that would only
+    // surface the best single subcategory-within-category slice and
+    // undercount a category whose sales are spread across several
+    // subcategories. Category and subcategory totals are rolled up
+    // independently in JS from the same per-(gender,category,subcategory)
+    // GMV rows, then each gender's best category and best subcategory are
+    // picked separately — verified against real data: Male's top category
+    // (Clothing, ~238K) correctly sums MEN'S TOP (~188K) plus its other
+    // subcategories, rather than just reporting the single top pairing.
+    const genderCategoryRows = await (
+      await client.query({
+        query: `
+          WITH gender_lookup AS (
+            SELECT customer_id, argMax(customer_gender, _airbyte_extracted_at) AS gender
+            FROM xv3.customers
+            WHERE customer_id IN (
+              SELECT DISTINCT customer_id FROM xv3.mart_net_sales
+              WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
+                AND customer_id IS NOT NULL AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            )
+            GROUP BY customer_id
+          )
+          SELECT
+            coalesce(g.gender, 'Unknown') AS gender,
+            ns.category_name AS category,
+            ns.sub_category_name AS subcategory,
+            ns.customer_id AS customer_id,
+            sum(ns.net_sales_amount) AS gmv
+          FROM xv3.mart_net_sales ns
+          LEFT JOIN gender_lookup g ON ns.customer_id = g.customer_id
+          WHERE ns.store_name = {store:String}
+            AND ns.sales_channel IN {channels:Array(String)}
+            AND ns.net_sales_amount > 0
+            AND ns.customer_id IS NOT NULL
+            AND trim(ns.\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
+            AND match(ns.\`ct.customer_name\`, '[a-zA-Z]')
+            AND ns.transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+          GROUP BY gender, category, subcategory, customer_id
+        `,
+        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+
+    const genderCustomers = new Map(); // gender -> Set(customer_id)
+    const genderGmv = new Map(); // gender -> total gmv
+    const categoryGmvByGender = new Map(); // "gender|category" -> gmv
+    const subcategoryGmvByGender = new Map(); // "gender|subcategory" -> gmv
+    for (const r of genderCategoryRows) {
+      const gmv = toNum(r.gmv);
+      if (!genderCustomers.has(r.gender)) genderCustomers.set(r.gender, new Set());
+      genderCustomers.get(r.gender).add(r.customer_id);
+      genderGmv.set(r.gender, (genderGmv.get(r.gender) || 0) + gmv);
+      const ck = `${r.gender}|${r.category}`;
+      categoryGmvByGender.set(ck, (categoryGmvByGender.get(ck) || 0) + gmv);
+      const sk = `${r.gender}|${r.subcategory}`;
+      subcategoryGmvByGender.set(sk, (subcategoryGmvByGender.get(sk) || 0) + gmv);
+    }
+    function topPerGender(map) {
+      const best = {};
+      for (const [key, gmv] of map) {
+        const sep = key.indexOf("|");
+        const gender = key.slice(0, sep);
+        const name = key.slice(sep + 1);
+        if (!best[gender] || gmv > best[gender].gmv) best[gender] = { name, gmv };
+      }
+      return best;
+    }
+    const topCategory = topPerGender(categoryGmvByGender);
+    const topSubcategory = topPerGender(subcategoryGmvByGender);
+    const customerDemographics = {
+      byGender: [...genderCustomers.keys()]
+        .map((gender) => ({
+          gender,
+          customers: genderCustomers.get(gender).size,
+          gmv: genderGmv.get(gender) || 0,
+          preferredCategory: topCategory[gender]?.name || null,
+          preferredSubcategory: topSubcategory[gender]?.name || null,
+        }))
+        .sort((a, b) => b.customers - a.customers),
+    };
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -588,6 +678,7 @@ export async function handleCustomerAnalytics(req, res) {
       purchaseFrequency: Object.entries(frequencyBuckets).map(([bucket, count]) => ({ bucket, count })),
       customerTrend,
       customersByProvince,
+      customerDemographics,
       topCustomers,
     });
   } catch (err) {
