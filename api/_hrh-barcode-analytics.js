@@ -30,6 +30,14 @@ function toNum(v) {
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
+// Same Asia/Manila "today" convention every other api/hrh-*.js file uses
+// (never the server's own UTC date) — needed here specifically for
+// "Barcoded Today", the one KPI on this otherwise dateless snapshot page
+// that's actually scoped to a calendar day.
+function manilaTodayISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
 
 export async function handleBarcodeAnalytics(req, res) {
   try {
@@ -39,43 +47,33 @@ export async function handleBarcodeAnalytics(req, res) {
     // "barcoded" here really means "catalogued", the earliest state this
     // table can see). "Posted" = has a positive HMRPH CMS posting quantity
     // (same posted/not-posted signal Product Analytics' Dropped Products
-    // panel already uses). There is no posted_at timestamp anywhere in
-    // this table, so "Avg Barcode -> Post Time" (the original mock KPI)
-    // isn't computable as a real duration — replaced with "Avg Days in
-    // Backlog", the average age (via date_received) of items that are
-    // barcoded but still NOT posted, which answers a closely related, real
-    // question ("how stale is the current unposted backlog") instead of a
-    // metric with no underlying data.
-    // unposted_backlog_value is scoped to item_qty > 0 (same "genuinely
-    // actionable" population as Oldest Unposted Items below) — the raw
-    // unposted COUNT includes ~6,500 zero-stock ghost records with nothing
-    // to post, so a value sum over ALL unposted rows would be dominated by
-    // records worth summing to ~0 anyway; scoping to real stock makes this
-    // "how much money is sitting unposted right now" rather than a mix of
-    // real and dead inventory.
+    // panel already uses).
+    // "Barcoded Today" uses created_time, the only genuine per-item
+    // creation timestamp on this table — checked for a real posting-side
+    // equivalent (items.barcoded_time, a dedicated postings table) but both
+    // turned out to belong to the auction/consignment side of the business
+    // (zero rows for HRH Online's store_id), so there's still no posted_at
+    // signal here and "Items Posted Today" isn't computable.
+    const today = manilaTodayISODate();
     const kpiRows = await (
       await client.query({
         query: `
           SELECT
             count() AS barcoded,
             countIf(cms_hmrph_posting_quantity > 0) AS posted,
-            countIf(cms_hmrph_posting_quantity <= 0) AS unposted,
-            avgIf(dateDiff('day', toDate(date_received), today()), cms_hmrph_posting_quantity <= 0 AND date_received IS NOT NULL) AS avg_backlog_days,
-            sumIf(total_current_srp, cms_hmrph_posting_quantity <= 0 AND item_qty > 0) AS unposted_backlog_value
+            countIf(toDate(created_time) = {today:Date}) AS barcoded_today
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
         `,
-        query_params: { store: HRH_STORE },
+        query_params: { store: HRH_STORE, today },
         format: "JSONEachRow",
       })
     ).json();
     const k = kpiRows[0] || {};
     const barcoded = toNum(k.barcoded);
     const posted = toNum(k.posted);
-    const unposted = toNum(k.unposted);
+    const barcodedToday = toNum(k.barcoded_today);
     const postingRate = safeDivide(posted, barcoded) * 100;
-    const avgBacklogDays = toNum(k.avg_backlog_days);
-    const unpostedBacklogValue = toNum(k.unposted_backlog_value);
 
     // Publishing Funnel — same canonical population as the KPIs above,
     // plus "Sold": distinct items (of this store's catalogued items) with
@@ -238,17 +236,13 @@ export async function handleBarcodeAnalytics(req, res) {
       meta: {
         snapshotNote:
           "Live inventory/posting snapshot for HRH Online — not affected by the Date Range or Channel filter above, since xv3.mart_level_of_inventory has no transaction date or sales-channel dimension.",
-        avgBacklogDaysNote:
-          "No posting timestamp exists in this data, so this is the average age (from date received) of items still awaiting posting today, not a historical barcode-to-post duration.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
         barcodedItems: { value: barcoded },
         postedItems: { value: posted },
         postingRate: { value: postingRate },
-        unpostedBacklog: { value: unposted },
-        avgBacklogDays: { value: avgBacklogDays },
-        unpostedBacklogValue: { value: unpostedBacklogValue },
+        barcodedToday: { value: barcodedToday },
         soldRate: { value: soldRate },
       },
       publishingFunnel: [

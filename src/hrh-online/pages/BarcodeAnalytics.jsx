@@ -86,9 +86,7 @@ export default function BarcodeAnalytics() {
           <KpiRow>
             <KpiCard label="Posting Rate" value={formatPct(data.kpis.postingRate.value)} sub="barcoded → posted" />
             <KpiCard label="Sold Rate" value={formatPct(data.kpis.soldRate.value)} sub="posted → sold" />
-            <KpiCard label="Unposted Backlog" value={formatNum(data.kpis.unpostedBacklog.value)} />
-            <KpiCard label="Unposted Backlog Value" value={formatPeso(data.kpis.unpostedBacklogValue.value)} sub="stocked, unposted items only" />
-            <KpiCard label="Avg Days in Backlog" value={`${data.kpis.avgBacklogDays.value.toFixed(0)} days`} sub="unposted items only" />
+            <KpiCard label="Items Barcoded Today" value={formatNum(data.kpis.barcodedToday.value)} sub="HRH Online" />
           </KpiRow>
 
           <Panel title="Publishing Funnel" className="mb-4">
@@ -104,7 +102,7 @@ export default function BarcodeAnalytics() {
             </Panel>
           </div>
 
-          <Panel title="Unposted Backlog Aging" subtitle={data.meta?.avgBacklogDaysNote} className="mb-4">
+          <Panel title="Unposted Backlog Aging" subtitle="How long unposted items have sat in inventory" className="mb-4">
             <BarComparisonChart data={unpostedBacklogAging} series={[{ key: "value", name: "Items", color: "#d99a3d" }]} valueFormatter={formatNum} />
           </Panel>
 
