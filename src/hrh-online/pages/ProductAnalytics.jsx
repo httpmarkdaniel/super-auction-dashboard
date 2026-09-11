@@ -37,15 +37,15 @@ const STATUS_SEVERITY = {
 };
 
 // null only happens when previousGmv is exactly 0 (pctDelta's `!previous`
-// guard) — a genuinely brand-new seller this period, not a real 0%. A
-// percentage is mathematically undefined off a zero base, so this reads
-// "New" (the "/ Note" half of the column's own name) rather than a bare
-// dash or a fabricated number.
+// guard) — a brand-new seller this period. A ratio is mathematically
+// undefined off a zero base, but per explicit product decision this is
+// shown as a flat +100% (treated as a full increase from nothing) rather
+// than a dash or a "New" label — always a real, comparable number.
 function changeCell(pct) {
   if (pct === null || pct === undefined) {
     return (
       <span className="font-semibold" style={{ color: hrh.good }}>
-        New
+        ▲ {formatPct(100)}
       </span>
     );
   }
