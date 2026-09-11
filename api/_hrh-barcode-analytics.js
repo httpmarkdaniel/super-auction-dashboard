@@ -46,6 +46,13 @@ export async function handleBarcodeAnalytics(req, res) {
     // barcoded but still NOT posted, which answers a closely related, real
     // question ("how stale is the current unposted backlog") instead of a
     // metric with no underlying data.
+    // unposted_backlog_value is scoped to item_qty > 0 (same "genuinely
+    // actionable" population as Oldest Unposted Items below) — the raw
+    // unposted COUNT includes ~6,500 zero-stock ghost records with nothing
+    // to post, so a value sum over ALL unposted rows would be dominated by
+    // records worth summing to ~0 anyway; scoping to real stock makes this
+    // "how much money is sitting unposted right now" rather than a mix of
+    // real and dead inventory.
     const kpiRows = await (
       await client.query({
         query: `
@@ -53,7 +60,8 @@ export async function handleBarcodeAnalytics(req, res) {
             count() AS barcoded,
             countIf(cms_hmrph_posting_quantity > 0) AS posted,
             countIf(cms_hmrph_posting_quantity <= 0) AS unposted,
-            avgIf(dateDiff('day', toDate(date_received), today()), cms_hmrph_posting_quantity <= 0 AND date_received IS NOT NULL) AS avg_backlog_days
+            avgIf(dateDiff('day', toDate(date_received), today()), cms_hmrph_posting_quantity <= 0 AND date_received IS NOT NULL) AS avg_backlog_days,
+            sumIf(total_current_srp, cms_hmrph_posting_quantity <= 0 AND item_qty > 0) AS unposted_backlog_value
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
         `,
@@ -67,6 +75,7 @@ export async function handleBarcodeAnalytics(req, res) {
     const unposted = toNum(k.unposted);
     const postingRate = safeDivide(posted, barcoded) * 100;
     const avgBacklogDays = toNum(k.avg_backlog_days);
+    const unpostedBacklogValue = toNum(k.unposted_backlog_value);
 
     // Publishing Funnel — same canonical population as the KPIs above,
     // plus "Sold": distinct items (of this store's catalogued items) with
@@ -87,6 +96,10 @@ export async function handleBarcodeAnalytics(req, res) {
       })
     ).json();
     const sold = toNum(soldRows[0]?.sold);
+    // Of the items actually posted (visible to buyers), what share have
+    // sold at least once — the funnel's own second drop-off, expressed as
+    // a rate to pair naturally with Posting Rate (the first drop-off).
+    const soldRate = safeDivide(sold, posted) * 100;
 
     // Posting Performance by Category — HRH Online is a single online
     // store with no physical-branch dimension in this table (unlike the
@@ -235,6 +248,8 @@ export async function handleBarcodeAnalytics(req, res) {
         postingRate: { value: postingRate },
         unpostedBacklog: { value: unposted },
         avgBacklogDays: { value: avgBacklogDays },
+        unpostedBacklogValue: { value: unpostedBacklogValue },
+        soldRate: { value: soldRate },
       },
       publishingFunnel: [
         { label: "Barcoded", value: barcoded },

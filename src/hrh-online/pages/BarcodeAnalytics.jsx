@@ -84,10 +84,10 @@ export default function BarcodeAnalytics() {
           </div>
 
           <KpiRow>
-            <KpiCard label="Barcoded Items" value={formatNum(data.kpis.barcodedItems.value)} />
-            <KpiCard label="Posted Items" value={formatNum(data.kpis.postedItems.value)} />
-            <KpiCard label="Posting Rate" value={formatPct(data.kpis.postingRate.value)} />
+            <KpiCard label="Posting Rate" value={formatPct(data.kpis.postingRate.value)} sub="barcoded → posted" />
+            <KpiCard label="Sold Rate" value={formatPct(data.kpis.soldRate.value)} sub="posted → sold" />
             <KpiCard label="Unposted Backlog" value={formatNum(data.kpis.unpostedBacklog.value)} />
+            <KpiCard label="Unposted Backlog Value" value={formatPeso(data.kpis.unpostedBacklogValue.value)} sub="stocked, unposted items only" />
             <KpiCard label="Avg Days in Backlog" value={`${data.kpis.avgBacklogDays.value.toFixed(0)} days`} sub="unposted items only" />
           </KpiRow>
 
