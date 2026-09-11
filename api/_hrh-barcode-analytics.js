@@ -123,11 +123,15 @@ export async function handleBarcodeAnalytics(req, res) {
     // buckets) without the Day view being too dense — HRH Online's volume
     // has real month-to-month swings (e.g. 3,257 in March vs 5 the prior
     // September), so this is worth seeing at more than just a day grain.
+    // "Posted" here is grouped by the SAME created_time day as "Barcoded"
+    // (there's still no posted_at timestamp anywhere in this data — see
+    // the KPI comment above) — it's the posted-as-of-now subset of that
+    // day's barcoded items, not a count of items posted ON that day.
     const trendFrom = addDaysISO(today, -179);
     const dailyRows = await (
       await client.query({
         query: `
-          SELECT toDate(created_time) AS d, count() AS n
+          SELECT toDate(created_time) AS d, count() AS n, countIf(cms_hmrph_posting_quantity > 0) AS n_posted
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String} AND created_time >= {trendFrom:Date}
           GROUP BY d
@@ -136,10 +140,11 @@ export async function handleBarcodeAnalytics(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const dailyMap = new Map(dailyRows.map((r) => [r.d, toNum(r.n)]));
+    const dailyMap = new Map(dailyRows.map((r) => [r.d, { barcoded: toNum(r.n), posted: toNum(r.n_posted) }]));
     const dailyBarcodingVolume = enumerateDatesISO(trendFrom, today).map((d) => ({
       date: d,
-      barcoded: dailyMap.get(d) || 0,
+      barcoded: dailyMap.get(d)?.barcoded || 0,
+      posted: dailyMap.get(d)?.posted || 0,
     }));
 
     // Product table — capped at 500 (safety net, not a "top N"

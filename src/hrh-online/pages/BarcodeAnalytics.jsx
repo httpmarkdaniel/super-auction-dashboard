@@ -67,7 +67,7 @@ export default function BarcodeAnalytics() {
   }, [load]);
 
   const publishingFunnel = data?.publishingFunnel || [];
-  const dailyBarcodingVolume = bucketRows(data?.dailyBarcodingVolume, trendBucket, ["barcoded"]);
+  const dailyBarcodingVolume = bucketRows(data?.dailyBarcodingVolume, trendBucket, ["barcoded", "posted"]);
 
   return (
     <div>
@@ -95,14 +95,17 @@ export default function BarcodeAnalytics() {
           </Panel>
 
           <Panel
-            title="Daily Barcoding Volume"
-            subtitle="Trailing 180 days, HRH Online"
+            title="Daily Barcoding & Posting Volume"
+            subtitle="Trailing 180 days, HRH Online — Posted is the posted-as-of-now subset of each day's barcoded items"
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
             <BarComparisonChart
               data={dailyBarcodingVolume}
-              series={[{ key: "barcoded", name: "Items Barcoded" }]}
+              series={[
+                { key: "barcoded", name: "Items Barcoded", color: hrh.series[0] },
+                { key: "posted", name: "Items Posted", color: hrh.series[1] },
+              ]}
               xKey="dateLabel"
               valueFormatter={formatNum}
             />
