@@ -285,15 +285,13 @@ function rollUpOtherStoreStock(otherStoreMap, itemIds) {
     .slice(0, 5);
 }
 
-// Four deterministic states — the whole point of this section is telling
-// "genuinely out of stock" apart from "still has stock, just not posted"
-// apart from "posted and still has stock" (all legitimately different
-// business situations), and never silently treating a missing inventory
-// match as zero stock.
+// Three deterministic states — telling "genuinely out of stock" apart from
+// "has stock" (posted or not — per request, no longer split into its own
+// state) apart from "no inventory match at all", never silently treating a
+// missing match as zero stock.
 function stockStatus(inv) {
   if (!inv) return "UNKNOWN STOCK";
   if (inv.stockQty <= 0) return "OUT OF STOCK";
-  if (inv.postedQty <= 0) return "HAS STOCK / NOT POSTED";
   return "HAS STOCK";
 }
 
