@@ -38,6 +38,21 @@ function manilaTodayISODate() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
+function addDaysISO(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+function enumerateDatesISO(from, to) {
+  const dates = [];
+  let cur = from;
+  while (cur <= to) {
+    dates.push(cur);
+    cur = addDaysISO(cur, 1);
+  }
+  return dates;
+}
 
 export async function handleBarcodeAnalytics(req, res) {
   try {
@@ -98,6 +113,34 @@ export async function handleBarcodeAnalytics(req, res) {
     // sold at least once — the funnel's own second drop-off, expressed as
     // a rate to pair naturally with Posting Rate (the first drop-off).
     const soldRate = safeDivide(sold, posted) * 100;
+
+    // Daily Barcoding Volume — independent of this page's (nonexistent)
+    // date filter, same as everything else here: a fixed trailing 180-day
+    // window of created_time, zero-filled day-by-day so the frontend's
+    // shared Day/Week/Month bucketing (trendBucket.js, same pattern as
+    // Executive Overview's Sales Trend) has a real daily series to
+    // re-bucket client-side. 180 days gives a meaningful Month view (6
+    // buckets) without the Day view being too dense — HRH Online's volume
+    // has real month-to-month swings (e.g. 3,257 in March vs 5 the prior
+    // September), so this is worth seeing at more than just a day grain.
+    const trendFrom = addDaysISO(today, -179);
+    const dailyRows = await (
+      await client.query({
+        query: `
+          SELECT toDate(created_time) AS d, count() AS n
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String} AND created_time >= {trendFrom:Date}
+          GROUP BY d
+        `,
+        query_params: { store: HRH_STORE, trendFrom },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const dailyMap = new Map(dailyRows.map((r) => [r.d, toNum(r.n)]));
+    const dailyBarcodingVolume = enumerateDatesISO(trendFrom, today).map((d) => ({
+      date: d,
+      barcoded: dailyMap.get(d) || 0,
+    }));
 
     // Product table — capped at 500 (safety net, not a "top N"
     // truncation), same pattern as every other api/hrh-*.js detail table;
@@ -184,6 +227,7 @@ export async function handleBarcodeAnalytics(req, res) {
         { label: "Posted", value: posted },
         { label: "Sold", value: sold },
       ],
+      dailyBarcodingVolume,
       productTable,
       oldestUnposted,
     });

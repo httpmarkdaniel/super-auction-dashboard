@@ -3,9 +3,12 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import FunnelList from "../components/FunnelList";
+import TrendBucketPills from "../components/TrendBucketPills";
+import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
+import { bucketRows } from "../trendBucket";
 
 const PRODUCT_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 200 },
@@ -38,6 +41,7 @@ export default function BarcodeAnalytics() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [trendBucket, setTrendBucket] = useState("day");
 
   const load = useCallback(async (signal) => {
     setLoading(true);
@@ -63,6 +67,7 @@ export default function BarcodeAnalytics() {
   }, [load]);
 
   const publishingFunnel = data?.publishingFunnel || [];
+  const dailyBarcodingVolume = bucketRows(data?.dailyBarcodingVolume, trendBucket, ["barcoded"]);
 
   return (
     <div>
@@ -87,6 +92,20 @@ export default function BarcodeAnalytics() {
 
           <Panel title="Publishing Funnel" className="mb-4">
             <FunnelList stages={publishingFunnel} />
+          </Panel>
+
+          <Panel
+            title="Daily Barcoding Volume"
+            subtitle="Trailing 180 days, HRH Online"
+            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
+            className="mb-4"
+          >
+            <BarComparisonChart
+              data={dailyBarcodingVolume}
+              series={[{ key: "barcoded", name: "Items Barcoded" }]}
+              xKey="dateLabel"
+              valueFormatter={formatNum}
+            />
           </Panel>
 
           <Panel title="Product Performance" subtitle="Highest stock value first" className="mb-4">
