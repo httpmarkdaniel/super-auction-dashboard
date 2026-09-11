@@ -237,7 +237,7 @@ export async function handleBarcodeAnalytics(req, res) {
         avgBacklogDays: { value: avgBacklogDays },
       },
       publishingFunnel: [
-        { label: "Received / Barcoded", value: barcoded },
+        { label: "Barcoded", value: barcoded },
         { label: "Posted", value: posted },
         { label: "Sold", value: sold },
       ],
