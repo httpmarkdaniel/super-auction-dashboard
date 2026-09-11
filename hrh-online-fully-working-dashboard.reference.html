@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HRH Online — Fully Working Dashboard Reference</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f7f9fc; --card:#ffffff; --line:#dfe6ef; --line2:#e9eef4;
+      --ink:#111a2d; --muted:#66758b; --navy:#174879; --navy2:#113a67;
+      --orange:#e8a11b; --soft-orange:#fff3df; --blue:#3f79d1;
+      --red:#e94343; --green:#21a753; --warn:#95670a; --soft:#eef2f7;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,Arial,sans-serif}
+    body{min-width:1180px}
+    button,select,input{font:inherit}
+    .app{display:grid;grid-template-columns:186px minmax(0,1fr);min-height:100vh}
+    .sidebar{background:#fff;border-right:1px solid var(--line);padding:18px 8px 18px;position:sticky;top:0;height:100vh;overflow:auto}
+    .brand{font-family:"Bebas Neue",sans-serif;font-size:31px;letter-spacing:.3px;padding:0 12px 18px}
+    .nav{display:flex;flex-direction:column;gap:2px}
+    .nav-section{padding:13px 8px 5px;color:#6d88b3;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .nav-link{display:flex;align-items:center;gap:10px;text-decoration:none;color:#345070;font-size:12.5px;padding:9px 10px;border-radius:7px;line-height:1.12}
+    .nav-link:hover{background:#f6f8fb}.nav-link.active{background:var(--soft-orange);color:#684600}
+    .nav-icon{width:18px;text-align:center;color:#6682a7}
+    .main{padding:22px 22px 18px;overflow:hidden}
+    .page{display:none}.page.active{display:block}
+    .header{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;margin-bottom:14px}
+    .header h1{margin:0;font-size:35px;line-height:1;letter-spacing:-.8px}.subtitle{margin-top:6px;color:var(--muted);font-size:13.5px}
+    .controls{display:flex;flex-direction:column;align-items:flex-end;gap:8px}.control-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+    .select,.pill,.date-chip,.btn{height:40px;border:1px solid #d7e0eb;background:#fff;border-radius:7px;color:#1f2b42;font-size:12.5px;font-weight:600;padding:0 14px}
+    .select{min-width:170px}.pill{min-width:120px;cursor:pointer}.pill.active{background:var(--navy);border-color:var(--navy);color:#fff}
+    .date-chip{display:flex;align-items:center;color:#5d6f88;background:#eef2f7}
+    .btn{cursor:pointer}.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+    .custom-range{display:none;gap:8px;align-items:center}.custom-range.show{display:flex}
+    .custom-range input{height:38px;border:1px solid #d7e0eb;border-radius:7px;padding:0 10px;background:#fff}
+    .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:16px}
+    .kpi{background:#fff;border:1px solid var(--line);border-top:3px solid var(--orange);border-radius:6px;padding:16px 16px 15px;min-height:126px}
+    .kpi-label{text-transform:uppercase;color:#627187;font-weight:700;font-size:11.5px;letter-spacing:.03em}
+    .kpi-value{font-size:25px;font-weight:700;margin-top:13px}.kpi-sub{display:flex;align-items:center;gap:12px;margin-top:9px;font-size:11.5px;color:#697893}
+    .kpi-delta{font-weight:700}.down{color:#ef3e48}.up{color:#11a841}
+    .grid3{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:12px;margin-bottom:12px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid21{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}
+    .panel{background:#fff;border:1px solid var(--line);border-top:3px solid var(--orange);border-radius:6px;overflow:hidden}
+    .panel-head{padding:11px 13px 8px}.panel-title{margin:0;font-size:15.5px;font-weight:700}.panel-sub{margin-top:3px;font-size:10.8px;color:var(--muted)}
+    .panel-body{padding:0 11px 11px}.chartbox{height:190px;border-top:1px solid #eef2f6;position:relative;background:linear-gradient(#f3f6fa 1px,transparent 1px),linear-gradient(90deg,#f3f6fa 1px,transparent 1px);background-size:100% 37px,66px 100%}
+    .chartbox svg{width:100%;height:100%}.legend{position:absolute;top:6px;right:8px;display:flex;gap:12px;color:#6b7990;font-size:10.5px;z-index:2}
+    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+    .donut-wrap{display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:center;min-height:190px}
+    .donut{width:132px;height:132px;border-radius:50%;background:conic-gradient(#3f79d1 0 62.5%,#f05b69 62.5% 94.6%,#f59a40 94.6% 100%);position:relative;margin:auto}
+    .donut:after{content:"";position:absolute;inset:31px;background:#fff;border-radius:50%}.donut-label{position:absolute;inset:0;z-index:2;display:grid;place-items:center;text-align:center;font-size:11px;font-weight:700}
+    .metric-list{display:flex;flex-direction:column;gap:10px;font-size:10.5px}.metric-row{display:grid;grid-template-columns:10px 1fr 44px;gap:7px;align-items:center}.metric-row strong{text-align:right}
+    .barlist{display:flex;flex-direction:column;gap:10px;padding:7px 0 5px}.barrow{display:grid;grid-template-columns:110px 1fr 56px;gap:7px;align-items:center;font-size:10.5px}.track{height:8px;border-radius:99px;background:#edf1f5;overflow:hidden}.fill{height:100%;background:#4f83c9;border-radius:99px}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:10.3px}
+    th{background:#eef3f8;color:#223451;text-align:left;padding:7px 6px;border-bottom:1px solid #dde5ee;font-weight:700}
+    td{padding:6.5px 6px;border-bottom:1px solid #e8edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    td.wrap{white-space:normal;line-height:1.15}.num{text-align:right}.center{text-align:center}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:9.5px;font-weight:600}.badge.good{background:#dcf6e5;color:#168c42}.badge.warn{background:#fff0c3;color:#91640a}.badge.bad{background:#fee1e1;color:#d93434}.badge.neutral{background:#edf0f4;color:#6a7483}
+    .panel-foot{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #edf1f5;padding:9px 10px;color:#66758b;font-size:10px}
+    .pager{display:flex;gap:3px}.pager button{width:28px;height:28px;border:1px solid #d8e1ec;background:#fff;border-radius:6px;color:#4f6685;cursor:pointer;font-size:10px}.pager button.active{background:var(--navy);border-color:var(--navy);color:#fff}
+    .mt{margin-top:12px}.empty{padding:42px 20px;text-align:center;color:#6b7990;border:1px dashed #ccd6e2;border-radius:7px;background:#fbfcfe}
+    @media(max-width:1450px){body{min-width:1080px}.app{grid-template-columns:170px minmax(0,1fr)}.main{padding:18px 14px}.pill{min-width:100px;padding:0 10px}.header h1{font-size:31px}table{font-size:9.8px}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">HRH ONLINE</div>
+    <nav class="nav">
+      <a class="nav-link" href="#/executive-overview" data-route="executive-overview"><span class="nav-icon">⌂</span>Executive Overview</a>
+      <div class="nav-section">Commerce</div>
+      <a class="nav-link" href="#/sales-analytics" data-route="sales-analytics"><span class="nav-icon">↗</span>Sales Analytics</a>
+      <a class="nav-link" href="#/traffic-conversion" data-route="traffic-conversion"><span class="nav-icon">⤢</span>Traffic &amp; Conversion</a>
+      <a class="nav-link" href="#/customer-analytics" data-route="customer-analytics"><span class="nav-icon">◌</span>Customer Analytics</a>
+      <div class="nav-section">Merchandising</div>
+      <a class="nav-link" href="#/product-analytics" data-route="product-analytics"><span class="nav-icon">▥</span>Product Analytics</a>
+      <a class="nav-link" href="#/product-merchandising" data-route="product-merchandising"><span class="nav-icon">▦</span>Product &amp; Merchandising</a>
+      <a class="nav-link" href="#/inventory-aging" data-route="inventory-aging"><span class="nav-icon">▤</span>Inventory Aging</a>
+      <a class="nav-link" href="#/markdown-analytics" data-route="markdown-analytics"><span class="nav-icon">◇</span>Markdown Analytics</a>
+      <div class="nav-section">Operations</div>
+      <a class="nav-link" href="#/orders-fulfillment" data-route="orders-fulfillment"><span class="nav-icon">▣</span>Orders &amp; Fulfillment</a>
+      <a class="nav-link" href="#/pickup-store" data-route="pickup-store"><span class="nav-icon">⌁</span>Pickup at Store</a>
+      <div class="nav-section">Channels</div>
+      <a class="nav-link" href="#/channel-performance" data-route="channel-performance"><span class="nav-icon">◉</span>Channel Performance</a>
+    </nav>
+  </aside>
+
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+const pageData = {
+  "executive-overview":{
+    title:"Executive Overview",sub:"Key performance metrics and trends for HRH Online",
+    kpis:[["GMV","₱479,648","▼ 22.7%","down"],["NMV","₱448,034","▼ 11.1%","down"],["AOV","₱1,990","▲ 28.2%","up"],["Orders","241","▼ 39.8%","down"],["Units","2,274","▲ 48.7%","up"]],
+    type:"executive"
+  },
+  "sales-analytics":{
+    title:"Sales Analytics",sub:"Detailed sales performance and revenue analysis",
+    kpis:[["GMV","₱479,648","▼ 22.7%","down"],["NMV","₱448,034","▼ 11.1%","down"],["AOV","₱1,990","▲ 28.2%","up"],["Orders","241","▼ 39.8%","down"],["Units","2,274","▲ 48.7%","up"]],
+    type:"sales"
+  },
+  "traffic-conversion":{
+    title:"Traffic & Conversion",sub:"Website traffic, user behavior, and conversion metrics",
+    kpis:[["Sessions","12,480","▲ 12.3%","up"],["Users","9,842","▲ 10.1%","up"],["Pageviews","28,764","▲ 15.7%","up"],["Conversion Rate","1.9%","▼ 8.2%","down"],["Orders","241","▲ 10.4%","up"]],
+    type:"traffic"
+  },
+  "customer-analytics":{
+    title:"Customer Analytics",sub:"Customer behavior, segments, and insights",
+    kpis:[["Total Customers","8,421","▲ 13.5%","up"],["New Customers","2,103","▲ 16.7%","up"],["Returning Customers","6,318","▲ 10.1%","up"],["Repeat Purchase Rate","28.4%","▲ 4.2%","up"],["Avg Customer Value","₱4,820","▲ 14.3%","up"]],
+    type:"customer"
+  },
+  "product-analytics":{
+    title:"Product Analytics",sub:"Sales performance and inventory insights for HRH Online",
+    kpis:[["GMV","₱479,648","▼ 22.7%","down"],["NMV","₱448,034","▼ 11.1%","down"],["AOV","₱1,990","▲ 28.2%","up"],["Orders","241","▼ 39.8%","down"],["Units","2,274","▲ 48.7%","up"]],
+    type:"product"
+  },
+  "product-merchandising":{
+    title:"Product & Merchandising",sub:"Product performance and merchandising insights",
+    kpis:[["Active Products","3,842","",null],["Total Categories","48","",null],["Top Performing Category","Electronics","",null],["Avg Sell-through Rate","62.1%","",null],["Low Stock Items","286","",null]],
+    type:"merch"
+  },
+  "inventory-aging":{
+    title:"Inventory Aging",sub:"Inventory distribution and aging analysis",
+    kpis:[["Total Inventory","12,840","",null],["Total Value (SRP)","₱18,420,560","",null],["Aging > 30 Days","2,184","",null],["Aging > 180 Days","1,026","",null],["Aging > 365 Days","412","",null]],
+    type:"inventory"
+  },
+  "markdown-analytics":{
+    title:"Markdown Analytics",sub:"Discount performance and markdown effectiveness",
+    kpis:[["Markdown Sales","₱89,420","",null],["Markdown Orders","412","",null],["Markdown Units","1,128","",null],["Avg. Discount","28.4%","",null],["Markdown GMV Share","18.6%","",null]],
+    type:"markdown"
+  },
+  "orders-fulfillment":{
+    title:"Orders & Fulfillment",sub:"Order processing and fulfillment performance",
+    kpis:[["Total Orders","241","",null],["Fulfilled Orders","201","▲ 20.4%","up"],["Pending Orders","45","▲ 16.7%","up"],["Cancelled Orders","21","▼ 8.7%","down"],["Avg. Fulfillment Time","1.8 days","",null]],
+    type:"orders"
+  },
+  "pickup-store":{
+    title:"Pickup at Store",sub:"BOPIS orders and store pickup performance",
+    kpis:[["BOPIS Orders","86","",null],["Units","214","",null],["BOPIS GMV","₱142,680","",null],["Avg. Preparation Time","2.4 hours","",null],["Pickup Rate","96.5%","",null]],
+    type:"pickup"
+  },
+  "channel-performance":{
+    title:"Channel Performance",sub:"Performance comparison across sales channels",
+    kpis:[["HMRPH Online","₱299,856","62.5%",null],["TikTok","₱153,892","32.1%",null],["Shopee","₱25,900","5.4%",null],["Total Channels","3","",null],["Best Performing","HMRPH Online","",null]],
+    type:"channel"
+  }
+};
+
+const productRows = [
+["Workzone Hobby Knife Set 29 pieces","₱8,449","₱3,927","33","120","₱23,880"],
+["Nouveau Headphones","₱7,230","₱3,512","28","21","₱21,000"],
+['TCL 55" QLED 4K TV',"₱12,450","₱3,100","5","0","—"],
+["DeLonghi DEDICA Espresso Machine","₱9,875","₱2,940","7","0","—"],
+["Crane Inflatable Movie Screen","₱5,620","₱2,810","11","11","₱11,000"],
+["Contempo Air Fryer","₱6,200","₱2,450","12","2","₱4,800"],
+["Waterpik Water Flosser","₱4,980","₱2,310","9","1","₱3,200"],
+["Kapture SmartDrive","₱4,700","₱2,150","8","7","₱14,000"],
+["Gigabyte B650M K","₱3,980","₱1,990","6","1","₱6,500"],
+["GreenPan Cookware","₱3,750","₱1,850","5","0","—"],
+["Husqvarna Blower","₱3,120","₱1,750","4","0","—"],
+["Philips Pasta Maker","₱2,980","₱1,540","3","0","—"]
+];
+
+function filterControls(){
+  return `
+  <div class="controls">
+    <div class="control-row">
+      <select class="select range-select">
+        <option>Last 7 Days</option><option selected>Last 30 Days</option><option>Last 90 Days</option><option>Month to Date</option><option>Year to Date</option><option>Custom Range</option>
+      </select>
+      <button class="pill active">All Channels</button><button class="pill">HMRPH Online</button><button class="pill">TikTok</button><button class="pill">Shopee</button>
+    </div>
+    <div class="custom-range"><input type="date" value="2026-08-10"><input type="date" value="2026-09-08"><button class="btn primary apply-custom">Apply</button></div>
+    <div class="date-chip">▣&nbsp;&nbsp;<span class="date-text">Aug 10, 2026 – Sep 8, 2026</span></div>
+  </div>`;
+}
+
+function kpiHtml(kpis){
+  return `<div class="kpis">${kpis.map(k=>`<div class="kpi"><div class="kpi-label">${k[0]}</div><div class="kpi-value">${k[1]}</div>${k[2]?`<div class="kpi-sub"><span class="kpi-delta ${k[3]||""}">${k[2]}</span></div>`:""}</div>`).join("")}</div>`;
+}
+
+function lineChart(){
+  return `<div class="chartbox"><div class="legend"><span><span class="dot" style="background:#e8a11b"></span>GMV</span><span><span class="dot" style="background:#6fa3de"></span>Orders</span></div>
+  <svg viewBox="0 0 600 190" preserveAspectRatio="none"><g fill="#acd0f4" opacity=".9">
+  ${[10,35,60,85,110,135,160,185,210,235,260,285,310,335,360,385,410,435,460,485,510,535,560].map((x,i)=>`<rect x="${x}" y="${130-(i%5)*6}" width="10" height="${44+(i%5)*6}"/>`).join("")}
+  </g><polyline points="10,112 35,127 60,102 85,102 110,119 135,115 160,120 185,91 210,77 235,91 260,105 285,91 310,105 335,82 360,50 385,69 410,87 435,82 460,104 485,68 510,51 535,89 560,111 590,78" fill="none" stroke="#e8a11b" stroke-width="3"/></svg></div>`;
+}
+
+function donut(title,values=["HMRPH Online","TikTok","Shopee"]){
+  return `<div class="donut-wrap"><div style="position:relative"><div class="donut"></div><div class="donut-label"><div>${title}</div></div></div><div class="metric-list">
+  <div class="metric-row"><span class="dot" style="background:#3f79d1"></span><span>${values[0]}</span><strong>62.5%</strong></div>
+  <div class="metric-row"><span class="dot" style="background:#f05b69"></span><span>${values[1]}</span><strong>32.1%</strong></div>
+  <div class="metric-row"><span class="dot" style="background:#f59a40"></span><span>${values[2]}</span><strong>5.4%</strong></div></div></div>`;
+}
+
+function table(headers,rows){
+  return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function pagination(total=145){
+  return `<div class="panel-foot"><span>Showing 1–10 of ${total}</span><div class="pager"><button>‹</button><button class="active">1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>…</button><button>›</button></div></div>`;
+}
+
+function pageContent(p){
+  const header = `<div class="header"><div><h1>${p.title}</h1><div class="subtitle">${p.sub}</div></div>${filterControls()}</div>${kpiHtml(p.kpis)}`;
+  switch(p.type){
+    case "executive":
+      return header + `
+      <div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales Trend</h2><div class="panel-sub">Daily GMV and Orders for the selected period</div></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales by Channel</h2><div class="panel-sub">GMV share for the selected period</div></div><div class="panel-body">${donut("₱479,648<br><span style='font-weight:400;color:#6b7890'>Total GMV</span>")}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Order Status</h2><div class="panel-sub">Order breakdown for the selected period</div></div><div class="panel-body">${donut("241<br><span style='font-weight:400;color:#6b7890'>Total Orders</span>",["Paid","Pending","Cancelled"])}</div></article>
+      </div>
+      <div class="grid2">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Products</h2></div><div class="panel-body">${table(["#","Product","Channel","GMV","Units","Orders"],[
+          ["1","Workzone Hobby Knife Set","HMRPH Online","₱23,880","33","28"],["2","Nouveau Headphones","TikTok","₱21,000","28","25"],["3",'TCL 55" QLED 4K TV',"HMRPH Online","₱18,450","5","5"],["4","DeLonghi DEDICA","Shopee","₱15,900","7","7"],["5","Crane Inflatable Screen","HMRPH Online","₱11,000","11","9"]
+        ])}</div>${pagination(342)}</article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Recent Orders</h2></div><div class="panel-body">${table(["#","Order Number","Date","Customer","Channel","Status","Amount"],[
+          ["1","HRH-20260908001","Sep 8","Maria Santos","HMRPH Online","Paid","₱2,450"],["2","HRH-20260908002","Sep 8","John Cruz","TikTok","Paid","₱1,990"],["3","HRH-20260908003","Sep 8","Ana Reyes","Shopee","Pending","₱3,250"],["4","HRH-20260908004","Sep 8","Luis Dela Cruz","HMRPH Online","Paid","₱890"],["5","HRH-20260908005","Sep 8","Karla Mendoza","TikTok","Cancelled","₱1,200"]
+        ])}</div>${pagination(241)}</article>
+      </div>`;
+    case "sales":
+      return header + `<div class="grid21">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales Over Time</h2><div class="panel-sub">This period vs previous period</div></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales by Channel</h2></div><div class="panel-body">${donut("₱479,648<br><span style='font-weight:400;color:#6b7890'>Total GMV</span>")}</div></article>
+      </div>
+      <div class="grid2 mt">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales by Category</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>Electronics</span><div class="track"><div class="fill" style="width:72%"></div></div><strong>24.4%</strong></div><div class="barrow"><span>Home & Living</span><div class="track"><div class="fill" style="width:61%"></div></div><strong>21.7%</strong></div><div class="barrow"><span>Appliances</span><div class="track"><div class="fill" style="width:44%"></div></div><strong>15.3%</strong></div></div></div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales by Store</h2></div><div class="panel-body">${table(["Store","GMV","Orders","Units","AOV"],[["HMR Online","₱299,856","118","1,220","₱2,541"],["TikTok","₱153,892","103","922","₱1,494"],["Shopee","₱25,900","20","132","₱1,295"]])}</div></article>
+      </div>`;
+    case "traffic":
+      return header + `<div class="grid21">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Traffic Trend</h2><div class="panel-sub">Sessions vs conversion rate</div></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Traffic by Source</h2></div><div class="panel-body">${donut("12,480<br><span style='font-weight:400;color:#6b7890'>Total Sessions</span>",["Direct","Organic Search","Social"])}</div></article>
+      </div>
+      <div class="grid2 mt">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Landing Pages</h2></div><div class="panel-body">${table(["#","Path","Sessions"],[["1","/","4,821"],["2","/collections/electronics","2,834"],["3","/products/tcl-55-qled","2,105"],["4","/collections/home-living","1,842"],["5","/products/headphones","1,321"]])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Devices</h2></div><div class="panel-body">${donut("12,480<br><span style='font-weight:400;color:#6b7890'>Total Sessions</span>",["Mobile","Desktop","Tablet"])}</div></article>
+      </div>`;
+    case "customer":
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Customer Growth</h2></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Customer Segments</h2></div><div class="panel-body">${donut("8,421<br><span style='font-weight:400;color:#6b7890'>Total Customers</span>",["One-time","Repeat","Loyal"])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Customers</h2></div><div class="panel-body">${table(["#","Customer","Orders","Total Spent"],[["1","Marlon Santos","34","₱25,980"],["2","Rebecca Ong","28","₱23,410"],["3","Paolo Dizon","21","₱18,900"]])}</div></article>
+      </div>
+      <div class="grid2 mt">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Customer Location</h2></div><div class="panel-body"><div class="empty">Map-style regional distribution reference</div></div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Purchase Frequency</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>1 order</span><div class="track"><div class="fill" style="width:71%"></div></div><strong>71.4%</strong></div><div class="barrow"><span>2–3</span><div class="track"><div class="fill" style="width:21%"></div></div><strong>21.2%</strong></div><div class="barrow"><span>4–6</span><div class="track"><div class="fill" style="width:6%"></div></div><strong>5.6%</strong></div></div></div></article>
+      </div>`;
+    case "product":
+      const repeat = productRows.slice(0,10).map((r,i)=>[i+1,...r]);
+      const tops = productRows.slice(0,10).map((r,i)=>[i+1,r[0],r[2],r[3]]);
+      const dropped = productRows.slice(2,12).map((r,i)=>[i+1,r[0],r[1],r[4],r[4]==="0"?"Out of Stock":"Has Stock"]);
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Repeat Sellers</h2><div class="panel-sub">Products with consistent sales across the selected period</div></div><div class="panel-body">${table(["#","Product","Prior Sales","Current Sales","Units","Current Stock","Stock Value"],repeat)}</div>${pagination(145)}</article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Products</h2><div class="panel-sub">Products with highest sales in the selected period</div></div><div class="panel-body">${table(["#","Product","Current Sales","Units"],tops)}</div>${pagination(342)}</article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Dropped Products / Stock Check</h2><div class="panel-sub">Previously sold products with no sales in the selected period</div></div><div class="panel-body">${table(["#","Product","Previous Sales","Current Stock","Status"],dropped)}</div>${pagination(86)}</article>
+      </div>`;
+    case "merch":
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Products by Category</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>Electronics</span><div class="track"><div class="fill" style="width:72%"></div></div><strong>26.8%</strong></div><div class="barrow"><span>Home & Living</span><div class="track"><div class="fill" style="width:59%"></div></div><strong>21.7%</strong></div><div class="barrow"><span>Appliances</span><div class="track"><div class="fill" style="width:41%"></div></div><strong>15.3%</strong></div></div></div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Brands</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>Samsung</span><div class="track"><div class="fill" style="width:60%"></div></div><strong>18.2%</strong></div><div class="barrow"><span>TCL</span><div class="track"><div class="fill" style="width:48%"></div></div><strong>14.6%</strong></div><div class="barrow"><span>Sony</span><div class="track"><div class="fill" style="width:39%"></div></div><strong>11.9%</strong></div></div></div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Product Status</h2></div><div class="panel-body">${donut("3,842<br><span style='font-weight:400;color:#6b7890'>Total Products</span>",["Active","Inactive","Discontinued"])}</div></article>
+      </div>
+      <div class="grid2 mt">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Products by Units</h2></div><div class="panel-body">${table(["#","Product","GMV","Units","Orders"],[["1","Workzone Hobby Knife","₱23,880","33","28"],["2","Nouveau Headphones","₱21,000","28","25"],["3","TCL 55 QLED TV","₱18,450","5","5"]])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Underperforming Products</h2></div><div class="panel-body">${table(["#","Product","Days Since Last Sale","Status"],[["1","Portable Bicycle Tire","23.3","Low Sales"],["2","Hair Dryer","31.2","Low Sales"],["3","Travel Fan","30.0","Low Sales"]])}</div></article>
+      </div>`;
+    case "inventory":
+      return header + `<div class="grid2">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Inventory Aging Distribution</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>0–30</span><div class="track"><div class="fill" style="width:58%"></div></div><strong>28.5%</strong></div><div class="barrow"><span>31–60</span><div class="track"><div class="fill" style="width:49%"></div></div><strong>24.1%</strong></div><div class="barrow"><span>61–90</span><div class="track"><div class="fill" style="width:33%"></div></div><strong>16.4%</strong></div><div class="barrow"><span>91–180</span><div class="track"><div class="fill" style="width:35%"></div></div><strong>17.4%</strong></div><div class="barrow"><span>181–365</span><div class="track"><div class="fill" style="width:16%"></div></div><strong>8.0%</strong></div><div class="barrow"><span>>365</span><div class="track"><div class="fill" style="width:9%"></div></div><strong>3.2%</strong></div></div></div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Inventory by Category</h2></div><div class="panel-body">${donut("12,840<br><span style='font-weight:400;color:#6b7890'>Total Items</span>",["Electronics","Fashion","Home & Living"])}</div></article>
+      </div>
+      <article class="panel mt"><div class="panel-head"><h2 class="panel-title">Aging Items (Top 10)</h2></div><div class="panel-body">${table(["#","Product","Current Stock","Days in Inventory","Value","Status"],[["1","Portable Wireless Speaker","14","389","₱8,400","365+ Days"],["2","Kogan Smart TV","9","372","₱18,900","365+ Days"],["3","Home Theater System","11","351","₱13,500","181–365 Days"]])}</div></article>`;
+    case "markdown":
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Markdown Sales Trend</h2></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Sales by Discount Range</h2></div><div class="panel-body">${donut("₱89,420<br><span style='font-weight:400;color:#6b7890'>Markdown Sales</span>",["0–10%","11–20%","21–30%"])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Top Markdown Categories</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>Electronics</span><div class="track"><div class="fill" style="width:70%"></div></div><strong>28.4%</strong></div><div class="barrow"><span>Home & Living</span><div class="track"><div class="fill" style="width:55%"></div></div><strong>24.1%</strong></div><div class="barrow"><span>Appliances</span><div class="track"><div class="fill" style="width:42%"></div></div><strong>18.6%</strong></div></div></div></article>
+      </div>
+      <article class="panel mt"><div class="panel-head"><h2 class="panel-title">Top Markdown Products</h2></div><div class="panel-body">${table(["#","Product","Original Price","Sale Price","Discount %","Units","GMV"],[["1","Workzone Hobby Knife","₱4,890","₱3,927","19.7%","33","₱3,927"],["2","Nouveau Headphones","₱4,500","₱3,512","22.0%","28","₱3,512"],["3","TCL QLED TV","₱3,900","₱3,100","20.5%","5","₱3,100"]])}</div></article>`;
+    case "orders":
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Orders Over Time</h2></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Order Status</h2></div><div class="panel-body">${donut("241<br><span style='font-weight:400;color:#6b7890'>Total Orders</span>",["Paid","Pending","Cancelled"])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Fulfillment Time</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>Same Day</span><div class="track"><div class="fill" style="width:80%"></div></div><strong>42.1%</strong></div><div class="barrow"><span>1–2 Days</span><div class="track"><div class="fill" style="width:65%"></div></div><strong>34.8%</strong></div><div class="barrow"><span>3–5 Days</span><div class="track"><div class="fill" style="width:28%"></div></div><strong>14.2%</strong></div></div></div></article>
+      </div>
+      <div class="grid2 mt"><article class="panel"><div class="panel-head"><h2 class="panel-title">Recent Orders</h2></div><div class="panel-body">${table(["#","Order","Date","Customer","Channel","Status","Amount"],[["1","HRH-001","Sep 8","Maria Santos","HMRPH Online","Paid","₱2,450"],["2","HRH-002","Sep 8","John Cruz","TikTok","Paid","₱1,990"],["3","HRH-003","Sep 8","Ana Reyes","Shopee","Pending","₱3,250"]])}</div></article><article class="panel"><div class="panel-head"><h2 class="panel-title">Orders by Channel</h2></div><div class="panel-body"><div class="barlist"><div class="barrow"><span>HMRPH Online</span><div class="track"><div class="fill" style="width:64%"></div></div><strong>62.5%</strong></div><div class="barrow"><span>TikTok</span><div class="track"><div class="fill" style="width:32%"></div></div><strong>32.1%</strong></div><div class="barrow"><span>Shopee</span><div class="track"><div class="fill" style="width:6%"></div></div><strong>5.4%</strong></div></div></div></article></div>`;
+    case "pickup":
+      return header + `<div class="grid3">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">BOPIS Orders Over Time</h2></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Orders by Store</h2></div><div class="panel-body">${donut("86<br><span style='font-weight:400;color:#6b7890'>BOPIS Orders</span>",["Sucat","Pioneer","Cainta"])}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Order Status</h2></div><div class="panel-body">${donut("86",["Prepared","Picked","Cancelled"])}</div></article>
+      </div>
+      <article class="panel mt"><div class="panel-head"><h2 class="panel-title">Recent BOPIS Orders</h2></div><div class="panel-body">${table(["#","Order","Store","Customer","Status","Amount"],[["1","BOPIS-001","Sucat","Patricia Ramos","Picked","₱1,800"],["2","BOPIS-002","Pioneer","Juan Dela Cruz","Ready","₱2,650"],["3","BOPIS-003","Cainta","Carlo Reyes","Cancelled","₱1,250"]])}</div></article>`;
+    case "channel":
+      return header + `<div class="grid21">
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Channel Sales Trend</h2></div><div class="panel-body">${lineChart()}</div></article>
+        <article class="panel"><div class="panel-head"><h2 class="panel-title">Channel Breakdown</h2></div><div class="panel-body">${donut("₱479,648<br><span style='font-weight:400;color:#6b7890'>Total GMV</span>")}</div></article>
+      </div>
+      <article class="panel mt"><div class="panel-head"><h2 class="panel-title">Channel Metrics</h2></div><div class="panel-body">${table(["#","Channel","GMV","Orders","Units","AOV"],[["1","HMRPH Online","₱299,856","118","1,220","₱2,541"],["2","TikTok","₱153,892","103","922","₱1,494"],["3","Shopee","₱25,900","20","132","₱1,295"]])}</div></article>`;
+  }
+}
+
+function renderRoute(){
+  const raw = location.hash.replace(/^#\//,"");
+  const route = pageData[raw] ? raw : "executive-overview";
+  document.querySelectorAll(".nav-link").forEach(a=>a.classList.toggle("active",a.dataset.route===route));
+  document.getElementById("main").innerHTML = pageContent(pageData[route]);
+  bindInteractions();
+  window.scrollTo(0,0);
+}
+
+function bindInteractions(){
+  document.querySelectorAll(".control-row").forEach(row=>{
+    const pills=[...row.querySelectorAll(".pill")];
+    pills.forEach(btn=>btn.onclick=()=>{pills.forEach(b=>b.classList.remove("active"));btn.classList.add("active")});
+  });
+
+  document.querySelectorAll(".range-select").forEach(sel=>{
+    sel.onchange=()=>{
+      const controls=sel.closest(".controls");
+      const custom=controls.querySelector(".custom-range");
+      const text=controls.querySelector(".date-text");
+      if(sel.value==="Custom Range"){custom.classList.add("show")}
+      else{
+        custom.classList.remove("show");
+        const map={
+          "Last 7 Days":"Sep 2, 2026 – Sep 8, 2026",
+          "Last 30 Days":"Aug 10, 2026 – Sep 8, 2026",
+          "Last 90 Days":"Jun 11, 2026 – Sep 8, 2026",
+          "Month to Date":"Sep 1, 2026 – Sep 8, 2026",
+          "Year to Date":"Jan 1, 2026 – Sep 8, 2026"
+        };
+        text.textContent=map[sel.value]||text.textContent;
+      }
+    };
+  });
+
+  document.querySelectorAll(".apply-custom").forEach(btn=>{
+    btn.onclick=()=>{
+      const wrap=btn.closest(".custom-range"), inputs=wrap.querySelectorAll("input");
+      const controls=wrap.closest(".controls"), text=controls.querySelector(".date-text");
+      const fmt=v=>new Date(v+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+      if(inputs[0].value && inputs[1].value) text.textContent=`${fmt(inputs[0].value)} – ${fmt(inputs[1].value)}`;
+    };
+  });
+
+  document.querySelectorAll(".pager").forEach(p=>{
+    p.onclick=e=>{
+      const b=e.target.closest("button");
+      if(!b||!/^\d+$/.test(b.textContent.trim())) return;
+      p.querySelectorAll("button").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active");
+    };
+  });
+}
+
+window.addEventListener("hashchange",renderRoute);
+renderRoute();
+</script>
+</body>
+</html>
