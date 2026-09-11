@@ -92,12 +92,11 @@ export default function BarcodeAnalytics() {
             <FunnelList stages={publishingFunnel} />
           </Panel>
 
-          <Panel title="Posting Performance by Category & Supplier" subtitle="Posted items per category, broken down by top suppliers" className="mb-4">
+          <Panel title="Posting Performance by Category & Supplier" subtitle="Posted items per category, compared across top suppliers" className="mb-4">
             <BarComparisonChart
               data={postingPerformanceByCategorySupplier.data}
               series={postingPerformanceByCategorySupplier.series}
               valueFormatter={formatNum}
-              stacked
             />
           </Panel>
 
