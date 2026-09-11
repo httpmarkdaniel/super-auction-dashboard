@@ -51,20 +51,26 @@ function trendCell(trend) {
 // All 4 buckets shown as their own column (not just a prior/current pair),
 // each header naming its actual date range — e.g. "Wk1 (Aug 14–20)" — so
 // the qualifying window is visible right in the table, not just the
-// subtitle. `periodBuckets` (data.meta.periodBuckets) has the same
-// {wk1,wk2,wk3,wk4} shape regardless of week/month granularity.
+// subtitle. Each cell shows sales with its units right beside it, so both
+// figures for that bucket are visible without a whole separate column per
+// week doubling the table's width. `periodBuckets` (data.meta.periodBuckets)
+// has the same {wk1,wk2,wk3,wk4} shape regardless of week/month granularity.
 function repeatSellerColumns(granularity, periodBuckets) {
   const prefix = granularity === "month" ? "Mo" : "Wk";
   const bucketColumns = ["wk1", "wk2", "wk3", "wk4"].map((key, i) => ({
     key: `${key}Sales`,
     label: periodBuckets?.[key] ? `${prefix}${i + 1} (${formatCompactRange(periodBuckets[key])})` : `${prefix}${i + 1}`,
-    render: (r) => formatPeso(r[`${key}Sales`]),
+    render: (r) => (
+      <span className="whitespace-nowrap">
+        {formatPeso(r[`${key}Sales`])}{" "}
+        <span style={{ color: hrh.muted }}>({formatNum(r[`${key}Units`])} units)</span>
+      </span>
+    ),
   }));
   return [
     { key: "sku", label: "SKU" },
     { key: "product", label: "Product", maxWidth: 130 },
     ...bucketColumns,
-    { key: "units", label: "Units", render: (r) => formatNum(r.units) },
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
