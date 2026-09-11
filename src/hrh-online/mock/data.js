@@ -139,38 +139,6 @@ export const customerAnalytics = {
 };
 
 // ---------------------------------------------------------------------
-// Inventory Aging — thresholds not yet defined, see DemoBadge on the page.
-// ---------------------------------------------------------------------
-export const inventoryAging = {
-  kpis: {
-    slowMovingSkus: { value: 0 },
-    slowMovingValue: { value: 0 },
-    nonMovingSkus: { value: 0 },
-    nonMovingValue: { value: 0 },
-  },
-  agingDistribution: [
-    { label: "1–30", value: 0 },
-    { label: "31–60", value: 0 },
-    { label: "61–90", value: 0 },
-    { label: "91–120", value: 0 },
-    { label: "121+", value: 0 },
-  ],
-  agedByCategory: [
-    { label: "Apparel", value: 0, color: "#22304f" },
-    { label: "Footwear", value: 0, color: "#d99a3d" },
-    { label: "Bags", value: 0, color: "#1baf7a" },
-    { label: "Home", value: 0, color: "#4a3aa7" },
-  ],
-  agedByBranch: [
-    { label: "Manila", value: 0 },
-    { label: "Cebu", value: 0 },
-    { label: "Davao", value: 0 },
-    { label: "Pampanga", value: 0 },
-  ],
-  oldestInventoryTable: [],
-};
-
-// ---------------------------------------------------------------------
 // Markdown Analytics — price-history integration pending, demo data only.
 // ---------------------------------------------------------------------
 export const markdownAnalytics = {
