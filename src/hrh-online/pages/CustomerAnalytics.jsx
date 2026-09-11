@@ -209,8 +209,40 @@ export default function CustomerAnalytics({ filters }) {
                 No customers with a matched province in this period.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_180px] gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_180px_220px] gap-4">
                 <PhilippinesMap data={customersByProvince} onHoverChange={setHoveredProvince} />
+                {byGender.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+                      By Gender
+                    </div>
+                    {byGender.map((g) => {
+                      const share = totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0;
+                      return (
+                        <div key={g.gender}>
+                          <div className="flex items-center justify-between text-[12px]">
+                            <span className="font-semibold" style={{ color: hrh.ink }}>
+                              {g.gender}
+                            </span>
+                            <span className="font-semibold" style={{ color: hrh.ink }}>
+                              {formatNum(g.customers)}
+                            </span>
+                          </div>
+                          <div className="text-[10.5px]" style={{ color: hrh.muted }}>
+                            {formatPct(share)} · {formatPeso(g.gmv)}
+                          </div>
+                          <div className="text-[11px] mt-1 truncate" style={{ color: hrh.ink2 }} title={g.preferredProduct || undefined}>
+                            <span style={{ color: hrh.muted }}>Prefers: </span>
+                            {g.preferredProduct || "—"}
+                          </div>
+                          <div className="text-[10.5px] truncate" style={{ color: hrh.muted }}>
+                            {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="space-y-3">
                   {activeProvince && (
                     <div className="rounded-md p-3" style={{ background: hrh.blueSoft, border: `1px solid ${hrh.border}` }}>
@@ -260,38 +292,6 @@ export default function CustomerAnalytics({ filters }) {
                     </div>
                   </div>
                 </div>
-                {byGender.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
-                      By Gender
-                    </div>
-                    {byGender.map((g) => {
-                      const share = totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0;
-                      return (
-                        <div key={g.gender}>
-                          <div className="flex items-center justify-between text-[12px]">
-                            <span className="font-semibold" style={{ color: hrh.ink }}>
-                              {g.gender}
-                            </span>
-                            <span className="font-semibold" style={{ color: hrh.ink }}>
-                              {formatNum(g.customers)}
-                            </span>
-                          </div>
-                          <div className="text-[10.5px]" style={{ color: hrh.muted }}>
-                            {formatPct(share)} · {formatPeso(g.gmv)}
-                          </div>
-                          <div className="text-[11px] mt-1 truncate" style={{ color: hrh.ink2 }} title={g.preferredProduct || undefined}>
-                            <span style={{ color: hrh.muted }}>Prefers: </span>
-                            {g.preferredProduct || "—"}
-                          </div>
-                          <div className="text-[10.5px] truncate" style={{ color: hrh.muted }}>
-                            {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             )}
           </Panel>
