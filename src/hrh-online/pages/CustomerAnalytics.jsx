@@ -48,21 +48,6 @@ function effectivePeriodLabel(period) {
   return from === to ? from : `${from} – ${to}`;
 }
 
-// "Preferred Category/Subcategory" per gender is the single highest-GMV
-// category/subcategory for that gender in the selected window — computed
-// server-side from independently-rolled-up totals (not just the single
-// best category+subcategory pairing, which would undercount a category
-// whose sales spread across several subcategories — see
-// api/_hrh-customer-analytics.js's comment for the reconciliation).
-const DEMOGRAPHICS_COLUMNS = [
-  { key: "gender", label: "Gender" },
-  { key: "customers", label: "Customers", render: (r) => formatNum(r.customers) },
-  { key: "share", label: "% of Total", render: (r) => formatPct(r.share) },
-  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
-  { key: "preferredCategory", label: "Preferred Category", render: (r) => r.preferredCategory || "—" },
-  { key: "preferredSubcategory", label: "Preferred Subcategory", render: (r) => r.preferredSubcategory || "—" },
-];
-
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
@@ -151,7 +136,6 @@ export default function CustomerAnalytics({ filters }) {
   const activeProvince = customersByProvince.find((p) => p.province === activeProvinceName) || null;
   const byGender = data?.customerDemographics?.byGender || [];
   const totalGenderCustomers = byGender.reduce((s, g) => s + g.customers, 0);
-  const demographicsRows = byGender.map((g) => ({ ...g, share: totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0 }));
 
   return (
     <div>
@@ -278,10 +262,39 @@ export default function CustomerAnalytics({ filters }) {
                 </div>
               </div>
             )}
-          </Panel>
-
-          <Panel title="Customer Demographics" subtitle="By gender, with each segment's top-selling category and subcategory" className="mb-4">
-            <DataTable columns={DEMOGRAPHICS_COLUMNS} rows={demographicsRows} emptyLabel="No customers with a matched gender in this period." />
+            {byGender.length > 0 && (
+              <div className="mt-4 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                {byGender.map((g) => {
+                  const share = totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0;
+                  return (
+                    <div key={g.gender} className="rounded-md p-3" style={{ background: hrh.bg, border: `1px solid ${hrh.border}` }}>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[13px] font-bold" style={{ color: hrh.ink }}>
+                          {g.gender}
+                        </div>
+                        <div className="font-display text-[22px] leading-none" style={{ color: hrh.ink }}>
+                          {formatNum(g.customers)}
+                        </div>
+                      </div>
+                      <div className="text-[11px]" style={{ color: hrh.muted }}>
+                        {formatPct(share)} of customers · {formatPeso(g.gmv)} GMV
+                      </div>
+                      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                        <div className="text-[12px]" style={{ color: hrh.ink2 }}>
+                          <span style={{ color: hrh.muted }}>Prefers: </span>
+                          <span className="font-semibold" style={{ color: hrh.ink }}>
+                            {g.preferredProduct || "—"}
+                          </span>
+                        </div>
+                        <div className="text-[11px] mt-0.5" style={{ color: hrh.muted }}>
+                          {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

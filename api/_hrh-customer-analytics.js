@@ -573,16 +573,17 @@ export async function handleCustomerAnalytics(req, res) {
     // TikTok/Shopee customer_ids resolve fine here too). Same WALK IN
     // exclusion as everywhere else on this page.
     //
-    // "Preferred category/subcategory" per gender is NOT read off the
-    // single highest (gender, category, subcategory) row — that would only
-    // surface the best single subcategory-within-category slice and
-    // undercount a category whose sales are spread across several
-    // subcategories. Category and subcategory totals are rolled up
-    // independently in JS from the same per-(gender,category,subcategory)
-    // GMV rows, then each gender's best category and best subcategory are
-    // picked separately — verified against real data: Male's top category
-    // (Clothing, ~238K) correctly sums MEN'S TOP (~188K) plus its other
-    // subcategories, rather than just reporting the single top pairing.
+    // "Preferred category/subcategory/product" per gender is NOT read off
+    // the single highest (gender, category, subcategory, product) row —
+    // that would only surface the best single product-within-subcategory-
+    // within-category slice and undercount a category/subcategory whose
+    // sales are spread across several subcategories/products. Category,
+    // subcategory, and product totals are each rolled up independently in
+    // JS from the same per-row GMV data, then each gender's best of each
+    // is picked separately — verified against real data: Male's top
+    // category (Clothing, ~238K) correctly sums MEN'S TOP (~188K) plus its
+    // other subcategories, rather than just reporting the single top
+    // pairing.
     const genderCategoryRows = await (
       await client.query({
         query: `
@@ -600,6 +601,7 @@ export async function handleCustomerAnalytics(req, res) {
             coalesce(g.gender, 'Unknown') AS gender,
             ns.category_name AS category,
             ns.sub_category_name AS subcategory,
+            ns.product_name AS product,
             ns.customer_id AS customer_id,
             sum(ns.net_sales_amount) AS gmv
           FROM xv3.mart_net_sales ns
@@ -611,7 +613,7 @@ export async function handleCustomerAnalytics(req, res) {
             AND trim(ns.\`ct.customer_name\`) NOT IN ('WALK IN', 'n/a')
             AND match(ns.\`ct.customer_name\`, '[a-zA-Z]')
             AND ns.transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-          GROUP BY gender, category, subcategory, customer_id
+          GROUP BY gender, category, subcategory, product, customer_id
         `,
         query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
         format: "JSONEachRow",
@@ -622,6 +624,7 @@ export async function handleCustomerAnalytics(req, res) {
     const genderGmv = new Map(); // gender -> total gmv
     const categoryGmvByGender = new Map(); // "gender|category" -> gmv
     const subcategoryGmvByGender = new Map(); // "gender|subcategory" -> gmv
+    const productGmvByGender = new Map(); // "gender|product" -> gmv
     for (const r of genderCategoryRows) {
       const gmv = toNum(r.gmv);
       if (!genderCustomers.has(r.gender)) genderCustomers.set(r.gender, new Set());
@@ -631,6 +634,8 @@ export async function handleCustomerAnalytics(req, res) {
       categoryGmvByGender.set(ck, (categoryGmvByGender.get(ck) || 0) + gmv);
       const sk = `${r.gender}|${r.subcategory}`;
       subcategoryGmvByGender.set(sk, (subcategoryGmvByGender.get(sk) || 0) + gmv);
+      const pk = `${r.gender}|${r.product}`;
+      productGmvByGender.set(pk, (productGmvByGender.get(pk) || 0) + gmv);
     }
     function topPerGender(map) {
       const best = {};
@@ -644,6 +649,7 @@ export async function handleCustomerAnalytics(req, res) {
     }
     const topCategory = topPerGender(categoryGmvByGender);
     const topSubcategory = topPerGender(subcategoryGmvByGender);
+    const topProduct = topPerGender(productGmvByGender);
     const customerDemographics = {
       byGender: [...genderCustomers.keys()]
         .map((gender) => ({
@@ -652,6 +658,7 @@ export async function handleCustomerAnalytics(req, res) {
           gmv: genderGmv.get(gender) || 0,
           preferredCategory: topCategory[gender]?.name || null,
           preferredSubcategory: topSubcategory[gender]?.name || null,
+          preferredProduct: topProduct[gender]?.name || null,
         }))
         .sort((a, b) => b.customers - a.customers),
     };
