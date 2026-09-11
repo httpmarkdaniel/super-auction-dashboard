@@ -3,7 +3,6 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import FunnelList from "../components/FunnelList";
-import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
@@ -64,8 +63,6 @@ export default function BarcodeAnalytics() {
   }, [load]);
 
   const publishingFunnel = data?.publishingFunnel || [];
-  const postingPerformanceByCategorySupplier = data?.postingPerformanceByCategorySupplier || { data: [], series: [] };
-  const unpostedBacklogAging = data?.unpostedBacklogAging || [];
 
   return (
     <div>
@@ -90,18 +87,6 @@ export default function BarcodeAnalytics() {
 
           <Panel title="Publishing Funnel" className="mb-4">
             <FunnelList stages={publishingFunnel} />
-          </Panel>
-
-          <Panel title="Posting Performance by Category & Supplier" subtitle="Posted items per category, compared across top suppliers" className="mb-4">
-            <BarComparisonChart
-              data={postingPerformanceByCategorySupplier.data}
-              series={postingPerformanceByCategorySupplier.series}
-              valueFormatter={formatNum}
-            />
-          </Panel>
-
-          <Panel title="Unposted Backlog Aging" subtitle="How long unposted items have sat in inventory" className="mb-4">
-            <BarComparisonChart data={unpostedBacklogAging} series={[{ key: "value", name: "Items", color: "#d99a3d" }]} valueFormatter={formatNum} />
           </Panel>
 
           <Panel title="Product Performance" subtitle="Highest stock value first" className="mb-4">
