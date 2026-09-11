@@ -36,14 +36,59 @@ const STATUS_SEVERITY = {
   "UNKNOWN STOCK": "critical",
 };
 
+// null only happens when previousGmv is exactly 0 (pctDelta's `!previous`
+// guard) — a genuinely brand-new seller this period, not a real 0%. A
+// percentage is mathematically undefined off a zero base, so this reads
+// "New" (the "/ Note" half of the column's own name) rather than a bare
+// dash or a fabricated number.
 function changeCell(pct) {
-  if (pct === null || pct === undefined) return "—";
+  if (pct === null || pct === undefined) {
+    return (
+      <span className="font-semibold" style={{ color: hrh.good }}>
+        New
+      </span>
+    );
+  }
   const color = pct > 0 ? hrh.good : pct < 0 ? hrh.bad : hrh.muted;
   const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "▬";
   return (
     <span className="font-semibold" style={{ color }}>
       {arrow} {formatPct(Math.abs(pct))}
     </span>
+  );
+}
+
+// Amount with its units shown right beside it in parentheses — same
+// compact "figure + units in one cell" pattern as Repeat Sellers' week
+// columns, used by Top/Dropped Products instead of separate Units columns.
+function amountWithUnitsCell(amount, units, formatAmount) {
+  return (
+    <span className="whitespace-nowrap">
+      {formatAmount(amount)} <span style={{ color: hrh.muted }}>({formatNum(units)} units)</span>
+    </span>
+  );
+}
+
+// `groupBy` swaps the identity column the same way repeatSellerColumns
+// does: Product mode shows a real barcode/product name; Category/
+// Subcategory mode rolls up many SKUs per row, so "SKU" becomes an item
+// count instead.
+function identityColumns(groupBy) {
+  const isProduct = groupBy === "product";
+  return [
+    { key: "sku", label: isProduct ? "SKU" : "SKUs", render: (r) => (isProduct ? r.sku : `${formatNum(r.sku)} SKUs`) },
+    { key: "product", label: GROUP_BY_IDENTITY_LABEL[groupBy] || "Product", maxWidth: 130 },
+  ];
+}
+
+function GroupByControl({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+        Group by
+      </span>
+      <TrendBucketPills value={value} onChange={onChange} options={GROUP_BY_OPTIONS} />
+    </div>
   );
 }
 
@@ -74,17 +119,10 @@ function repeatSellerColumns(granularity, periodBuckets, groupBy) {
   const bucketColumns = ["wk1", "wk2", "wk3", "wk4"].map((key, i) => ({
     key: `${key}Sales`,
     label: periodBuckets?.[key] ? `${prefix}${i + 1} (${formatCompactRange(periodBuckets[key])})` : `${prefix}${i + 1}`,
-    render: (r) => (
-      <span className="whitespace-nowrap">
-        {formatPeso(r[`${key}Sales`])}{" "}
-        <span style={{ color: hrh.muted }}>({formatNum(r[`${key}Units`])} units)</span>
-      </span>
-    ),
+    render: (r) => amountWithUnitsCell(r[`${key}Sales`], r[`${key}Units`], formatPeso),
   }));
-  const isProduct = groupBy === "product";
   return [
-    { key: "sku", label: isProduct ? "SKU" : "SKUs", render: (r) => (isProduct ? r.sku : `${formatNum(r.sku)} SKUs`) },
-    { key: "product", label: GROUP_BY_IDENTITY_LABEL[groupBy] || "Product", maxWidth: 130 },
+    ...identityColumns(groupBy),
     ...bucketColumns,
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
@@ -92,27 +130,26 @@ function repeatSellerColumns(granularity, periodBuckets, groupBy) {
   ];
 }
 
-const TOP_PRODUCT_COLUMNS = [
-  { key: "sku", label: "SKU" },
-  { key: "product", label: "Product", maxWidth: 130 },
-  { key: "currentGmv", label: "Current GMV", render: (r) => formatPeso(r.currentGmv) },
-  { key: "currentUnits", label: "Current Units", render: (r) => formatNum(r.currentUnits) },
-  { key: "previousGmv", label: "Previous GMV", render: (r) => formatPeso(r.previousGmv) },
-  { key: "previousUnits", label: "Previous Units", render: (r) => formatNum(r.previousUnits) },
-  { key: "gmvChangePct", label: "Change / Note", render: (r) => changeCell(r.gmvChangePct) },
-  { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
-];
+function topProductColumns(groupBy) {
+  return [
+    ...identityColumns(groupBy),
+    { key: "currentGmv", label: "Current GMV", render: (r) => amountWithUnitsCell(r.currentGmv, r.currentUnits, formatPeso) },
+    { key: "previousGmv", label: "Previous GMV", render: (r) => amountWithUnitsCell(r.previousGmv, r.previousUnits, formatPeso) },
+    { key: "gmvChangePct", label: "Change / Note", render: (r) => changeCell(r.gmvChangePct) },
+    { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
+    { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+  ];
+}
 
-const DROPPED_PRODUCT_COLUMNS = [
-  { key: "sku", label: "SKU" },
-  { key: "product", label: "Product", maxWidth: 130 },
-  { key: "previousGmv", label: "Previous-Period Sales", render: (r) => formatPeso(r.previousGmv) },
-  { key: "previousUnits", label: "Previous-Period Units", render: (r) => formatNum(r.previousUnits) },
-  { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
-  { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
-  { key: "status", label: "Status", render: (r) => <SeverityBadge severity={STATUS_SEVERITY[r.status] || "critical"} text={r.status} /> },
-];
+function droppedProductColumns(groupBy) {
+  return [
+    ...identityColumns(groupBy),
+    { key: "previousGmv", label: "Previous-Period Sales", render: (r) => amountWithUnitsCell(r.previousGmv, r.previousUnits, formatPeso) },
+    { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
+    { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+    { key: "status", label: "Status", render: (r) => <SeverityBadge severity={STATUS_SEVERITY[r.status] || "critical"} text={r.status} /> },
+  ];
+}
 
 function formatAsOf(meta) {
   if (!meta) return null;
@@ -182,15 +219,20 @@ export default function ProductAnalytics({ filters }) {
   const [error, setError] = useState(null);
   const [bucketGranularity, setBucketGranularity] = useState("week");
   const [groupBy, setGroupBy] = useState("product");
+  // Shared between Top Products and Dropped Products — both panels are two
+  // views of the same underlying current-vs-previous comparison dataset
+  // (see api/hrh-product-analytics.js), so one toggle controls both rather
+  // than each having its own independent grouping.
+  const [comparisonGroupBy, setComparisonGroupBy] = useState("product");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p, gran, grp) => {
+  const load = useCallback(async (ch, p, gran, grp, cmpGrp) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p, bucketGranularity: gran, groupBy: grp });
+      const qs = new URLSearchParams({ channel: ch, ...p, bucketGranularity: gran, groupBy: grp, comparisonGroupBy: cmpGrp });
       const res = await fetch(`/api/hrh-product-analytics?${qs.toString()}`);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -205,8 +247,8 @@ export default function ProductAnalytics({ filters }) {
 
   useEffect(() => {
     if (!ready) return;
-    load(channel, params, bucketGranularity, groupBy);
-  }, [channel, params, bucketGranularity, groupBy, ready, load]);
+    load(channel, params, bucketGranularity, groupBy, comparisonGroupBy);
+  }, [channel, params, bucketGranularity, groupBy, comparisonGroupBy, ready, load]);
 
   return (
     <div>
@@ -231,7 +273,7 @@ export default function ProductAnalytics({ filters }) {
           )}
           <button
             type="button"
-            onClick={() => ready && load(channel, params, bucketGranularity, groupBy)}
+            onClick={() => ready && load(channel, params, bucketGranularity, groupBy, comparisonGroupBy)}
             disabled={loading || !ready}
             className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
             style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
@@ -252,12 +294,7 @@ export default function ProductAnalytics({ filters }) {
             subtitle={`Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"} — independent of the Date Range filter above`}
             action={
               <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
-                    Group by
-                  </span>
-                  <TrendBucketPills value={groupBy} onChange={setGroupBy} options={GROUP_BY_OPTIONS} />
-                </div>
+                <GroupByControl value={groupBy} onChange={setGroupBy} />
                 <TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />
               </div>
             }
@@ -275,16 +312,18 @@ export default function ProductAnalytics({ filters }) {
           <Panel
             title="Top Products — Current vs Previous Period"
             subtitle={`Highest current-period GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
+            action={<GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />}
             className="mb-4"
           >
-            <DataTable columns={TOP_PRODUCT_COLUMNS} rows={data.topProducts} paginate pageSize={10} />
+            <DataTable columns={topProductColumns(comparisonGroupBy)} rows={data.topProducts} paginate pageSize={10} />
           </Panel>
 
           <Panel
             title="Dropped Products — Stock Check"
             subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
+            action={<GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />}
           >
-            <DataTable columns={DROPPED_PRODUCT_COLUMNS} rows={data.droppedProducts} paginate pageSize={10} />
+            <DataTable columns={droppedProductColumns(comparisonGroupBy)} rows={data.droppedProducts} paginate pageSize={10} />
           </Panel>
         </>
       )}

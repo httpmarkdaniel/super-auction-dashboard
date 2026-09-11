@@ -256,6 +256,16 @@ export default async function handler(req, res) {
     const bucketGranularity = req.query.bucketGranularity === "month" ? "month" : "week";
     const groupBy = ["product", "category", "subcategory"].includes(req.query.groupBy) ? req.query.groupBy : "product";
     const GROUP_FIELD = { product: "`ct.item_id`", category: "category_name", subcategory: "sub_category_name" }[groupBy];
+    // Independent grouping toggle for Top Products / Dropped Products —
+    // both panels are two views (currentGmv>0 vs currentGmv<=0&&previousGmv>0)
+    // of the SAME comparisonRows query below, so they share one grouping
+    // rather than each getting its own.
+    const comparisonGroupBy = ["product", "category", "subcategory"].includes(req.query.comparisonGroupBy)
+      ? req.query.comparisonGroupBy
+      : "product";
+    const COMPARISON_GROUP_FIELD = { product: "`ct.item_id`", category: "category_name", subcategory: "sub_category_name" }[
+      comparisonGroupBy
+    ];
 
     let current;
     let previous;
@@ -391,14 +401,19 @@ export default async function handler(req, res) {
     // GMV = 0) isn't cut off by a "top N" limit before we can classify it.
     // previousUnits is computed and carried straight through to both
     // consumers below — never hardcoded to 0.
+    const comparisonIdentitySelect =
+      comparisonGroupBy === "product"
+        ? `${COMPARISON_GROUP_FIELD} AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,`
+        : `${COMPARISON_GROUP_FIELD} AS group_key, groupUniqArray(\`ct.item_id\`) AS item_ids,`;
+    const comparisonIdentityFilter =
+      comparisonGroupBy === "product"
+        ? `AND ${COMPARISON_GROUP_FIELD} IS NOT NULL`
+        : `AND ${COMPARISON_GROUP_FIELD} IS NOT NULL AND trim(${COMPARISON_GROUP_FIELD}) != ''`;
     const comparisonRows = await (
       await client.query({
         query: `
           SELECT
-            \`ct.item_id\` AS item_id,
-            any(barcode) AS barcode,
-            argMax(product_name, transaction_date) AS product_name,
-            argMax(category_name, transaction_date) AS category_name,
+            ${comparisonIdentitySelect}
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
             sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
             sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
@@ -407,8 +422,8 @@ export default async function handler(req, res) {
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
             AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            AND \`ct.item_id\` IS NOT NULL
-          GROUP BY \`ct.item_id\`
+            ${comparisonIdentityFilter}
+          GROUP BY group_key
           HAVING cur_gmv > 0 OR prev_gmv > 0
         `,
         query_params: {
@@ -439,9 +454,11 @@ export default async function handler(req, res) {
     // a quoted-string array ClickHouse then rejects.
     const repeatItemIds =
       groupBy === "product" ? repeatRows.map((r) => r.group_key) : repeatRows.flatMap((r) => r.item_ids || []);
+    const comparisonItemIds =
+      comparisonGroupBy === "product" ? comparisonRows.map((r) => r.group_key) : comparisonRows.flatMap((r) => r.item_ids || []);
     const allItemIds = Array.from(
       new Set(
-        [...repeatItemIds, ...comparisonRows.map((r) => r.item_id)]
+        [...repeatItemIds, ...comparisonItemIds]
           .filter((v) => v !== null && v !== undefined)
           .map((v) => Number(v)),
       ),
@@ -505,24 +522,45 @@ export default async function handler(req, res) {
     });
 
     const comparisons = comparisonRows.map((r) => {
-      const inv = inventoryMap.get(String(r.item_id));
       const curG = toNum(r.cur_gmv);
       const prevG = toNum(r.prev_gmv);
       const curU = toNum(r.cur_units);
       const prevU = toNum(r.prev_units);
+      // Same product-vs-category/subcategory split as Repeat Sellers above:
+      // one direct inventory lookup per item in Product mode, a rolled-up
+      // sum across every item_id in the group otherwise.
+      let sku;
+      let product;
+      let stockQty;
+      let stockValue;
+      let postedQty;
+      if (comparisonGroupBy === "product") {
+        const inv = inventoryMap.get(String(r.group_key));
+        sku = r.barcode;
+        product = r.display_name;
+        stockQty = inv ? inv.stockQty : null;
+        stockValue = inv ? inv.stockValue : null;
+        postedQty = inv ? inv.postedQty : null;
+      } else {
+        const invEntries = (r.item_ids || []).map((id) => inventoryMap.get(String(id))).filter(Boolean);
+        sku = (r.item_ids || []).length;
+        product = r.group_key;
+        stockQty = invEntries.length ? invEntries.reduce((s, e) => s + e.stockQty, 0) : null;
+        stockValue = invEntries.length ? invEntries.reduce((s, e) => s + e.stockValue, 0) : null;
+        postedQty = invEntries.length ? invEntries.reduce((s, e) => s + e.postedQty, 0) : null;
+      }
       return {
-        sku: r.barcode,
-        product: r.product_name,
-        category: r.category_name || null,
+        sku,
+        product,
         currentGmv: curG,
         currentUnits: curU,
         previousGmv: prevG,
         previousUnits: prevU,
         gmvChangePct: pctDelta(curG, prevG),
         unitsChangePct: pctDelta(curU, prevU),
-        currentStockQty: inv ? inv.stockQty : null,
-        currentStockValue: inv ? inv.stockValue : null,
-        postedQty: inv ? inv.postedQty : null,
+        currentStockQty: stockQty,
+        currentStockValue: stockValue,
+        postedQty,
       };
     });
 
@@ -542,7 +580,6 @@ export default async function handler(req, res) {
       .map((r) => ({
         sku: r.sku,
         product: r.product,
-        category: r.category,
         previousGmv: r.previousGmv,
         previousUnits: r.previousUnits,
         currentGmv: r.currentGmv,
@@ -563,6 +600,7 @@ export default async function handler(req, res) {
         previous,
         bucketGranularity,
         groupBy,
+        comparisonGroupBy,
         periodBuckets: { wk1, wk2, wk3, wk4 },
         salesAsOf: k.sales_as_of || null,
         inventoryAsOf: (invMetaRows[0] && invMetaRows[0].inventory_as_of) || null,
