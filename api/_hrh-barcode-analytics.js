@@ -196,7 +196,7 @@ export async function handleBarcodeAnalytics(req, res) {
             AND cms_hmrph_posting_quantity <= 0
             AND item_qty > 0
             AND date_received IS NOT NULL
-          ORDER BY date_received ASC
+          ORDER BY date_received ASC, item_qty DESC
           LIMIT 50
         `,
         query_params: { store: HRH_STORE },
