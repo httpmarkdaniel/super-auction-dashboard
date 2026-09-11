@@ -138,38 +138,6 @@ export const customerAnalytics = {
   ],
 };
 
-// ---------------------------------------------------------------------
-// Orders & Fulfillment — timestamp completeness not yet validated.
-// ---------------------------------------------------------------------
-export const fulfillment = {
-  kpis: {
-    ordersRequiringPick: { value: 0, delta: null },
-    pickRate: { value: 0, delta: null },
-    pendingPicks: { value: 0, delta: null },
-    avgPickTime: { value: 0, sub: "hours" },
-    fulfillmentRate: { value: 0, delta: null },
-  },
-  funnel: [
-    { label: "Order", value: 0 },
-    { label: "Pick", value: 0 },
-    { label: "Dispatch", value: 0 },
-    { label: "Complete", value: 0 },
-  ],
-  pendingPickQueue: [],
-  performanceByStore: [
-    { label: "Manila", fulfillmentRate: 0 },
-    { label: "Cebu", fulfillmentRate: 0 },
-    { label: "Davao", fulfillmentRate: 0 },
-    { label: "Pampanga", fulfillmentRate: 0 },
-  ],
-  pickDispatchTimeDistribution: [
-    { label: "< 1h", value: 0 },
-    { label: "1–4h", value: 0 },
-    { label: "4–12h", value: 0 },
-    { label: "12–24h", value: 0 },
-    { label: "24h+", value: 0 },
-  ],
-};
 
 // ---------------------------------------------------------------------
 // Pickup at Store — pickup is fulfillment behavior, not a payment type.
