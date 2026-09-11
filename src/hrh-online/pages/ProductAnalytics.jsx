@@ -75,8 +75,8 @@ function amountWithUnitsCell(amount, units, formatAmount) {
 function identityColumns(groupBy) {
   const isProduct = groupBy === "product";
   return [
-    { key: "sku", label: isProduct ? "SKU" : "SKUs", render: (r) => (isProduct ? r.sku : `${formatNum(r.sku)} SKUs`) },
-    { key: "product", label: GROUP_BY_IDENTITY_LABEL[groupBy] || "Product", maxWidth: 130 },
+    { key: "sku", label: isProduct ? "SKU" : "SKUs", render: (r) => (isProduct ? r.sku : `${formatNum(r.sku)} SKUs`), width: 90 },
+    { key: "product", label: GROUP_BY_IDENTITY_LABEL[groupBy] || "Product", maxWidth: 150, width: 150 },
   ];
 }
 
@@ -320,6 +320,7 @@ export default function ProductAnalytics({ filters }) {
               rows={data.repeatSellers}
               paginate
               pageSize={10}
+              stickyColumns={2}
               emptyLabel={`No repeat-selling ${groupBy === "product" ? "products" : groupBy + "s"} found for the selected 4-${bucketGranularity === "month" ? "month" : "week"} window.`}
             />
           </Panel>
