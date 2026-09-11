@@ -64,8 +64,7 @@ export default function BarcodeAnalytics() {
   }, [load]);
 
   const publishingFunnel = data?.publishingFunnel || [];
-  const postingPerformanceByCategory = data?.postingPerformanceByCategory || [];
-  const postingPerformanceBySupplier = data?.postingPerformanceBySupplier || [];
+  const postingPerformanceByCategorySupplier = data?.postingPerformanceByCategorySupplier || { data: [], series: [] };
   const unpostedBacklogAging = data?.unpostedBacklogAging || [];
 
   return (
@@ -93,14 +92,14 @@ export default function BarcodeAnalytics() {
             <FunnelList stages={publishingFunnel} />
           </Panel>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Panel title="Posting Performance by Category">
-              <BarComparisonChart data={postingPerformanceByCategory} series={[{ key: "posted", name: "Posted Items" }]} valueFormatter={formatNum} />
-            </Panel>
-            <Panel title="Posting Performance by Supplier">
-              <BarComparisonChart data={postingPerformanceBySupplier} series={[{ key: "posted", name: "Posted Items", color: hrh.blue }]} valueFormatter={formatNum} />
-            </Panel>
-          </div>
+          <Panel title="Posting Performance by Category & Supplier" subtitle="Posted items per category, broken down by top suppliers" className="mb-4">
+            <BarComparisonChart
+              data={postingPerformanceByCategorySupplier.data}
+              series={postingPerformanceByCategorySupplier.series}
+              valueFormatter={formatNum}
+              stacked
+            />
+          </Panel>
 
           <Panel title="Unposted Backlog Aging" subtitle="How long unposted items have sat in inventory" className="mb-4">
             <BarComparisonChart data={unpostedBacklogAging} series={[{ key: "value", name: "Items", color: "#d99a3d" }]} valueFormatter={formatNum} />

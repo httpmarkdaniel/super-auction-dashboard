@@ -99,18 +99,22 @@ export async function handleBarcodeAnalytics(req, res) {
     // a rate to pair naturally with Posting Rate (the first drop-off).
     const soldRate = safeDivide(sold, posted) * 100;
 
-    // Posting Performance by Category — HRH Online is a single online
-    // store with no physical-branch dimension in this table (unlike the
-    // original mock's "by Branch" breakdown, which doesn't have a real
-    // equivalent here), so this is grouped by category_name instead — a
-    // real, populated dimension that answers the same underlying question
-    // ("where is posting strongest/weakest").
-    const categoryRows = await (
+    // Posting Performance by Category & Supplier — one stacked chart
+    // combining both dimensions: top 8 categories by posted count on the
+    // X axis (HRH Online is a single online store with no physical-branch
+    // dimension in this table, so category replaces the original mock's
+    // "by Branch" split), each bar stacked by supplier so it also answers
+    // "which suppliers make up each category's posted items". Verified
+    // supplier_name coverage first (99.8%, 12,071 of 12,093 rows).
+    // Bucketed to the top 5 suppliers overall (named segments, matching
+    // the 5-color hrh.series palette) + "Other" — a category can have
+    // 3-12 distinct suppliers feeding it, so naming every one would blow
+    // the stack up into unreadable slivers.
+    const TOP_N_SUPPLIERS = 5;
+    const topCategoryRows = await (
       await client.query({
         query: `
-          SELECT
-            coalesce(nullIf(category_name, ''), 'Uncategorized') AS category,
-            countIf(cms_hmrph_posting_quantity > 0) AS posted
+          SELECT coalesce(nullIf(category_name, ''), 'Uncategorized') AS category, countIf(cms_hmrph_posting_quantity > 0) AS posted
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
           GROUP BY category
@@ -121,29 +125,59 @@ export async function handleBarcodeAnalytics(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const postingPerformanceByCategory = categoryRows.map((r) => ({ label: r.category, posted: toNum(r.posted) }));
+    const topCategories = topCategoryRows.map((r) => r.category);
 
-    // Posting Performance by Supplier — verified coverage first (99.8%,
-    // 12,071 of 12,093 rows have a supplier_name), same "posted count"
-    // shape as the category breakdown, top 8 by posted items so the
-    // biggest suppliers' posting performance is what's actually visible.
-    const supplierRows = await (
+    const topSupplierRows = await (
       await client.query({
         query: `
-          SELECT
-            coalesce(nullIf(supplier_name, ''), 'Unknown') AS supplier,
-            countIf(cms_hmrph_posting_quantity > 0) AS posted
+          SELECT coalesce(nullIf(supplier_name, ''), 'Unknown') AS supplier, countIf(cms_hmrph_posting_quantity > 0) AS posted
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
           GROUP BY supplier
           ORDER BY posted DESC
-          LIMIT 8
+          LIMIT ${TOP_N_SUPPLIERS}
         `,
         query_params: { store: HRH_STORE },
         format: "JSONEachRow",
       })
     ).json();
-    const postingPerformanceBySupplier = supplierRows.map((r) => ({ label: r.supplier, posted: toNum(r.posted) }));
+    const topSuppliers = topSupplierRows.map((r) => r.supplier);
+
+    const crossTabRows = await (
+      await client.query({
+        query: `
+          SELECT
+            coalesce(nullIf(category_name, ''), 'Uncategorized') AS category,
+            if(
+              has({topSuppliers:Array(String)}, coalesce(nullIf(supplier_name, ''), 'Unknown')),
+              coalesce(nullIf(supplier_name, ''), 'Unknown'),
+              'Other'
+            ) AS supplier_bucket,
+            countIf(cms_hmrph_posting_quantity > 0) AS posted
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String}
+            AND coalesce(nullIf(category_name, ''), 'Uncategorized') IN ({topCategories:Array(String)})
+          GROUP BY category, supplier_bucket
+        `,
+        query_params: { store: HRH_STORE, topCategories, topSuppliers },
+        format: "JSONEachRow",
+      })
+    ).json();
+
+    const supplierKey = (name) => "s_" + Buffer.from(name).toString("hex");
+    const postingSupplierSeries = [...topSuppliers.map((s) => ({ key: supplierKey(s), name: s })), { key: "s_other", name: "Other" }];
+    const postingPerformanceByCategorySupplier = topCategories.map((category) => {
+      const row = { label: category };
+      for (const s of postingSupplierSeries) row[s.key] = 0;
+      return row;
+    });
+    const categoryRowIndex = new Map(postingPerformanceByCategorySupplier.map((r, i) => [r.label, i]));
+    for (const r of crossTabRows) {
+      const rowIdx = categoryRowIndex.get(r.category);
+      if (rowIdx === undefined) continue;
+      const key = r.supplier_bucket === "Other" ? "s_other" : supplierKey(r.supplier_bucket);
+      postingPerformanceByCategorySupplier[rowIdx][key] += toNum(r.posted);
+    }
 
     // Unposted Backlog Aging — buckets the ALREADY-COMPUTED inventory_aging
     // field (not re-derived from date_received), same categorical buckets
@@ -250,8 +284,10 @@ export async function handleBarcodeAnalytics(req, res) {
         { label: "Posted", value: posted },
         { label: "Sold", value: sold },
       ],
-      postingPerformanceByCategory,
-      postingPerformanceBySupplier,
+      postingPerformanceByCategorySupplier: {
+        data: postingPerformanceByCategorySupplier,
+        series: postingSupplierSeries,
+      },
       unpostedBacklogAging,
       productTable,
       oldestUnposted,
