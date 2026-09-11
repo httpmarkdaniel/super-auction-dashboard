@@ -209,7 +209,7 @@ export default function CustomerAnalytics({ filters }) {
                 No customers with a matched province in this period.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_180px] gap-4">
                 <PhilippinesMap data={customersByProvince} onHoverChange={setHoveredProvince} />
                 <div className="space-y-3">
                   {activeProvince && (
@@ -260,39 +260,38 @@ export default function CustomerAnalytics({ filters }) {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-            {byGender.length > 0 && (
-              <div className="mt-4 pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ borderTop: `1px solid ${hrh.border}` }}>
-                {byGender.map((g) => {
-                  const share = totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0;
-                  return (
-                    <div key={g.gender} className="rounded-md p-3" style={{ background: hrh.bg, border: `1px solid ${hrh.border}` }}>
-                      <div className="flex items-center justify-between">
-                        <div className="text-[13px] font-bold" style={{ color: hrh.ink }}>
-                          {g.gender}
-                        </div>
-                        <div className="font-display text-[22px] leading-none" style={{ color: hrh.ink }}>
-                          {formatNum(g.customers)}
-                        </div>
-                      </div>
-                      <div className="text-[11px]" style={{ color: hrh.muted }}>
-                        {formatPct(share)} of customers · {formatPeso(g.gmv)} GMV
-                      </div>
-                      <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${hrh.border}` }}>
-                        <div className="text-[12px]" style={{ color: hrh.ink2 }}>
-                          <span style={{ color: hrh.muted }}>Prefers: </span>
-                          <span className="font-semibold" style={{ color: hrh.ink }}>
-                            {g.preferredProduct || "—"}
-                          </span>
-                        </div>
-                        <div className="text-[11px] mt-0.5" style={{ color: hrh.muted }}>
-                          {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
-                        </div>
-                      </div>
+                {byGender.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+                      By Gender
                     </div>
-                  );
-                })}
+                    {byGender.map((g) => {
+                      const share = totalGenderCustomers > 0 ? (g.customers / totalGenderCustomers) * 100 : 0;
+                      return (
+                        <div key={g.gender}>
+                          <div className="flex items-center justify-between text-[12px]">
+                            <span className="font-semibold" style={{ color: hrh.ink }}>
+                              {g.gender}
+                            </span>
+                            <span className="font-semibold" style={{ color: hrh.ink }}>
+                              {formatNum(g.customers)}
+                            </span>
+                          </div>
+                          <div className="text-[10.5px]" style={{ color: hrh.muted }}>
+                            {formatPct(share)} · {formatPeso(g.gmv)}
+                          </div>
+                          <div className="text-[11px] mt-1 truncate" style={{ color: hrh.ink2 }} title={g.preferredProduct || undefined}>
+                            <span style={{ color: hrh.muted }}>Prefers: </span>
+                            {g.preferredProduct || "—"}
+                          </div>
+                          <div className="text-[10.5px] truncate" style={{ color: hrh.muted }}>
+                            {g.preferredCategory || "—"} › {g.preferredSubcategory || "—"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </Panel>
