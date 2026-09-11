@@ -12,6 +12,13 @@ const BUCKET_GRANULARITY_OPTIONS = [
   { key: "month", label: "Month" },
 ];
 
+const GROUP_BY_OPTIONS = [
+  { key: "product", label: "Product" },
+  { key: "category", label: "Category" },
+  { key: "subcategory", label: "Subcategory" },
+];
+const GROUP_BY_IDENTITY_LABEL = { product: "Product", category: "Category", subcategory: "Subcategory" };
+
 const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
 const TREND_COLOR = { up: hrh.good, down: hrh.bad, flat: hrh.muted };
 // Color alone (a red/green arrow) isn't accessible or self-explanatory on
@@ -55,7 +62,14 @@ function trendCell(trend) {
 // figures for that bucket are visible without a whole separate column per
 // week doubling the table's width. `periodBuckets` (data.meta.periodBuckets)
 // has the same {wk1,wk2,wk3,wk4} shape regardless of week/month granularity.
-function repeatSellerColumns(granularity, periodBuckets) {
+//
+// `groupBy` (product/category/subcategory) changes only the identity
+// column, not the table's shape: Product mode has one real SKU per row, so
+// "SKU" shows the barcode; Category/Subcategory mode rolls up many SKUs
+// per row (see api/hrh-product-analytics.js), so "SKU" becomes an item
+// count instead ("24 SKUs") — same column, same position, same everything
+// else.
+function repeatSellerColumns(granularity, periodBuckets, groupBy) {
   const prefix = granularity === "month" ? "Mo" : "Wk";
   const bucketColumns = ["wk1", "wk2", "wk3", "wk4"].map((key, i) => ({
     key: `${key}Sales`,
@@ -67,9 +81,10 @@ function repeatSellerColumns(granularity, periodBuckets) {
       </span>
     ),
   }));
+  const isProduct = groupBy === "product";
   return [
-    { key: "sku", label: "SKU" },
-    { key: "product", label: "Product", maxWidth: 130 },
+    { key: "sku", label: isProduct ? "SKU" : "SKUs", render: (r) => (isProduct ? r.sku : `${formatNum(r.sku)} SKUs`) },
+    { key: "product", label: GROUP_BY_IDENTITY_LABEL[groupBy] || "Product", maxWidth: 130 },
     ...bucketColumns,
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
@@ -166,15 +181,16 @@ export default function ProductAnalytics({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [bucketGranularity, setBucketGranularity] = useState("week");
+  const [groupBy, setGroupBy] = useState("product");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p, gran) => {
+  const load = useCallback(async (ch, p, gran, grp) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p, bucketGranularity: gran });
+      const qs = new URLSearchParams({ channel: ch, ...p, bucketGranularity: gran, groupBy: grp });
       const res = await fetch(`/api/hrh-product-analytics?${qs.toString()}`);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -189,8 +205,8 @@ export default function ProductAnalytics({ filters }) {
 
   useEffect(() => {
     if (!ready) return;
-    load(channel, params, bucketGranularity);
-  }, [channel, params, bucketGranularity, ready, load]);
+    load(channel, params, bucketGranularity, groupBy);
+  }, [channel, params, bucketGranularity, groupBy, ready, load]);
 
   return (
     <div>
@@ -215,7 +231,7 @@ export default function ProductAnalytics({ filters }) {
           )}
           <button
             type="button"
-            onClick={() => ready && load(channel, params, bucketGranularity)}
+            onClick={() => ready && load(channel, params, bucketGranularity, groupBy)}
             disabled={loading || !ready}
             className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
             style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
@@ -234,15 +250,25 @@ export default function ProductAnalytics({ filters }) {
           <Panel
             title="Repeat Sellers"
             subtitle={`Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"} — independent of the Date Range filter above`}
-            action={<TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />}
+            action={
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+                    Group by
+                  </span>
+                  <TrendBucketPills value={groupBy} onChange={setGroupBy} options={GROUP_BY_OPTIONS} />
+                </div>
+                <TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />
+              </div>
+            }
             className="mb-4"
           >
             <DataTable
-              columns={repeatSellerColumns(bucketGranularity, data.meta?.periodBuckets)}
+              columns={repeatSellerColumns(bucketGranularity, data.meta?.periodBuckets, groupBy)}
               rows={data.repeatSellers}
               paginate
               pageSize={10}
-              emptyLabel={`No repeat-selling products found for the selected 4-${bucketGranularity === "month" ? "month" : "week"} window.`}
+              emptyLabel={`No repeat-selling ${groupBy === "product" ? "products" : groupBy + "s"} found for the selected 4-${bucketGranularity === "month" ? "month" : "week"} window.`}
             />
           </Panel>
 

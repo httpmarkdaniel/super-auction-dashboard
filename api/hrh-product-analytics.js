@@ -254,6 +254,8 @@ export default async function handler(req, res) {
     const range = req.query.range || (from && to ? "custom" : "wtd");
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
     const bucketGranularity = req.query.bucketGranularity === "month" ? "month" : "week";
+    const groupBy = ["product", "category", "subcategory"].includes(req.query.groupBy) ? req.query.groupBy : "product";
+    const GROUP_FIELD = { product: "`ct.item_id`", category: "category_name", subcategory: "sub_category_name" }[groupBy];
 
     let current;
     let previous;
@@ -314,16 +316,24 @@ export default async function handler(req, res) {
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
 
-    // Repeat Sellers — canonical key `ct.item_id` (the literal dot requires
-    // backticks) with positive GMV in >= 2 of the last 4 buckets, either 4
-    // real 7-day weeks or 4 calendar months ending "today" per the
+    // Repeat Sellers — grouped by item (canonical key `ct.item_id`, the
+    // literal dot requires backticks), category, or subcategory per the
+    // groupBy toggle, with positive GMV in >= 2 of the last 4 buckets,
+    // either 4 real 7-day weeks or 4 calendar months ending "today" per the
     // bucketGranularity toggle (see weeklyBucketsEndingAt/
     // monthlyBucketsEndingAt) — independent of the page's selected range
-    // preset either way. Prior/Current-Period Sales and Units are Wk3/Wk4
-    // directly, NOT the page-level current/previous window (which for
-    // MTD/YTD can span months and wouldn't mean anything as a per-bucket
-    // figure). product_name/category_name/barcode picked via argMax/any — display only, never
-    // the join/group key.
+    // preset either way. The qualification itself is re-evaluated AT
+    // WHICHEVER GROUPING LEVEL is selected (GROUP BY category_name, not a
+    // re-aggregation of already item-qualified rows) — a category can
+    // qualify on its combined sales even if no single item within it does,
+    // same as it should. Wk1-4 Sales/Units are the buckets directly, NOT
+    // the page-level current/previous window (which for MTD/YTD can span
+    // months and wouldn't mean anything as a per-bucket figure).
+    //
+    // Product mode carries barcode/product_name (display only, never the
+    // join/group key) via argMax/any. Category/subcategory mode has no
+    // single SKU, so it carries item_ids (groupUniqArray) instead, used
+    // below to roll up inventory across every item in that group.
     //
     // coalesce(sumIf(...), 0) is load-bearing, not decoration: sumIf over a
     // Nullable column returns NULL (not 0) when zero rows match, and
@@ -332,14 +342,16 @@ export default async function handler(req, res) {
     // moment ANY one week has no sales. That was hiding true repeat sellers
     // for every channel (confirmed against real data: coalescing raised
     // HMRPH Online 0->26, TikTok 9->57, Shopee 0->3 for the same window).
+    const identitySelect =
+      groupBy === "product"
+        ? `${GROUP_FIELD} AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,`
+        : `${GROUP_FIELD} AS group_key, groupUniqArray(\`ct.item_id\`) AS item_ids,`;
+    const identityFilter = groupBy === "product" ? `AND ${GROUP_FIELD} IS NOT NULL` : `AND ${GROUP_FIELD} IS NOT NULL AND trim(${GROUP_FIELD}) != ''`;
     const repeatRows = await (
       await client.query({
         query: `
           SELECT
-            \`ct.item_id\` AS item_id,
-            any(barcode) AS barcode,
-            argMax(product_name, transaction_date) AS product_name,
-            argMax(category_name, transaction_date) AS category_name,
+            ${identitySelect}
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
             coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
@@ -352,8 +364,8 @@ export default async function handler(req, res) {
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
             AND transaction_date BETWEEN {wk1From:String} AND {wk4To:String}
-            AND \`ct.item_id\` IS NOT NULL
-          GROUP BY \`ct.item_id\`
+            ${identityFilter}
+          GROUP BY group_key
           HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 2
           ORDER BY wk4_gmv DESC
           LIMIT 500
@@ -425,9 +437,11 @@ export default async function handler(req, res) {
     // avoid JS number-precision loss on large values) — coerce back to a
     // real number here so the client serializes this as Array(Int64), not
     // a quoted-string array ClickHouse then rejects.
+    const repeatItemIds =
+      groupBy === "product" ? repeatRows.map((r) => r.group_key) : repeatRows.flatMap((r) => r.item_ids || []);
     const allItemIds = Array.from(
       new Set(
-        [...repeatRows.map((r) => r.item_id), ...comparisonRows.map((r) => r.item_id)]
+        [...repeatItemIds, ...comparisonRows.map((r) => r.item_id)]
           .filter((v) => v !== null && v !== undefined)
           .map((v) => Number(v)),
       ),
@@ -451,11 +465,31 @@ export default async function handler(req, res) {
       } else if (wk4Gmv > 0) {
         trend = "up";
       }
-      const inv = inventoryMap.get(String(r.item_id));
+      // Product mode: one item, one direct inventory lookup. Category/
+      // subcategory mode: no single SKU, so `sku` becomes the item count
+      // and stock rolls up (summed) across every item_id in the group —
+      // null only when NONE of them have an inventory match at all, same
+      // "unknown vs genuinely zero" distinction as product mode's null.
+      let sku;
+      let product;
+      let stockQty;
+      let stockValue;
+      if (groupBy === "product") {
+        const inv = inventoryMap.get(String(r.group_key));
+        sku = r.barcode;
+        product = r.display_name;
+        stockQty = inv ? inv.stockQty : null;
+        stockValue = inv ? inv.stockValue : null;
+      } else {
+        const invEntries = (r.item_ids || []).map((id) => inventoryMap.get(String(id))).filter(Boolean);
+        sku = (r.item_ids || []).length;
+        product = r.group_key;
+        stockQty = invEntries.length ? invEntries.reduce((s, e) => s + e.stockQty, 0) : null;
+        stockValue = invEntries.length ? invEntries.reduce((s, e) => s + e.stockValue, 0) : null;
+      }
       return {
-        sku: r.barcode,
-        product: r.product_name,
-        category: r.category_name || null,
+        sku,
+        product,
         wk1Sales: wk1Gmv,
         wk1Units: toNum(r.wk1_units),
         wk2Sales: wk2Gmv,
@@ -465,8 +499,8 @@ export default async function handler(req, res) {
         wk4Sales: wk4Gmv,
         wk4Units: toNum(r.wk4_units),
         trend,
-        currentStockQty: inv ? inv.stockQty : null,
-        currentStockValue: inv ? inv.stockValue : null,
+        currentStockQty: stockQty,
+        currentStockValue: stockValue,
       };
     });
 
@@ -528,6 +562,7 @@ export default async function handler(req, res) {
         current,
         previous,
         bucketGranularity,
+        groupBy,
         periodBuckets: { wk1, wk2, wk3, wk4 },
         salesAsOf: k.sales_as_of || null,
         inventoryAsOf: (invMetaRows[0] && invMetaRows[0].inventory_as_of) || null,
