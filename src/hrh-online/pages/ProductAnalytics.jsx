@@ -81,6 +81,30 @@ function identityColumns(groupBy) {
   ];
 }
 
+// Top 5 other branches/warehouses with positive stock for this row (see
+// rollUpOtherStoreStock in api/hrh-product-analytics.js — already summed
+// across every SKU in the row for Category/Subcategory mode). Shown as a
+// single-line comma list, same "figure beside its label" density as the
+// rest of this page's cells, rather than a stacked list that would make
+// some rows visibly taller than others.
+const STOCK_FROM_OTHER_STORE_COLUMN = {
+  key: "otherStoreStock",
+  label: "Stock from Other Store",
+  render: (r) =>
+    !r.otherStoreStock || r.otherStoreStock.length === 0 ? (
+      <span style={{ color: hrh.muted }}>—</span>
+    ) : (
+      <span className="whitespace-nowrap">
+        {r.otherStoreStock.map((s, i) => (
+          <span key={s.store}>
+            {i > 0 && ", "}
+            {s.store}: <span className="font-semibold">{formatNum(s.qty)}</span>
+          </span>
+        ))}
+      </span>
+    ),
+};
+
 function GroupByControl({ value, onChange }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -127,6 +151,7 @@ function repeatSellerColumns(granularity, periodBuckets, groupBy) {
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+    STOCK_FROM_OTHER_STORE_COLUMN,
   ];
 }
 
@@ -138,6 +163,7 @@ function topProductColumns(groupBy) {
     { key: "gmvChangePct", label: "Change / Note", render: (r) => changeCell(r.gmvChangePct) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+    STOCK_FROM_OTHER_STORE_COLUMN,
   ];
 }
 
@@ -147,6 +173,7 @@ function droppedProductColumns(groupBy) {
     { key: "previousGmv", label: "Previous-Period Sales", render: (r) => amountWithUnitsCell(r.previousGmv, r.previousUnits, formatPeso) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => (r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
+    STOCK_FROM_OTHER_STORE_COLUMN,
     { key: "status", label: "Status", render: (r) => <SeverityBadge severity={STATUS_SEVERITY[r.status] || "critical"} text={r.status} /> },
   ];
 }

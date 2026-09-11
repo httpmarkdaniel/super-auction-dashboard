@@ -234,6 +234,57 @@ async function fetchInventory(itemIds) {
   return map;
 }
 
+// Stock at every OTHER branch/warehouse (any store_name != HRH ONLINE with
+// positive item_qty) — lets a merchandiser see where a HRH Online-listed
+// item still has physical stock elsewhere in the business. Returns
+// Map(item_id -> Map(store_name -> qty)) rather than a flat per-item list
+// so category/subcategory grouping (many items per row) can merge multiple
+// items' per-store quantities together with a simple map-sum, the same way
+// fetchInventory's totals get summed across a group's item_ids elsewhere
+// in this file.
+async function fetchOtherStoreStock(itemIds) {
+  if (itemIds.length === 0) return new Map();
+  const rows = await (
+    await client.query({
+      query: `
+        SELECT product_id, store_name, sum(item_qty) AS qty
+        FROM xv3.mart_level_of_inventory
+        WHERE store_name != {store:String} AND store_name IS NOT NULL AND product_id IN {itemIds:Array(Int64)}
+        GROUP BY product_id, store_name
+        HAVING qty > 0
+      `,
+      query_params: { store: HRH_STORE, itemIds },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const map = new Map();
+  for (const r of rows) {
+    const key = String(r.product_id);
+    if (!map.has(key)) map.set(key, new Map());
+    map.get(key).set(r.store_name, toNum(r.qty));
+  }
+  return map;
+}
+
+// Merges per-item store->qty maps (from fetchOtherStoreStock) across every
+// item_id in a row, sums quantities per store, and returns the top 5
+// stores by quantity as a flat sorted array — used identically by Product
+// mode (one item_id) and Category/Subcategory mode (many).
+function rollUpOtherStoreStock(otherStoreMap, itemIds) {
+  const merged = new Map();
+  for (const id of itemIds) {
+    const perStore = otherStoreMap.get(String(id));
+    if (!perStore) continue;
+    for (const [store, qty] of perStore) {
+      merged.set(store, (merged.get(store) || 0) + qty);
+    }
+  }
+  return [...merged.entries()]
+    .map(([store, qty]) => ({ store, qty }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 5);
+}
+
 // Four deterministic states — the whole point of this section is telling
 // "genuinely out of stock" apart from "still has stock, just not posted"
 // apart from "posted and still has stock" (all legitimately different
@@ -464,6 +515,7 @@ export default async function handler(req, res) {
       ),
     );
     const inventoryMap = await fetchInventory(allItemIds);
+    const otherStoreMap = await fetchOtherStoreStock(allItemIds);
 
     // Trend rule (Repeat Sellers) — deliberately simple and deterministic:
     // Wk4 (current) vs. the AVERAGE of Wk1-3, +/-5% band = "flat". Averaging
@@ -491,18 +543,21 @@ export default async function handler(req, res) {
       let product;
       let stockQty;
       let stockValue;
+      let itemIds;
       if (groupBy === "product") {
         const inv = inventoryMap.get(String(r.group_key));
         sku = r.barcode;
         product = r.display_name;
         stockQty = inv ? inv.stockQty : null;
         stockValue = inv ? inv.stockValue : null;
+        itemIds = [r.group_key];
       } else {
         const invEntries = (r.item_ids || []).map((id) => inventoryMap.get(String(id))).filter(Boolean);
         sku = (r.item_ids || []).length;
         product = r.group_key;
         stockQty = invEntries.length ? invEntries.reduce((s, e) => s + e.stockQty, 0) : null;
         stockValue = invEntries.length ? invEntries.reduce((s, e) => s + e.stockValue, 0) : null;
+        itemIds = r.item_ids || [];
       }
       return {
         sku,
@@ -518,6 +573,7 @@ export default async function handler(req, res) {
         trend,
         currentStockQty: stockQty,
         currentStockValue: stockValue,
+        otherStoreStock: rollUpOtherStoreStock(otherStoreMap, itemIds),
       };
     });
 
@@ -534,6 +590,7 @@ export default async function handler(req, res) {
       let stockQty;
       let stockValue;
       let postedQty;
+      let itemIds;
       if (comparisonGroupBy === "product") {
         const inv = inventoryMap.get(String(r.group_key));
         sku = r.barcode;
@@ -541,6 +598,7 @@ export default async function handler(req, res) {
         stockQty = inv ? inv.stockQty : null;
         stockValue = inv ? inv.stockValue : null;
         postedQty = inv ? inv.postedQty : null;
+        itemIds = [r.group_key];
       } else {
         const invEntries = (r.item_ids || []).map((id) => inventoryMap.get(String(id))).filter(Boolean);
         sku = (r.item_ids || []).length;
@@ -548,6 +606,7 @@ export default async function handler(req, res) {
         stockQty = invEntries.length ? invEntries.reduce((s, e) => s + e.stockQty, 0) : null;
         stockValue = invEntries.length ? invEntries.reduce((s, e) => s + e.stockValue, 0) : null;
         postedQty = invEntries.length ? invEntries.reduce((s, e) => s + e.postedQty, 0) : null;
+        itemIds = r.item_ids || [];
       }
       return {
         sku,
@@ -558,6 +617,7 @@ export default async function handler(req, res) {
         previousUnits: prevU,
         gmvChangePct: pctDelta(curG, prevG),
         unitsChangePct: pctDelta(curU, prevU),
+        otherStoreStock: rollUpOtherStoreStock(otherStoreMap, itemIds),
         currentStockQty: stockQty,
         currentStockValue: stockValue,
         postedQty,
@@ -586,6 +646,7 @@ export default async function handler(req, res) {
         currentUnits: r.currentUnits,
         currentStockQty: r.currentStockQty,
         currentStockValue: r.currentStockValue,
+        otherStoreStock: r.otherStoreStock,
         status: stockStatus(
           r.currentStockQty !== null ? { stockQty: r.currentStockQty, postedQty: r.postedQty } : null,
         ),
