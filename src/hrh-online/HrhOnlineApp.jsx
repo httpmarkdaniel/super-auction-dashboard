@@ -6,7 +6,7 @@ import SalesAnalytics from "./pages/SalesAnalytics";
 import TrafficConversion from "./pages/TrafficConversion";
 import CustomerAnalytics from "./pages/CustomerAnalytics";
 import ProductAnalytics from "./pages/ProductAnalytics";
-import ProductMerchandising from "./pages/ProductMerchandising";
+import BarcodeAnalytics from "./pages/BarcodeAnalytics";
 import InventoryAging from "./pages/InventoryAging";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
 import OrdersFulfillment from "./pages/OrdersFulfillment";
@@ -22,7 +22,7 @@ const PAGES = {
   traffic: TrafficConversion,
   customers: CustomerAnalytics,
   productAnalytics: ProductAnalytics,
-  merchandising: ProductMerchandising,
+  barcodeAnalytics: BarcodeAnalytics,
   inventoryAging: InventoryAging,
   markdown: MarkdownAnalytics,
   fulfillment: OrdersFulfillment,

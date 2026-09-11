@@ -10,7 +10,7 @@ const client = createClient({
 // Underscore-prefixed (see api/_hrh-traffic-analytics.js's comment) — the
 // Vercel project's Hobby plan caps deployments at 12 Serverless Functions
 // and is already exactly at that cap, so this can't be its own route.
-// api/hrh-sales-analytics.js dispatches here on `?report=merchandising`.
+// api/hrh-sales-analytics.js dispatches here on `?report=barcodeAnalytics`.
 //
 // A live INVENTORY/POSTING snapshot, not a sales-over-time report — every
 // other api/hrh-*.js file takes a Date Range + Channel filter because it's
@@ -31,7 +31,7 @@ function safeDivide(a, b) {
   return b ? a / b : 0;
 }
 
-export async function handleMerchandising(req, res) {
+export async function handleBarcodeAnalytics(req, res) {
   try {
     // KPIs — "Barcoded Items" is every inventory record for this store
     // (verified: 100% of xv3.mart_level_of_inventory rows already carry a
@@ -192,9 +192,9 @@ export async function handleMerchandising(req, res) {
       productTable,
     });
   } catch (err) {
-    console.error("HRH Merchandising API error:", err);
+    console.error("HRH Barcode Analytics API error:", err);
     return res.status(500).json({
-      error: "Failed to load HRH Online Product & Merchandising data",
+      error: "Failed to load HRH Online Barcode Analytics data",
       message: err instanceof Error ? err.message : String(err),
     });
   }

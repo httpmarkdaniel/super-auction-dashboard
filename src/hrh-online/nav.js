@@ -14,7 +14,7 @@ export const NAV_GROUPS = [
     label: "Merchandising",
     items: [
       { key: "productAnalytics", label: "Product Analytics" },
-      { key: "merchandising", label: "Product & Merchandising" },
+      { key: "barcodeAnalytics", label: "Barcode Analytics" },
       { key: "inventoryAging", label: "Inventory Aging" },
       { key: "markdown", label: "Markdown Analytics" },
     ],

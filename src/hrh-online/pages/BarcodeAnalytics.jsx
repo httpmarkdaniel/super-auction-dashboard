@@ -14,18 +14,19 @@ const PRODUCT_COLUMNS = [
   { key: "units", label: "Current Stock", render: (r) => formatNum(r.units) },
   { key: "stockValue", label: "Stock Value (SRP)", render: (r) => formatPeso(r.stockValue) },
   { key: "postedQty", label: "Posted Qty", render: (r) => formatNum(r.postedQty) },
-  { key: "aging", label: "Age (days)" },
+  { key: "aging", label: "Age Bucket (days)" },
   { key: "status", label: "Status" },
 ];
 
-// Real ClickHouse-backed Product & Merchandising — see
-// api/_hrh-merchandising.js (dispatched from api/hrh-sales-analytics.js via
-// ?report=merchandising) for the queries. A live inventory/posting
-// snapshot, not a sales-over-time report, so it deliberately does NOT take
-// the dashboard's Date Range/Channel filter (xv3.mart_level_of_inventory
-// has no transaction date or sales-channel dimension) — always "as of
-// right now" for HRH Online.
-export default function ProductMerchandising() {
+// Real ClickHouse-backed Barcode Analytics (barcoding/posting workflow —
+// formerly "Product & Merchandising") — see api/_hrh-barcode-analytics.js
+// (dispatched from api/hrh-sales-analytics.js via ?report=barcodeAnalytics)
+// for the queries. A live inventory/posting snapshot, not a sales-over-time
+// report, so it deliberately does NOT take the dashboard's Date
+// Range/Channel filter (xv3.mart_level_of_inventory has no transaction
+// date or sales-channel dimension) — always "as of right now" for HRH
+// Online.
+export default function BarcodeAnalytics() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -34,7 +35,7 @@ export default function ProductMerchandising() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/hrh-sales-analytics?report=merchandising`, { signal });
+      const res = await fetch(`/api/hrh-sales-analytics?report=barcodeAnalytics`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
@@ -60,11 +61,11 @@ export default function ProductMerchandising() {
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Product &amp; Merchandising
+        Barcode Analytics
       </div>
 
-      {loading && !data && <LoadingState label="Loading Product & Merchandising…" />}
-      {error && <ErrorState label={`Couldn't load Product & Merchandising: ${error}`} />}
+      {loading && !data && <LoadingState label="Loading Barcode Analytics…" />}
+      {error && <ErrorState label={`Couldn't load Barcode Analytics: ${error}`} />}
 
       {data && !error && (
         <>
