@@ -18,6 +18,15 @@ const PRODUCT_COLUMNS = [
   { key: "status", label: "Status" },
 ];
 
+const OLDEST_UNPOSTED_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 200 },
+  { key: "category", label: "Category" },
+  { key: "supplier", label: "Supplier", maxWidth: 160 },
+  { key: "units", label: "Current Stock", render: (r) => formatNum(r.units) },
+  { key: "stockValue", label: "Stock Value (SRP)", render: (r) => formatPeso(r.stockValue) },
+  { key: "daysWaiting", label: "Days Waiting", render: (r) => (r.daysWaiting === null ? "—" : formatNum(r.daysWaiting)) },
+];
+
 // Real ClickHouse-backed Barcode Analytics (barcoding/posting workflow —
 // formerly "Product & Merchandising") — see api/_hrh-barcode-analytics.js
 // (dispatched from api/hrh-sales-analytics.js via ?report=barcodeAnalytics)
@@ -56,6 +65,7 @@ export default function BarcodeAnalytics() {
 
   const publishingFunnel = data?.publishingFunnel || [];
   const postingPerformanceByCategory = data?.postingPerformanceByCategory || [];
+  const postingPerformanceBySupplier = data?.postingPerformanceBySupplier || [];
   const unpostedBacklogAging = data?.unpostedBacklogAging || [];
 
   return (
@@ -89,13 +99,30 @@ export default function BarcodeAnalytics() {
             <Panel title="Posting Performance by Category">
               <BarComparisonChart data={postingPerformanceByCategory} series={[{ key: "posted", name: "Posted Items" }]} valueFormatter={formatNum} />
             </Panel>
-            <Panel title="Unposted Backlog Aging" subtitle={data.meta?.avgBacklogDaysNote}>
-              <BarComparisonChart data={unpostedBacklogAging} series={[{ key: "value", name: "Items", color: "#d99a3d" }]} valueFormatter={formatNum} />
+            <Panel title="Posting Performance by Supplier">
+              <BarComparisonChart data={postingPerformanceBySupplier} series={[{ key: "posted", name: "Posted Items", color: hrh.blue }]} valueFormatter={formatNum} />
             </Panel>
           </div>
 
-          <Panel title="Product Performance" subtitle="Highest stock value first">
+          <Panel title="Unposted Backlog Aging" subtitle={data.meta?.avgBacklogDaysNote} className="mb-4">
+            <BarComparisonChart data={unpostedBacklogAging} series={[{ key: "value", name: "Items", color: "#d99a3d" }]} valueFormatter={formatNum} />
+          </Panel>
+
+          <Panel title="Product Performance" subtitle="Highest stock value first" className="mb-4">
             <DataTable columns={PRODUCT_COLUMNS} rows={data.productTable} paginate pageSize={10} />
+          </Panel>
+
+          <Panel
+            title="Oldest Unposted Items"
+            subtitle="Unposted items with real stock on hand, oldest first — excludes zero-stock records with nothing to post"
+          >
+            <DataTable
+              columns={OLDEST_UNPOSTED_COLUMNS}
+              rows={data.oldestUnposted}
+              paginate
+              pageSize={10}
+              emptyLabel="No unposted items with stock on hand right now."
+            />
           </Panel>
         </>
       )}

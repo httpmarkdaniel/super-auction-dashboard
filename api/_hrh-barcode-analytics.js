@@ -112,6 +112,28 @@ export async function handleBarcodeAnalytics(req, res) {
     ).json();
     const postingPerformanceByCategory = categoryRows.map((r) => ({ label: r.category, posted: toNum(r.posted) }));
 
+    // Posting Performance by Supplier — verified coverage first (99.8%,
+    // 12,071 of 12,093 rows have a supplier_name), same "posted count"
+    // shape as the category breakdown, top 8 by posted items so the
+    // biggest suppliers' posting performance is what's actually visible.
+    const supplierRows = await (
+      await client.query({
+        query: `
+          SELECT
+            coalesce(nullIf(supplier_name, ''), 'Unknown') AS supplier,
+            countIf(cms_hmrph_posting_quantity > 0) AS posted
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String}
+          GROUP BY supplier
+          ORDER BY posted DESC
+          LIMIT 8
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const postingPerformanceBySupplier = supplierRows.map((r) => ({ label: r.supplier, posted: toNum(r.posted) }));
+
     // Unposted Backlog Aging — buckets the ALREADY-COMPUTED inventory_aging
     // field (not re-derived from date_received), same categorical buckets
     // Inventory Aging elsewhere in this app already uses, filtered to only
@@ -166,6 +188,38 @@ export async function handleBarcodeAnalytics(req, res) {
       status: toNum(r.cms_hmrph_posting_quantity) > 0 ? "Posted" : "Unposted",
     }));
 
+    // Oldest Unposted Items — deliberately scoped to item_qty > 0. Verified
+    // first: of the 7,179 "unposted" rows, only 704 actually have physical
+    // stock on hand; the other 6,475 are zero-stock records (some dating
+    // back to 2018) with nothing to post in the first place. Without this
+    // filter, this list would be dominated by ancient dead records instead
+    // of the genuinely actionable backlog a merchandiser could actually go
+    // post today.
+    const oldestUnpostedRows = await (
+      await client.query({
+        query: `
+          SELECT product_name, category_name, supplier_name, item_qty, total_current_srp, date_received
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String}
+            AND cms_hmrph_posting_quantity <= 0
+            AND item_qty > 0
+            AND date_received IS NOT NULL
+          ORDER BY date_received ASC
+          LIMIT 50
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const oldestUnposted = oldestUnpostedRows.map((r) => ({
+      product: r.product_name || "—",
+      category: r.category_name || "Uncategorized",
+      supplier: r.supplier_name || "Unknown",
+      units: toNum(r.item_qty),
+      stockValue: toNum(r.total_current_srp),
+      daysWaiting: r.date_received ? Math.round((Date.now() - new Date(r.date_received).getTime()) / 86400000) : null,
+    }));
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -188,8 +242,10 @@ export async function handleBarcodeAnalytics(req, res) {
         { label: "Sold", value: sold },
       ],
       postingPerformanceByCategory,
+      postingPerformanceBySupplier,
       unpostedBacklogAging,
       productTable,
+      oldestUnposted,
     });
   } catch (err) {
     console.error("HRH Barcode Analytics API error:", err);
