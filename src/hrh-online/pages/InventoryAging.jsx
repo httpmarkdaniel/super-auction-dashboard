@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
+import TrendBucketPills from "../components/TrendBucketPills";
 import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
@@ -17,10 +18,15 @@ const OLDEST_COLUMNS = [
 ];
 
 const TOP_ITEM_COLUMNS = [
-  { key: "product", label: "Product", maxWidth: 200 },
-  { key: "category", label: "Category" },
+  { key: "product", label: "Product", maxWidth: 200, width: 200 },
+  { key: "category", label: "Category", width: 130 },
   { key: "units", label: "Current Stock", render: (r) => formatNum(r.units) },
   { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
+];
+
+const SORT_BY_OPTIONS = [
+  { key: "value", label: "Value" },
+  { key: "qty", label: "Qty" },
 ];
 
 // Real ClickHouse-backed Inventory Aging — see api/_hrh-inventory-aging.js
@@ -33,6 +39,7 @@ export default function InventoryAging() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [topItemsSortBy, setTopItemsSortBy] = useState("value");
 
   const load = useCallback(async (signal) => {
     setLoading(true);
@@ -57,8 +64,8 @@ export default function InventoryAging() {
     return () => controller.abort();
   }, [load]);
 
-  const topSlowMovingItems = data?.topSlowMovingItems || [];
-  const topNonMovingItems = data?.topNonMovingItems || [];
+  const topSlowMovingItems = (topItemsSortBy === "qty" ? data?.topSlowMovingItemsByQty : data?.topSlowMovingItemsByValue) || [];
+  const topNonMovingItems = (topItemsSortBy === "qty" ? data?.topNonMovingItemsByQty : data?.topNonMovingItemsByValue) || [];
   const agedByCategory = data?.agedByCategory || [];
   const agedBySupplier = data?.agedBySupplier || [];
 
@@ -84,12 +91,15 @@ export default function InventoryAging() {
             <KpiCard label="Non-Moving Value" value={formatPeso(data.kpis.nonMovingValue.value)} />
           </KpiRow>
 
+          <div className="flex justify-end mb-2">
+            <TrendBucketPills value={topItemsSortBy} onChange={setTopItemsSortBy} options={SORT_BY_OPTIONS} />
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Panel title="Top 10 Slow-Moving Items by Value" subtitle="61+ days, has sold before">
-              <DataTable columns={TOP_ITEM_COLUMNS} rows={topSlowMovingItems} emptyLabel="No slow-moving items right now." />
+            <Panel title={`Top 10 Slow-Moving Items by ${topItemsSortBy === "qty" ? "Qty" : "Value"}`} subtitle="61+ days, has sold before">
+              <DataTable columns={TOP_ITEM_COLUMNS} rows={topSlowMovingItems} stickyColumns={2} emptyLabel="No slow-moving items right now." />
             </Panel>
-            <Panel title="Top 10 Non-Moving Items by Value" subtitle="61+ days, never sold">
-              <DataTable columns={TOP_ITEM_COLUMNS} rows={topNonMovingItems} emptyLabel="No non-moving items right now." />
+            <Panel title={`Top 10 Non-Moving Items by ${topItemsSortBy === "qty" ? "Qty" : "Value"}`} subtitle="61+ days, never sold">
+              <DataTable columns={TOP_ITEM_COLUMNS} rows={topNonMovingItems} stickyColumns={2} emptyLabel="No non-moving items right now." />
             </Panel>
           </div>
 

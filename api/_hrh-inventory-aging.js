@@ -63,47 +63,38 @@ export async function handleInventoryAging(req, res) {
 
     // Top 10 Slow-Moving / Non-Moving Items by Value — same 61+ day, real-
     // stock population as the KPIs above, split the same way (sold before
-    // vs never sold), sorted by SRP value descending so the biggest-money
-    // items needing action surface first in each list.
-    const topSlowMovingRows = await (
-      await client.query({
-        query: `
-          SELECT product_name, category_name, item_qty, total_current_srp
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold > 0
-          ORDER BY total_current_srp DESC
-          LIMIT 10
-        `,
-        query_params: { store: HRH_STORE },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const topSlowMovingItems = topSlowMovingRows.map((r) => ({
-      product: r.product_name || "—",
-      category: r.category_name || "Uncategorized",
-      units: toNum(r.item_qty),
-      value: toNum(r.total_current_srp),
-    }));
+    // vs never sold). Fetched pre-sorted both ways (by value and by qty)
+    // so the frontend's Value/Qty toggle just swaps which array it shows,
+    // rather than re-querying on toggle.
+    const topItemsQuery = (extraWhere, orderBy) => ({
+      query: `
+        SELECT product_name, category_name, item_qty, total_current_srp
+        FROM xv3.mart_level_of_inventory
+        WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND ${extraWhere}
+        ORDER BY ${orderBy} DESC
+        LIMIT 10
+      `,
+      query_params: { store: HRH_STORE },
+      format: "JSONEachRow",
+    });
+    const mapTopItems = (rows) =>
+      rows.map((r) => ({
+        product: r.product_name || "—",
+        category: r.category_name || "Uncategorized",
+        units: toNum(r.item_qty),
+        value: toNum(r.total_current_srp),
+      }));
 
-    const topNonMovingRows = await (
-      await client.query({
-        query: `
-          SELECT product_name, category_name, item_qty, total_current_srp
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String} AND item_qty > 0 AND inventory_aging IN ('61-90','91-120','121+') AND total_qty_sold = 0
-          ORDER BY total_current_srp DESC
-          LIMIT 10
-        `,
-        query_params: { store: HRH_STORE },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const topNonMovingItems = topNonMovingRows.map((r) => ({
-      product: r.product_name || "—",
-      category: r.category_name || "Uncategorized",
-      units: toNum(r.item_qty),
-      value: toNum(r.total_current_srp),
-    }));
+    const [slowByValue, slowByQty, nonByValue, nonByQty] = await Promise.all([
+      client.query(topItemsQuery("total_qty_sold > 0", "total_current_srp")).then((r) => r.json()),
+      client.query(topItemsQuery("total_qty_sold > 0", "item_qty")).then((r) => r.json()),
+      client.query(topItemsQuery("total_qty_sold = 0", "total_current_srp")).then((r) => r.json()),
+      client.query(topItemsQuery("total_qty_sold = 0", "item_qty")).then((r) => r.json()),
+    ]);
+    const topSlowMovingItemsByValue = mapTopItems(slowByValue);
+    const topSlowMovingItemsByQty = mapTopItems(slowByQty);
+    const topNonMovingItemsByValue = mapTopItems(nonByValue);
+    const topNonMovingItemsByQty = mapTopItems(nonByQty);
 
     // Aged Inventory Value by Category — same 61+ day population as the
     // KPIs, top 8 categories by value.
@@ -181,8 +172,10 @@ export async function handleInventoryAging(req, res) {
         nonMovingSkus: { value: toNum(k.non_moving_skus) },
         nonMovingValue: { value: toNum(k.non_moving_value) },
       },
-      topSlowMovingItems,
-      topNonMovingItems,
+      topSlowMovingItemsByValue,
+      topSlowMovingItemsByQty,
+      topNonMovingItemsByValue,
+      topNonMovingItemsByQty,
       agedByCategory,
       agedBySupplier,
       oldestInventoryTable,
