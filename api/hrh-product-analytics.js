@@ -155,21 +155,24 @@ function resolveRange(range, fromParam, toParam) {
   return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
 }
 
-// Four rolling weekly buckets for Repeat Sellers — always the 4 most
-// recent real 7-day calendar weeks ending at the effective "to" date,
-// deliberately INDEPENDENT of whichever range preset is selected (a WTD/
-// MTD/YTD/Custom "current" window can be a single day or a whole year;
-// none of those shapes fit "weekly repeat-purchase cadence", so this
-// lookback stays fixed and explicit no matter what's chosen elsewhere on
-// the page).
+// Four ISO weeks (Monday-Sunday) for Repeat Sellers — the most recent
+// bucket is the ISO week CONTAINING the effective "to" date (so its own
+// Sunday can fall after "to" if today isn't Sunday yet — the bucket's sum
+// is still correct, it just naturally only has real sales through today),
+// the 3 before it are full prior ISO weeks. Deliberately INDEPENDENT of
+// whichever range preset is selected (a WTD/MTD/YTD/Custom "current"
+// window can be a single day or a whole year; none of those shapes fit
+// "weekly repeat-purchase cadence", so this lookback stays fixed and
+// explicit no matter what's chosen elsewhere on the page).
 function weeklyBucketsEndingAt(to) {
-  const wk4 = { from: addDaysISO(to, -6), to };
-  const wk3To = addDaysISO(wk4.from, -1);
-  const wk3 = { from: addDaysISO(wk3To, -6), to: wk3To };
-  const wk2To = addDaysISO(wk3.from, -1);
-  const wk2 = { from: addDaysISO(wk2To, -6), to: wk2To };
-  const wk1To = addDaysISO(wk2.from, -1);
-  const wk1 = { from: addDaysISO(wk1To, -6), to: wk1To };
+  const wk4From = mondayOfWeek(to);
+  const wk4 = { from: wk4From, to: addDaysISO(wk4From, 6) };
+  const wk3From = addDaysISO(wk4From, -7);
+  const wk3 = { from: wk3From, to: addDaysISO(wk3From, 6) };
+  const wk2From = addDaysISO(wk3From, -7);
+  const wk2 = { from: wk2From, to: addDaysISO(wk2From, 6) };
+  const wk1From = addDaysISO(wk2From, -7);
+  const wk1 = { from: wk1From, to: addDaysISO(wk1From, 6) };
   return [wk1, wk2, wk3, wk4];
 }
 
