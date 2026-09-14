@@ -62,7 +62,7 @@ export default function HrhOnlineApp() {
           onChannelChange={setChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
-          hideChannelFilter={page === "traffic" || page === "customerSuccess"}
+          hideChannelFilter={page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics"}
         />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />

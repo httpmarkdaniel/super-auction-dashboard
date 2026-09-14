@@ -8,35 +8,28 @@ const client = createClient({
 });
 
 // Underscore-prefixed (see api/_hrh-traffic-analytics.js's comment) — the
-// Vercel project's Hobby plan caps deployments at 12 Serverless Functions
-// and is already exactly at that cap, so this can't be its own route.
+// Vercel project's Hobby plan caps deployments at 12 Serverless Functions.
 // api/hrh-sales-analytics.js dispatches here on `?report=barcodeAnalytics`.
 //
-// A live INVENTORY/POSTING snapshot, not a sales-over-time report — every
-// other api/hrh-*.js file takes a Date Range + Channel filter because it's
-// summing sales transactions over a window; this one queries
-// xv3.mart_level_of_inventory, which has no transaction date or
-// sales_channel dimension at all (it's a current-state snapshot per
-// item/store). So this endpoint deliberately ignores the page's Date
-// Range/Channel filter and always answers "as of right now" for HRH
-// Online specifically (hardcoded store_name, same as every other
-// api/hrh-*.js file's locked contract).
-const HRH_STORE = "HRH ONLINE";
-
+// REBUILT on xv3.mart_order_fulfilment_journey (real warehouse-ops
+// timestamps: picker, QC station, pick/pack/dispatch durations) —
+// replaces the old xv3.mart_level_of_inventory-based version (barcoded/
+// posted/sold funnel). No store_name/sales_channel column exists on this
+// table at all, but per the same investigation already documented in
+// api/_hrh-orders-fulfillment.js and api/_hrh-pickup-delivery.js, this
+// table is exclusively HRH Online's own fulfillment operations (its own
+// warehouse handles all 3 channels), so no store filter is needed or
+// possible. Respects the page's Date Range filter via order_placed_at;
+// ignores the Channel filter (no channel dimension exists here).
+//
+// "Pick Rate" / picking_status from xv3.mart_xv3_order_pickability is
+// still intentionally excluded (see Orders & Fulfillment's methodology
+// note — HMR MART runs its own WMS, that field isn't meaningful). Picker
+// performance and QC throughput here are a DIFFERENT, real signal: named
+// pickers/QC stations with real timestamped durations, not that flag.
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-function safeDivide(a, b) {
-  return b ? a / b : 0;
-}
-// Same Asia/Manila "today" convention every other api/hrh-*.js file uses
-// (never the server's own UTC date) — needed here specifically for
-// "Barcoded Today", the one KPI on this otherwise dateless snapshot page
-// that's actually scoped to a calendar day.
-function manilaTodayISODate() {
-  const d = new Date(Date.now() + 8 * 3600 * 1000);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 function addDaysISO(iso, days) {
   const [y, m, d] = iso.split("-").map(Number);
@@ -44,196 +37,208 @@ function addDaysISO(iso, days) {
   dt.setUTCDate(dt.getUTCDate() + days);
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
-function enumerateDatesISO(from, to) {
-  const dates = [];
-  let cur = from;
-  while (cur <= to) {
-    dates.push(cur);
-    cur = addDaysISO(cur, 1);
-  }
-  return dates;
+function manilaTodayISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
+function mondayOfWeek(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return addDaysISO(iso, dow === 0 ? -6 : 1 - dow);
+}
+function firstOfMonthISO(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  return `${y}-${String(m).padStart(2, "0")}-01`;
+}
+function resolveRange(range, fromParam, toParam) {
+  const today = manilaTodayISODate();
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    return { from, to };
+  }
+  if (range === "mtd") return { from: firstOfMonthISO(today), to: today };
+  if (range === "ytd") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  return { from: mondayOfWeek(today), to: today }; // wtd (default)
+}
+
+const DIST_BUCKETS = [
+  { label: "≤1h", where: "hrs <= 1" },
+  { label: "1-6h", where: "hrs > 1 AND hrs <= 6" },
+  { label: "6-24h", where: "hrs > 6 AND hrs <= 24" },
+  { label: "24-48h", where: "hrs > 24 AND hrs <= 48" },
+  { label: "48h+", where: "hrs > 48" },
+];
 
 export async function handleBarcodeAnalytics(req, res) {
   try {
-    // KPIs — "Barcoded Items" is every inventory record for this store
-    // (verified: 100% of xv3.mart_level_of_inventory rows already carry a
-    // barcode — this table doesn't track pre-barcode items at all, so
-    // "barcoded" here really means "catalogued", the earliest state this
-    // table can see). "Posted" = has a positive HMRPH CMS posting quantity
-    // (same posted/not-posted signal Product Analytics' Dropped Products
-    // panel already uses).
-    // "Barcoded Today" uses created_time, the only genuine per-item
-    // creation timestamp on this table — checked for a real posting-side
-    // equivalent (items.barcoded_time, a dedicated postings table) but both
-    // turned out to belong to the auction/consignment side of the business
-    // (zero rows for HRH Online's store_id), so there's still no posted_at
-    // signal here and "Items Posted Today" isn't computable.
-    const today = manilaTodayISODate();
+    const { from = "", to = "" } = req.query;
+    const range = req.query.range || (from && to ? "custom" : "wtd");
+
+    let range_;
+    try {
+      range_ = resolveRange(range, from, to);
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+
+    // KPIs — orders processed in the window (by order_placed_at) plus avg
+    // duration for each real stage: pick→QC, QC→waybill, and total
+    // pick→dispatch (picking_started_at to dispatch_finalized_at,
+    // computed directly rather than summed from the intermediate stage
+    // columns, so it can't drift from nulls in any one intermediate stage).
     const kpiRows = await (
       await client.query({
         query: `
           SELECT
-            count() AS barcoded,
-            countIf(cms_hmrph_posting_quantity > 0) AS posted,
-            countIf(toDate(created_time) = {today:Date}) AS barcoded_today
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String}
+            count() AS orders,
+            avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
+            avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds,
+            avgIf(
+              dateDiff('second', picking_started_at, dispatch_finalized_at),
+              picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
+            ) AS avg_pick_to_dispatch_seconds
+          FROM xv3.mart_order_fulfilment_journey
+          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
         `,
-        query_params: { store: HRH_STORE, today },
+        query_params: { from: range_.from, to: range_.to },
         format: "JSONEachRow",
       })
     ).json();
     const k = kpiRows[0] || {};
-    const barcoded = toNum(k.barcoded);
-    const posted = toNum(k.posted);
-    const barcodedToday = toNum(k.barcoded_today);
-    const postingRate = safeDivide(posted, barcoded) * 100;
 
-    // Publishing Funnel — same canonical population as the KPIs above,
-    // plus "Sold": distinct items (of this store's catalogued items) with
-    // at least one positive-sale row in xv3.mart_net_sales, joined on the
-    // same `ct.item_id` <-> product_id key Product Analytics already uses.
-    const soldRows = await (
-      await client.query({
-        query: `
-          SELECT count() AS sold
-          FROM (SELECT DISTINCT product_id FROM xv3.mart_level_of_inventory WHERE store_name = {store:String} AND product_id IS NOT NULL) inv
-          WHERE inv.product_id IN (
-            SELECT DISTINCT \`ct.item_id\` FROM xv3.mart_net_sales
-            WHERE store_name = {store:String} AND net_sales_amount > 0 AND \`ct.item_id\` IS NOT NULL
-          )
-        `,
-        query_params: { store: HRH_STORE },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const sold = toNum(soldRows[0]?.sold);
-    // Of the items actually posted (visible to buyers), what share have
-    // sold at least once — the funnel's own second drop-off, expressed as
-    // a rate to pair naturally with Posting Rate (the first drop-off).
-    const soldRate = safeDivide(sold, posted) * 100;
-
-    // Daily Barcoding Volume — independent of this page's (nonexistent)
-    // date filter, same as everything else here: a fixed trailing 180-day
-    // window of created_time, zero-filled day-by-day so the frontend's
-    // shared Day/Week/Month bucketing (trendBucket.js, same pattern as
-    // Executive Overview's Sales Trend) has a real daily series to
-    // re-bucket client-side. 180 days gives a meaningful Month view (6
-    // buckets) without the Day view being too dense — HRH Online's volume
-    // has real month-to-month swings (e.g. 3,257 in March vs 5 the prior
-    // September), so this is worth seeing at more than just a day grain.
-    // "Posted" here is grouped by the SAME created_time day as "Barcoded"
-    // (there's still no posted_at timestamp anywhere in this data — see
-    // the KPI comment above) — it's the posted-as-of-now subset of that
-    // day's barcoded items, not a count of items posted ON that day.
-    const trendFrom = addDaysISO(today, -179);
-    const dailyRows = await (
-      await client.query({
-        query: `
-          SELECT toDate(created_time) AS d, count() AS n, countIf(cms_hmrph_posting_quantity > 0) AS n_posted
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String} AND created_time >= {trendFrom:Date}
-          GROUP BY d
-        `,
-        query_params: { store: HRH_STORE, trendFrom },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const dailyMap = new Map(dailyRows.map((r) => [r.d, { barcoded: toNum(r.n), posted: toNum(r.n_posted) }]));
-    const dailyBarcodingVolume = enumerateDatesISO(trendFrom, today).map((d) => ({
-      date: d,
-      barcoded: dailyMap.get(d)?.barcoded || 0,
-      posted: dailyMap.get(d)?.posted || 0,
-    }));
-
-    // Product table — capped at 500 (safety net, not a "top N"
-    // truncation), same pattern as every other api/hrh-*.js detail table;
-    // the frontend paginates the full list it receives. Sorted by current
-    // stock (item_qty) descending so the highest-stock items surface first.
-    const productRows = await (
+    // Picker Performance — real named pickers, ranked by volume. Excludes
+    // null picker_name (a single row store-wide, verified) rather than
+    // showing an "Unassigned" bucket with nothing meaningful in it.
+    const pickerRows = await (
       await client.query({
         query: `
           SELECT
-            product_name,
-            category_name,
-            item_qty,
-            total_current_srp,
-            cms_hmrph_posting_quantity,
-            coalesce(nullIf(inventory_aging, ''), 'Unknown') AS aging_bucket
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String}
-          ORDER BY item_qty DESC
-          LIMIT 500
+            picker_name,
+            count() AS orders,
+            sum(coalesce(picked_item_count, 0)) AS items,
+            avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds
+          FROM xv3.mart_order_fulfilment_journey
+          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+            AND picker_name IS NOT NULL
+          GROUP BY picker_name
+          ORDER BY orders DESC
+          LIMIT 20
         `,
-        query_params: { store: HRH_STORE },
+        query_params: { from: range_.from, to: range_.to },
         format: "JSONEachRow",
       })
     ).json();
-    const productTable = productRows.map((r) => ({
-      product: r.product_name || "—",
-      category: r.category_name || "Uncategorized",
-      units: toNum(r.item_qty),
-      stockValue: toNum(r.total_current_srp),
-      postedQty: toNum(r.cms_hmrph_posting_quantity),
-      aging: r.aging_bucket,
-      status: toNum(r.cms_hmrph_posting_quantity) > 0 ? "Posted" : "Unposted",
+    const pickerPerformance = pickerRows.map((r) => ({
+      picker: r.picker_name,
+      orders: toNum(r.orders),
+      items: toNum(r.items),
+      avgPickSeconds: toNum(r.avg_pick_seconds),
     }));
 
-    // Oldest Unposted Items — deliberately scoped to item_qty > 0. Verified
-    // first: of the 7,179 "unposted" rows, only 704 actually have physical
-    // stock on hand; the other 6,475 are zero-stock records (some dating
-    // back to 2018) with nothing to post in the first place. Without this
-    // filter, this list would be dominated by ancient dead records instead
-    // of the genuinely actionable backlog a merchandiser could actually go
-    // post today.
-    const oldestUnpostedRows = await (
+    // QC Station Throughput — same idea, per QC station.
+    const qcRows = await (
       await client.query({
         query: `
-          SELECT product_name, category_name, supplier_name, item_qty, total_current_srp, date_received
-          FROM xv3.mart_level_of_inventory
-          WHERE store_name = {store:String}
-            AND cms_hmrph_posting_quantity <= 0
-            AND item_qty > 0
-            AND date_received IS NOT NULL
-          ORDER BY date_received ASC, item_qty DESC
-          LIMIT 50
+          SELECT
+            qc_station,
+            count() AS orders,
+            avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds
+          FROM xv3.mart_order_fulfilment_journey
+          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+            AND qc_station IS NOT NULL
+          GROUP BY qc_station
+          ORDER BY orders DESC
         `,
-        query_params: { store: HRH_STORE },
+        query_params: { from: range_.from, to: range_.to },
         format: "JSONEachRow",
       })
     ).json();
-    const oldestUnposted = oldestUnpostedRows.map((r) => ({
-      product: r.product_name || "—",
-      category: r.category_name || "Uncategorized",
-      supplier: r.supplier_name || "Unknown",
-      units: toNum(r.item_qty),
-      stockValue: toNum(r.total_current_srp),
-      daysWaiting: r.date_received ? Math.round((Date.now() - new Date(r.date_received).getTime()) / 86400000) : null,
+    const qcThroughput = qcRows.map((r) => ({
+      station: r.qc_station,
+      orders: toNum(r.orders),
+      avgQcSeconds: toNum(r.avg_qc_seconds),
     }));
+
+    // Pick-to-Dispatch Time Distribution — same bucketing shape the old
+    // Orders & Fulfillment page used for this same table, before that
+    // page was rebuilt on the invoice-matching methodology.
+    const distRows = await (
+      await client.query({
+        query: `
+          SELECT ${DIST_BUCKETS.map((b, i) => `countIf(${b.where}) AS b${i}`).join(", ")}
+          FROM (
+            SELECT dateDiff('second', picking_started_at, dispatch_finalized_at) / 3600.0 AS hrs
+            FROM xv3.mart_order_fulfilment_journey
+            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+              AND picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
+          )
+        `,
+        query_params: { from: range_.from, to: range_.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const distRow = distRows[0] || {};
+    const pickToDispatchDistribution = DIST_BUCKETS.map((b, i) => ({ label: b.label, value: toNum(distRow[`b${i}`]) }));
+
+    // Daily volume — orders placed / picked / packed / shipped per day,
+    // for the frontend's Day/Week/Month bucketing (same client-side
+    // pattern as Executive Overview's Sales Trend).
+    const dailyRows = await (
+      await client.query({
+        query: `
+          SELECT
+            toDate(order_placed_at) AS d,
+            count() AS orders,
+            countIf(picking_started_at IS NOT NULL) AS picked,
+            countIf(is_packed = 1) AS packed,
+            countIf(is_shipped = 1) AS shipped
+          FROM xv3.mart_order_fulfilment_journey
+          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+          GROUP BY d
+        `,
+        query_params: { from: range_.from, to: range_.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const dailyMap = new Map(dailyRows.map((r) => [String(r.d), r]));
+    const dailyVolume = [];
+    for (let d = range_.from; d <= range_.to; d = addDaysISO(d, 1)) {
+      const r = dailyMap.get(d);
+      dailyVolume.push({
+        date: d,
+        orders: toNum(r?.orders),
+        picked: toNum(r?.picked),
+        packed: toNum(r?.packed),
+        shipped: toNum(r?.shipped),
+      });
+    }
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
-        snapshotNote:
-          "Live inventory/posting snapshot for HRH Online — not affected by the Date Range or Channel filter above, since xv3.mart_level_of_inventory has no transaction date or sales-channel dimension.",
+        range,
+        current: { from: range_.from, to: range_.to },
+        methodologyNote:
+          "Real warehouse-ops timestamps from xv3.mart_order_fulfilment_journey (picking, QC, packing, dispatch) — HRH Online's own fulfillment operations across all 3 channels (this table has no store/channel column, but is exclusively HRH Online's, verified elsewhere). Pick Rate / picking_status from a different table is intentionally excluded — HMR MART runs its own WMS.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        barcodedItems: { value: barcoded },
-        postedItems: { value: posted },
-        postingRate: { value: postingRate },
-        barcodedToday: { value: barcodedToday },
-        soldRate: { value: soldRate },
+        ordersProcessed: { value: toNum(k.orders) },
+        avgPickTime: { value: toNum(k.avg_pick_seconds) },
+        avgQcTime: { value: toNum(k.avg_qc_seconds) },
+        avgPickToDispatch: { value: toNum(k.avg_pick_to_dispatch_seconds) },
       },
-      publishingFunnel: [
-        { label: "Barcoded", value: barcoded },
-        { label: "Posted", value: posted },
-        { label: "Sold", value: sold },
+      pickerPerformance,
+      qcThroughput,
+      pickToDispatchDistribution,
+      dailyVolume,
+      dataQuality: [
+        "picker_name/qc_station are excluded when null (1 order store-wide has no picker logged) rather than shown as a meaningless \"Unassigned\" row.",
+        "Pick-to-Dispatch duration is picking_started_at → dispatch_finalized_at, computed directly (not summed from intermediate stage columns), so a null in any one intermediate stage can't silently understate it.",
+        "This table has no store_name or sales_channel column — scoped to HRH Online implicitly (verified: this warehouse's own fulfillment ops, all 3 channels), not filterable by the page's Channel control.",
       ],
-      dailyBarcodingVolume,
-      productTable,
-      oldestUnposted,
     });
   } catch (err) {
     console.error("HRH Barcode Analytics API error:", err);
