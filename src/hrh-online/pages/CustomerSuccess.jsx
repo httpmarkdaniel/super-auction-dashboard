@@ -142,7 +142,10 @@ export default function CustomerSuccess({ filters }) {
           </KpiRow>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Status Breakdown" subtitle="All inquiries in the selected period">
+            <Panel
+              title="Status Breakdown"
+              subtitle={'"Did Not Respond" = the agent followed up and the customer went silent, not HMR failing to reply'}
+            >
               <DonutChart segments={statusSegments} centerValue={formatNum(data.kpis.totalInquiries.value)} centerLabel="Total Inquiries" />
             </Panel>
             <Panel title="Inquiries by Source" subtitle="Where the inquiry came in — chatbot, social media, calls">
