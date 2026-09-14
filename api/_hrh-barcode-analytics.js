@@ -15,12 +15,23 @@ const client = createClient({
 // timestamps: picker, QC station, pick/pack/dispatch durations) —
 // replaces the old xv3.mart_level_of_inventory-based version (barcoded/
 // posted/sold funnel). No store_name/sales_channel column exists on this
-// table at all, but per the same investigation already documented in
-// api/_hrh-orders-fulfillment.js and api/_hrh-pickup-delivery.js, this
-// table is exclusively HRH Online's own fulfillment operations (its own
-// warehouse handles all 3 channels), so no store filter is needed or
-// possible. Respects the page's Date Range filter via order_placed_at;
-// ignores the Channel filter (no channel dimension exists here).
+// table at all, but freshly re-verified (not just inherited from the old
+// Orders & Fulfillment comment) that it's exclusively HRH Online's own
+// fulfillment operations across all 3 channels:
+//   - The 6-digit order_ids (HMRPH Online's own website orders) match
+//     xv3.mart_xv3_order_report.order_number at 100% (1,532 of 1,532,
+//     zero exceptions) — that table is itself already established
+//     elsewhere as HMRPH Online-only.
+//   - The 18-digit order_ids (TikTok/Shopee's own external order-ID
+//     format, which never populate order_report) can't be checked that
+//     way, but their staging_location is the SAME physical warehouse
+//     code as the confirmed HRH Online orders — "HMR01-Dispatch-HMR-01"
+//     (a Shopee-courier subset shows "HMR01-Dispatch-SPX-01", SPX =
+//     Shopee Xpress) — i.e. picked/packed/dispatched out of the exact
+//     same facility, not a different store or branch.
+// So no store filter is needed or possible. Respects the page's Date
+// Range filter via order_placed_at; ignores the Channel filter (no
+// channel dimension exists here).
 //
 // "Pick Rate" / picking_status from xv3.mart_xv3_order_pickability is
 // still intentionally excluded (see Orders & Fulfillment's methodology
