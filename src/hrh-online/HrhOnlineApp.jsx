@@ -10,7 +10,7 @@ import BarcodeAnalytics from "./pages/BarcodeAnalytics";
 import InventoryAging from "./pages/InventoryAging";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
 import OrdersFulfillment from "./pages/OrdersFulfillment";
-import PickupAtStore from "./pages/PickupAtStore";
+import PickupAndDelivery from "./pages/PickupAndDelivery";
 import CustomerSuccess from "./pages/CustomerSuccess";
 import OperationalFlags from "./pages/OperationalFlags";
 import { OPERATIONAL_FLAGS_KEY } from "./nav";
@@ -27,7 +27,7 @@ const PAGES = {
   inventoryAging: InventoryAging,
   markdown: MarkdownAnalytics,
   fulfillment: OrdersFulfillment,
-  pickup: PickupAtStore,
+  pickup: PickupAndDelivery,
   customerSuccess: CustomerSuccess,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,
 };

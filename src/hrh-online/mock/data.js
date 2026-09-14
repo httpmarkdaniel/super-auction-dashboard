@@ -87,7 +87,7 @@ export const salesAnalytics = {
     { id: "bp5", product: "Linen Throw Pillow", category: "Home", gmv: 15_600, units: 14 },
   ],
   // Payment Type and Fulfillment/Checkout Method are deliberately separate
-  // dimensions — see PickupAtStore.jsx's own comment on the same rule.
+  // dimensions — see PickupAndDelivery.jsx's own comment on the same rule.
   paymentType: [
     { label: "GCash", value: 6_540_000, color: "#22304f" },
     { label: "Credit/Debit Card", value: 4_980_000, color: "#d99a3d" },
@@ -135,50 +135,6 @@ export const customerAnalytics = {
     { label: "Online Shopper", value: 4_920, color: "#22304f" },
     { label: "Online Bidder", value: 1_380, color: "#d99a3d" },
     { label: "Bidder / Shopper", value: 880, color: "#1baf7a" },
-  ],
-};
-
-
-// ---------------------------------------------------------------------
-// Pickup at Store — pickup is fulfillment behavior, not a payment type.
-// ---------------------------------------------------------------------
-export const pickupAtStore = {
-  kpis: {
-    pickupOrders: { value: 0, delta: null },
-    pickupGmv: { value: 0, delta: null },
-    pickupNmv: { value: 0, delta: null },
-    pickupShare: { value: 0, delta: null },
-    pickupAov: { value: 0, delta: null },
-  },
-  pickupVsDelivery: [
-    { label: "Pickup at Store", value: 0, color: "#d99a3d" },
-    { label: "Home Delivery", value: 0, color: "#22304f" },
-  ],
-  // Payment type WITHIN pickup orders only — still a separate dimension
-  // from the fulfillment method itself (see the top-level comment in this
-  // file and PickupAtStore.jsx).
-  paymentTypeWithinPickup: [
-    { label: "GCash", value: 0, color: "#22304f" },
-    { label: "Store Cash", value: 0, color: "#d99a3d" },
-    { label: "Credit/Debit Card", value: 0, color: "#1baf7a" },
-    { label: "Bank Transfer", value: 0, color: "#4a3aa7" },
-  ],
-  pickupByRedemptionStore: [
-    { label: "Manila", value: 0 },
-    { label: "Cebu", value: 0 },
-    { label: "Davao", value: 0 },
-    { label: "Pampanga", value: 0 },
-  ],
-  pickupByCategory: [
-    { label: "Apparel", value: 0, color: "#22304f" },
-    { label: "Footwear", value: 0, color: "#d99a3d" },
-    { label: "Bags", value: 0, color: "#1baf7a" },
-    { label: "Home", value: 0, color: "#4a3aa7" },
-  ],
-  pickupLifecycle: [
-    { label: "Ordered", value: 0 },
-    { label: "Ready for Pickup", value: 0 },
-    { label: "Picked Up", value: 0 },
   ],
 };
 

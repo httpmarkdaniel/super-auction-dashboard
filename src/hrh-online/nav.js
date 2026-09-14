@@ -23,7 +23,7 @@ export const NAV_GROUPS = [
     label: "Operations",
     items: [
       { key: "fulfillment", label: "Orders & Fulfillment" },
-      { key: "pickup", label: "Pickup at Store" },
+      { key: "pickup", label: "Pickup and Delivery" },
       { key: "customerSuccess", label: "Customer Success" },
     ],
   },
