@@ -183,6 +183,59 @@ export function FulfillmentTrendComboChart({ data, height = 260 }) {
   );
 }
 
+function RateTrendTooltip({ active, payload, label, barKeys }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span style={{ color: "#a3adba" }}>{p.name}:</span>
+          <span className="font-semibold">{barKeys.includes(p.dataKey) ? p.value.toLocaleString("en-PH") : `${p.value.toFixed(1)}%`}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Generic "count bars + rate line" combo — one or two count series on the
+// left axis (grouped, not stacked, when there are two — e.g. Received vs
+// Cancelled aren't parts of one whole the way Fulfilled/Cancelled/Awaiting
+// are) plus a single rate line (%) on the right axis. Used by Orders &
+// Fulfillment's Cancellation and Returns tabs so each gets the same
+// trend-chart treatment as Fulfillment Performance without duplicating
+// that chart's stacked-parts semantics, which don't apply here. `bars`:
+// [{ key, name, color }] (1-2 entries). `rateKey`/`rateName`: the line.
+export function RateTrendComboChart({ data, bars, rateKey, rateName, height = 260 }) {
+  const barKeys = bars.map((b) => b.key);
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={hrh.border} vertical={false} />
+        <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <YAxis yAxisId="count" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
+        <YAxis
+          yAxisId="rate"
+          orientation="right"
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={(v) => `${v}%`}
+          domain={[0, 100]}
+          width={44}
+        />
+        <Tooltip content={<RateTrendTooltip barKeys={barKeys} />} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        {bars.map((b) => (
+          <Bar key={b.key} yAxisId="count" dataKey={b.key} name={b.name} fill={b.color} radius={[2, 2, 0, 0]} maxBarSize={24} />
+        ))}
+        <Line yAxisId="rate" type="monotone" dataKey={rateKey} name={rateName} stroke={hrh.accent} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 // Area trend for same-unit series on one shared axis (e.g. Order Value vs.
 // Discount Value). `stacked` (default false) draws each area independently,
 // overlapping with partial opacity so both are readable at once — turn it

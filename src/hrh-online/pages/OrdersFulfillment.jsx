@@ -5,7 +5,7 @@ import DataTable from "../components/DataTable";
 import Modal, { ModalRow } from "../components/Modal";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { DonutChart, FulfillmentTrendComboChart } from "../components/Charts";
+import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart } from "../components/Charts";
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
@@ -316,21 +316,43 @@ export default function OrdersFulfillment({ filters }) {
             action={<TrendBucketPills value={cancellationBucket} onChange={setCancellationBucket} />}
             className="mb-4"
           >
-            <DataTable
-              columns={[
-                { key: "dateLabel", label: "Period" },
-                { key: "received", label: "Orders Received", render: (r) => formatNum(r.received) },
-                { key: "cancelled", label: "Cancelled", render: (r) => formatNum(r.cancelled) },
-                { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatPct(r.cancellationRate) },
+            <RateTrendComboChart
+              data={cancellationPerf}
+              bars={[
+                { key: "received", name: "Orders Received", color: hrh.blue },
+                { key: "cancelled", name: "Cancelled", color: hrh.bad },
               ]}
-              rows={cancellationPerf}
-              emptyLabel="No orders in this period."
+              rateKey="cancellationRate"
+              rateName="Cancellation Rate"
             />
+            <div className="mt-3">
+              <DataTable
+                columns={[
+                  { key: "dateLabel", label: "Period" },
+                  { key: "received", label: "Orders Received", render: (r) => formatNum(r.received) },
+                  { key: "cancelled", label: "Cancelled", render: (r) => formatNum(r.cancelled) },
+                  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatPct(r.cancellationRate) },
+                ]}
+                rows={cancellationPerf}
+                emptyLabel="No orders in this period."
+              />
+            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
             <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of all real cancellations">
               <DonutChart segments={cancelledByMethodSegments} centerValue={formatNum(data.cancellations.total)} centerLabel="Cancelled Orders" />
+              <div className="mt-3">
+                <DataTable
+                  columns={[
+                    { key: "method", label: "Method" },
+                    { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
+                    { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
+                  ]}
+                  rows={data.cancellations?.byFulfillmentMethod || []}
+                  emptyLabel="No cancellations in this period."
+                />
+              </div>
             </Panel>
             <Panel title="Cancellation Reasons" subtitle="Click a row for the underlying orders — 7-category grouping">
               <DataTable
@@ -364,22 +386,45 @@ export default function OrdersFulfillment({ filters }) {
             action={<TrendBucketPills value={returnsBucket} onChange={setReturnsBucket} />}
             className="mb-4"
           >
-            <DataTable
-              columns={[
-                { key: "dateLabel", label: "Period" },
-                { key: "salesCount", label: "Sales", render: (r) => formatNum(r.salesCount) },
-                { key: "returns", label: "Returns", render: (r) => formatNum(r.returns) },
-                { key: "returnRateCount", label: "Rate (count)", render: (r) => formatPct(r.returnRateCount) },
-                { key: "returnRateValue", label: "Rate (value)", render: (r) => formatPct(r.returnRateValue) },
+            <RateTrendComboChart
+              data={returnsPerf}
+              bars={[
+                { key: "salesCount", name: "Sales", color: hrh.blue },
+                { key: "returns", name: "Returns", color: hrh.bad },
               ]}
-              rows={returnsPerf}
-              emptyLabel="No sales or returns in this period."
+              rateKey="returnRateCount"
+              rateName="Return Rate (count)"
             />
+            <div className="mt-3">
+              <DataTable
+                columns={[
+                  { key: "dateLabel", label: "Period" },
+                  { key: "salesCount", label: "Sales", render: (r) => formatNum(r.salesCount) },
+                  { key: "returns", label: "Returns", render: (r) => formatNum(r.returns) },
+                  { key: "returnRateCount", label: "Rate (count)", render: (r) => formatPct(r.returnRateCount) },
+                  { key: "returnRateValue", label: "Rate (value)", render: (r) => formatPct(r.returnRateValue) },
+                ]}
+                rows={returnsPerf}
+                emptyLabel="No sales or returns in this period."
+              />
+            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
             <Panel title="Returns by Fulfillment Method" subtitle="Pickup vs Delivery, via order_no → checkout_method">
               <DonutChart segments={returnsByMethodSegments} centerValue={formatNum(data.returns.kpis.totalReturns.value)} centerLabel="Returns" />
+              <div className="mt-3">
+                <DataTable
+                  columns={[
+                    { key: "method", label: "Method" },
+                    { key: "count", label: "Returns", render: (r) => formatNum(r.count) },
+                    { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
+                    { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
+                  ]}
+                  rows={data.returns?.byFulfillmentMethod || []}
+                  emptyLabel="No returns in this period."
+                />
+              </div>
             </Panel>
             <Panel title="Return Reasons" subtitle="Click a row for the underlying transactions — 10-category grouping">
               <DataTable
