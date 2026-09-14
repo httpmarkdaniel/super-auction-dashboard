@@ -25,16 +25,35 @@ function isDateRangeReady(dateRange) {
 
 // A real tapering funnel — plain SVG polygons, no new chart dependency.
 // Each stage is a trapezoid: top edge = this stage's share of the first
-// stage, bottom edge = the NEXT stage's share (so the shape actually narrows
-// stage-to-stage instead of just being a shorter bar); the last stage is a
-// straight-sided band since it has no next stage to taper into. Centered
-// horizontally, contiguous bands (no gaps) for a single continuous funnel
-// silhouette. Labels/qty/conversion sit outside the shape (left of a
-// pointer line) rather than on top of the fill, so they stay legible
-// regardless of the band's color or how thin it gets.
-const VB_W = 520;
-const BAND_H = 76;
-const MIN_FRAC = 0.05; // keep a sliver visible even for a near-zero stage
+// stage, bottom edge = the NEXT stage's share (so the shape actually
+// narrows stage-to-stage, proportional to the real counts); the last stage
+// has no next stage to taper into, so it's drawn as a straight-sided band.
+// Centered horizontally, contiguous bands (no gaps) for one continuous
+// silhouette. Deliberately no text inside the shape — a label like "Posted
+// (Listed for Sale)" would overflow a narrow bottom-of-funnel trapezoid and
+// spill across neighboring bands (SVG doesn't wrap or clip text by
+// default); all labels/qty/conversion live in the legend to the right
+// instead, which stays legible no matter how thin a band gets.
+//
+// width/height are the SVG's real intrinsic pixel size; CSS then scales it
+// responsively (width: 100%, height: auto) — the standard safe pattern for
+// a scalable inline SVG, rather than relying on viewBox-only sizing.
+const VB_W = 280;
+const BAND_H = 56;
+const MIN_FRAC = 0.02; // avoid a literal zero-width (degenerate) polygon; a thin sliver is fine — a real funnel is allowed to nearly close
+
+// Single-hue sequential scale (light -> dark) so the funnel reads as one
+// shape narrowing in both size AND color depth, not unrelated rainbow
+// blocks — hrh.blue (top) down to hrh.navy (bottom).
+function lerpColor(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+function funnelColor(i, n) {
+  return lerpColor(hrh.blue, hrh.navy, n > 1 ? i / (n - 1) : 0);
+}
 
 function LifecycleFunnel({ stages }) {
   const firstQty = stages[0]?.qty || 0;
@@ -43,8 +62,13 @@ function LifecycleFunnel({ stages }) {
   const cx = VB_W / 2;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
-      <svg viewBox={`0 0 ${VB_W} ${vbH}`} className="w-full" style={{ maxWidth: 420 }} preserveAspectRatio="xMidYMid meet">
+    <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-5 items-center">
+      <svg
+        viewBox={`0 0 ${VB_W} ${vbH}`}
+        width={VB_W}
+        height={vbH}
+        style={{ width: "100%", maxWidth: 220, height: "auto", display: "block", margin: "0 auto" }}
+      >
         {stages.map((s, i) => {
           const topW = frac(s.qty) * VB_W;
           const bottomW = i < stages.length - 1 ? frac(stages[i + 1].qty) * VB_W : topW;
@@ -58,38 +82,31 @@ function LifecycleFunnel({ stages }) {
           ]
             .map((p) => p.join(","))
             .join(" ");
-          return (
-            <g key={s.key}>
-              <polygon points={points} fill={hrh.series[i % hrh.series.length]} stroke={hrh.surface} strokeWidth={2} />
-              <text x={cx} y={y0 + BAND_H / 2 - 6} textAnchor="middle" fontSize="15" fontWeight="600" fill="#fff">
-                {formatNum(s.qty)}
-              </text>
-              <text x={cx} y={y0 + BAND_H / 2 + 14} textAnchor="middle" fontSize="11" fill="rgba(255,255,255,0.85)">
-                {s.label}
-              </text>
-            </g>
-          );
+          return <polygon key={s.key} points={points} fill={funnelColor(i, stages.length)} stroke={hrh.surface} strokeWidth={2} />;
         })}
       </svg>
 
-      <div className="space-y-2 lg:pt-2 lg:min-w-[180px]">
+      <div className="space-y-3 w-full">
         {stages.map((s, i) => (
-          <div key={s.key} className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: hrh.series[i % hrh.series.length] }} />
-            <span className="text-[11.5px]" style={{ color: hrh.ink2 }}>
-              {i === 0 ? (
-                <span style={{ color: hrh.muted }}>Cohort start</span>
-              ) : s.conversionFromPrev !== null && s.conversionFromPrev !== undefined ? (
-                <>
-                  <span className="font-semibold" style={{ color: hrh.ink }}>
-                    {formatPct(s.conversionFromPrev)}
-                  </span>{" "}
-                  of {stages[i - 1].label}
-                </>
-              ) : (
-                "—"
-              )}
-            </span>
+          <div key={s.key} className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: funnelColor(i, stages.length) }} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
+                  {s.label}
+                </span>
+                <span className="text-[13px] font-semibold" style={{ color: hrh.ink }}>
+                  {formatNum(s.qty)}
+                </span>
+              </div>
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                {i === 0
+                  ? "Cohort start"
+                  : s.conversionFromPrev !== null && s.conversionFromPrev !== undefined
+                    ? `${formatPct(s.conversionFromPrev)} of ${stages[i - 1].label}`
+                    : "—"}
+              </div>
+            </div>
           </div>
         ))}
       </div>
