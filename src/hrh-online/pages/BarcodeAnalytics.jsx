@@ -23,28 +23,25 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-// A real tapering funnel — plain SVG polygons, no new chart dependency.
-// Each stage is a trapezoid: top edge = this stage's share of the first
-// stage, bottom edge = the NEXT stage's share (so the shape actually
-// narrows stage-to-stage, proportional to the real counts); the last stage
-// has no next stage to taper into, so it's drawn as a straight-sided band.
-// Centered horizontally, contiguous bands (no gaps) for one continuous
-// silhouette. Deliberately no text inside the shape — a label like "Posted
-// (Listed for Sale)" would overflow a narrow bottom-of-funnel trapezoid and
-// spill across neighboring bands (SVG doesn't wrap or clip text by
-// default); all labels/qty/conversion live in the legend to the right
-// instead, which stays legible no matter how thin a band gets.
+// A real funnel — centered, width-proportional blocks stacked top to
+// bottom, plain CSS (no SVG, no polygon coordinate math). Each block's
+// width = its stage's count as a share of the first stage's count, so the
+// stack visibly narrows in step with the real conversion. A previous SVG
+// version computed each stage as a trapezoid tapering into the next
+// stage's width via raw polygon points; that math (and long labels
+// rendered as centered SVG <text>, which SVG doesn't wrap or clip) was
+// fragile and rendered wrong. This version only ever sets a plain
+// percentage `width` + `margin: 0 auto`, which cannot mis-render.
 //
-// width/height are the SVG's real intrinsic pixel size; CSS then scales it
-// responsively (width: 100%, height: auto) — the standard safe pattern for
-// a scalable inline SVG, rather than relying on viewBox-only sizing.
-const VB_W = 280;
-const BAND_H = 56;
-const MIN_FRAC = 0.02; // avoid a literal zero-width (degenerate) polygon; a thin sliver is fine — a real funnel is allowed to nearly close
+// Numbers live inside each block (always short, always fits); the
+// descriptive label and conversion-from-previous-stage sit in normal
+// document flow directly underneath each block — never overlapping the
+// shape, never at risk of overflow, regardless of how narrow a stage gets.
+const MIN_WIDTH_PCT = 14; // keep even a near-zero stage visible as a real block, not a sliver
 
 // Single-hue sequential scale (light -> dark) so the funnel reads as one
-// shape narrowing in both size AND color depth, not unrelated rainbow
-// blocks — hrh.blue (top) down to hrh.navy (bottom).
+// shape, not unrelated rainbow blocks — hrh.blue (top) down to hrh.navy
+// (bottom).
 function lerpColor(a, b, t) {
   const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
   const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
@@ -57,59 +54,40 @@ function funnelColor(i, n) {
 
 function LifecycleFunnel({ stages }) {
   const firstQty = stages[0]?.qty || 0;
-  const frac = (qty) => (firstQty > 0 ? Math.max(MIN_FRAC, Math.min(1, qty / firstQty)) : MIN_FRAC);
-  const vbH = stages.length * BAND_H;
-  const cx = VB_W / 2;
+  const widthPct = (qty) => (firstQty > 0 ? Math.max(MIN_WIDTH_PCT, Math.min(100, (qty / firstQty) * 100)) : MIN_WIDTH_PCT);
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-5 items-center">
-      <svg
-        viewBox={`0 0 ${VB_W} ${vbH}`}
-        width={VB_W}
-        height={vbH}
-        style={{ width: "100%", maxWidth: 220, height: "auto", display: "block", margin: "0 auto" }}
-      >
-        {stages.map((s, i) => {
-          const topW = frac(s.qty) * VB_W;
-          const bottomW = i < stages.length - 1 ? frac(stages[i + 1].qty) * VB_W : topW;
-          const y0 = i * BAND_H;
-          const y1 = y0 + BAND_H;
-          const points = [
-            [cx - topW / 2, y0],
-            [cx + topW / 2, y0],
-            [cx + bottomW / 2, y1],
-            [cx - bottomW / 2, y1],
-          ]
-            .map((p) => p.join(","))
-            .join(" ");
-          return <polygon key={s.key} points={points} fill={funnelColor(i, stages.length)} stroke={hrh.surface} strokeWidth={2} />;
-        })}
-      </svg>
-
-      <div className="space-y-3 w-full">
-        {stages.map((s, i) => (
-          <div key={s.key} className="flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: funnelColor(i, stages.length) }} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
-                  {s.label}
-                </span>
-                <span className="text-[13px] font-semibold" style={{ color: hrh.ink }}>
-                  {formatNum(s.qty)}
-                </span>
-              </div>
-              <div className="text-[11px]" style={{ color: hrh.muted }}>
-                {i === 0
-                  ? "Cohort start"
-                  : s.conversionFromPrev !== null && s.conversionFromPrev !== undefined
-                    ? `${formatPct(s.conversionFromPrev)} of ${stages[i - 1].label}`
-                    : "—"}
-              </div>
+    <div className="max-w-md mx-auto">
+      {stages.map((s, i) => (
+        <div key={s.key} className={i > 0 ? "mt-3" : ""}>
+          <div
+            className="mx-auto flex items-center justify-center text-white font-bold"
+            style={{
+              width: `${widthPct(s.qty)}%`,
+              minWidth: 92,
+              height: 58,
+              background: funnelColor(i, stages.length),
+              borderRadius: 8,
+              fontSize: 17,
+              clipPath: "polygon(5% 0%, 95% 0%, 100% 100%, 0% 100%)",
+            }}
+          >
+            {formatNum(s.qty)}
+          </div>
+          <div className="text-center mt-1.5">
+            <div className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
+              {s.label}
+            </div>
+            <div className="text-[11px]" style={{ color: hrh.muted }}>
+              {i === 0
+                ? "Cohort start"
+                : s.conversionFromPrev !== null && s.conversionFromPrev !== undefined
+                  ? `${formatPct(s.conversionFromPrev)} of ${stages[i - 1].label}`
+                  : "—"}
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      ))}
     </div>
   );
 }

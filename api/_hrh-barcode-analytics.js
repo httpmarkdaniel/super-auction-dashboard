@@ -255,7 +255,13 @@ async function computeLifecycleFunnel(from, to) {
     }
   }
 
-  const safeDiv = (a, b) => (b > 0 ? a / b : null);
+  // *100 — every other percentage this codebase sends the frontend
+  // (completionRate, cancellationRate, returnRateByCount, sharePct, ...in
+  // api/_hrh-orders-fulfillment.js) is pre-multiplied server-side, since
+  // formatPct() just appends "%" to whatever number it's given rather than
+  // multiplying by 100 itself. This was missed here originally, which
+  // rendered a true 100% conversion as "1.0%".
+  const safeDiv = (a, b) => (b > 0 ? (a / b) * 100 : null);
 
   return {
     grain: "1 row = 1 barcoded unit (xv3.mart_level_of_inventory, store_name = 'HRH ONLINE')",
