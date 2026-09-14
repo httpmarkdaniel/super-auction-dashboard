@@ -1,41 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
-import DataTable from "../components/DataTable";
-import TrendBucketPills from "../components/TrendBucketPills";
-import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatNum, formatPct } from "../format";
-import { bucketRows } from "../trendBucket";
-
-function formatDuration(seconds) {
-  if (!seconds || seconds <= 0) return "—";
-  const mins = seconds / 60;
-  if (mins < 60) return `${Math.round(mins)}m`;
-  const hrs = mins / 60;
-  if (hrs < 48) return `${hrs.toFixed(1)}h`;
-  return `${(hrs / 24).toFixed(1)}d`;
-}
 
 function formatDays(days) {
   if (days === null || days === undefined) return "—";
   if (days < 1) return `${Math.round(days * 24)}h`;
   return `${days.toFixed(1)}d`;
 }
-
-const PICKER_COLUMNS = [
-  { key: "picker", label: "Picker" },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "items", label: "Items Picked", render: (r) => formatNum(r.items) },
-  { key: "avgPickSeconds", label: "Avg Pick Time", render: (r) => formatDuration(r.avgPickSeconds) },
-];
-
-const QC_COLUMNS = [
-  { key: "station", label: "QC Station" },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "avgQcSeconds", label: "Avg QC Time", render: (r) => formatDuration(r.avgQcSeconds) },
-];
 
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
@@ -51,10 +24,7 @@ function isDateRangeReady(dateRange) {
 }
 
 // Simple horizontal progressive-bar funnel — no new chart dependency, just
-// width-proportional bars + conversion-from-previous-stage labels. Same
-// component as Orders & Fulfillment's Warehouse Operations tab (kept as a
-// local duplicate here, matching this file's existing duplication of
-// PICKER_COLUMNS/QC_COLUMNS/formatDuration rather than a new shared module).
+// width-proportional bars + conversion-from-previous-stage labels.
 function LifecycleFunnelBars({ stages }) {
   const maxQty = Math.max(1, ...stages.map((s) => s.qty));
   return (
@@ -90,31 +60,24 @@ function LifecycleFunnelBars({ stages }) {
   );
 }
 
-// Real ClickHouse-backed Barcode Analytics — rebuilt on
-// xv3.mart_order_fulfilment_journey (real warehouse-ops timestamps:
-// picker, QC station, pick/pack/dispatch durations), replacing the old
-// xv3.mart_level_of_inventory-based barcoded/posted/sold funnel. See
-// api/_hrh-barcode-analytics.js for the full methodology note. Respects
-// the page's Date Range filter (order_placed_at); the Channel filter is
-// hidden — this table has no channel dimension at all.
+// Barcode Analytics — scoped to ONLY the ASN -> Barcoded -> Posted -> Sold
+// inventory lifecycle funnel (api/_hrh-barcode-analytics.js's
+// computeLifecycleFunnel). The picker/QC/pick-to-dispatch content that used
+// to live on this page stays on Orders & Fulfillment's "Warehouse
+// Operations" sub-tab only — this page no longer duplicates it.
 //
-// Restored as its own sidebar page (it briefly lived only inside Orders &
-// Fulfillment's "Warehouse Operations" sub-tab) — kept alongside that tab
-// intentionally rather than removing it, per explicit instruction, so the
-// same data/report (?report=barcodeAnalytics) is now reachable from both
-// places.
-//
-// Also renders the ASN -> Barcoded -> Posted -> Sold inventory lifecycle
-// funnel (api/_hrh-barcode-analytics.js's computeLifecycleFunnel) — see
-// that function's own comment for the validation this was built on
-// (Put-away omitted as unreliable; "Posted" uses
+// Still fetches ?report=barcodeAnalytics (same endpoint, unchanged) but
+// only reads the `lifecycleFunnel` field from the response. See
+// computeLifecycleFunnel()'s own comment in that file for the validation
+// this was built on (Put-away omitted as unreliable; "Posted" uses
 // cms.mart_cms_posted_inventory_report, not cms_hmrph_posting_quantity).
+// No Channel dimension exists for this data — the Channel filter is hidden
+// for this page (see HrhOnlineApp.jsx's hideChannelFilter).
 export default function BarcodeAnalytics({ filters }) {
   const { dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [trendBucket, setTrendBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -144,7 +107,7 @@ export default function BarcodeAnalytics({ filters }) {
     return () => controller.abort();
   }, [params, ready, load]);
 
-  const dailyVolume = bucketRows(data?.dailyVolume, trendBucket, ["orders", "picked", "packed", "shipped"]);
+  const funnel = data?.lifecycleFunnel;
 
   return (
     <div>
@@ -156,120 +119,57 @@ export default function BarcodeAnalytics({ filters }) {
       {ready && loading && !data && <LoadingState label="Loading Barcode Analytics…" />}
       {error && <ErrorState label={`Couldn't load Barcode Analytics: ${error}`} />}
 
-      {data && !error && (
-        <>
-          <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            {data.meta?.methodologyNote}
-          </div>
+      {funnel && !error && (
+        <Panel
+          title="Inventory Lifecycle Funnel"
+          subtitle={`ASN → Barcoded → Posted → Sold — cohort received in this period, tracked to date (${funnel.cohort?.from} to ${funnel.cohort?.to})`}
+        >
+          <LifecycleFunnelBars stages={funnel.stages} />
 
-          <KpiRow>
-            <KpiCard label="Orders Processed" value={formatNum(data.kpis.ordersProcessed.value)} />
-            <KpiCard label="Avg Pick Time" value={formatDuration(data.kpis.avgPickTime.value)} sub="pick → QC" />
-            <KpiCard label="Avg QC Time" value={formatDuration(data.kpis.avgQcTime.value)} sub="QC → waybill" />
-            <KpiCard label="Avg Pick-to-Dispatch" value={formatDuration(data.kpis.avgPickToDispatch.value)} sub="picking start → dispatch" />
-          </KpiRow>
-
-          <Panel
-            title="Daily Fulfillment Volume"
-            subtitle="Orders placed / picked / packed / shipped, by order date"
-            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
-            className="mb-4"
-          >
-            <BarComparisonChart
-              data={dailyVolume}
-              xKey="dateLabel"
-              valueFormatter={formatNum}
-              series={[
-                { key: "orders", name: "Orders Placed", color: hrh.series[0] },
-                { key: "picked", name: "Picked", color: hrh.blue },
-                { key: "packed", name: "Packed", color: hrh.series[2] },
-                { key: "shipped", name: "Shipped", color: hrh.accent },
-              ]}
-            />
-          </Panel>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Picker Performance" subtitle="Ranked by orders picked">
-              <DataTable columns={PICKER_COLUMNS} rows={data.pickerPerformance} paginate pageSize={10} emptyLabel="No picking activity in this period." />
-            </Panel>
-            <Panel title="QC Station Throughput" subtitle="Ranked by orders processed">
-              <DataTable columns={QC_COLUMNS} rows={data.qcThroughput} emptyLabel="No QC activity in this period." />
-            </Panel>
-          </div>
-
-          <Panel title="Pick-to-Dispatch Time Distribution" subtitle="Picking start to dispatch finalized" className="mb-4">
-            <BarComparisonChart
-              data={data.pickToDispatchDistribution}
-              xKey="label"
-              valueFormatter={formatNum}
-              series={[{ key: "value", name: "Orders", color: hrh.accent }]}
-            />
-          </Panel>
-
-          {data.lifecycleFunnel && (
-            <Panel
-              title="Inventory Lifecycle Funnel"
-              subtitle={`ASN → Barcoded → Posted → Sold — cohort received in this period, tracked to date (${data.lifecycleFunnel.cohort?.from} to ${data.lifecycleFunnel.cohort?.to})`}
-              className="mb-4"
-            >
-              <LifecycleFunnelBars stages={data.lifecycleFunnel.stages} />
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
-                <div>
-                  <div className="text-[11px]" style={{ color: hrh.muted }}>
-                    Received → Barcoded
-                  </div>
-                  <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
-                    {(() => {
-                      const hrs = data.lifecycleFunnel.cycleTimeDays?.receivedToBarcodedHours;
-                      return hrs === null || hrs === undefined ? "—" : formatDays(hrs / 24);
-                    })()}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px]" style={{ color: hrh.muted }}>
-                    Barcoded → Posted
-                  </div>
-                  <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
-                    {formatDays(data.lifecycleFunnel.cycleTimeDays?.barcodedToPostedDays ?? null)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px]" style={{ color: hrh.muted }}>
-                    Posted → First Sale
-                  </div>
-                  <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
-                    {formatDays(data.lifecycleFunnel.cycleTimeDays?.postedToFirstSaleDays ?? null)}
-                  </div>
-                </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
+            <div>
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                Received → Barcoded
               </div>
+              <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                {(() => {
+                  const hrs = funnel.cycleTimeDays?.receivedToBarcodedHours;
+                  return hrs === null || hrs === undefined ? "—" : formatDays(hrs / 24);
+                })()}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                Barcoded → Posted
+              </div>
+              <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                {formatDays(funnel.cycleTimeDays?.barcodedToPostedDays ?? null)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                Posted → First Sale
+              </div>
+              <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                {formatDays(funnel.cycleTimeDays?.postedToFirstSaleDays ?? null)}
+              </div>
+            </div>
+          </div>
 
-              {data.lifecycleFunnel.unmatched?.soldButNeverPosted > 0 && (
-                <div className="text-[11px] mt-3" style={{ color: hrh.muted }}>
-                  {formatNum(data.lifecycleFunnel.unmatched.soldButNeverPosted)} unit(s) in this cohort sold with no matching "Published" record — a real but unexplained gap between the sales data and the CMS listing data, not folded into the Posted count above.
-                </div>
-              )}
-
-              {data.lifecycleFunnel.dataQuality?.length > 0 && (
-                <ul className="list-disc pl-5 space-y-1.5 text-[11px] mt-3" style={{ color: hrh.ink2 }}>
-                  {data.lifecycleFunnel.dataQuality.map((note, i) => (
-                    <li key={i}>{note}</li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
+          {funnel.unmatched?.soldButNeverPosted > 0 && (
+            <div className="text-[11px] mt-3" style={{ color: hrh.muted }}>
+              {formatNum(funnel.unmatched.soldButNeverPosted)} unit(s) in this cohort sold with no matching "Published" record — a real but unexplained gap between the sales data and the CMS listing data, not folded into the Posted count above.
+            </div>
           )}
 
-          {data.dataQuality?.length > 0 && (
-            <Panel title="Data Quality Notes">
-              <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: hrh.ink2 }}>
-                {data.dataQuality.map((note, i) => (
-                  <li key={i}>{note}</li>
-                ))}
-              </ul>
-            </Panel>
+          {funnel.dataQuality?.length > 0 && (
+            <ul className="list-disc pl-5 space-y-1.5 text-[11px] mt-3" style={{ color: hrh.ink2 }}>
+              {funnel.dataQuality.map((note, i) => (
+                <li key={i}>{note}</li>
+              ))}
+            </ul>
           )}
-        </>
+        </Panel>
       )}
     </div>
   );

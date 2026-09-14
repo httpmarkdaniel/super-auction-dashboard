@@ -15,13 +15,13 @@ export const NAV_GROUPS = [
     items: [
       { key: "productAnalytics", label: "Product Analytics" },
       { key: "markdown", label: "Markdown Analytics" },
+      { key: "barcodeAnalytics", label: "Barcode Analytics" },
     ],
   },
   {
     label: "Operations",
     items: [
       { key: "fulfillment", label: "Orders & Fulfillment" },
-      { key: "barcodeAnalytics", label: "Barcode Analytics" },
       { key: "pickup", label: "Pickup and Delivery" },
       { key: "customerSuccess", label: "Customer Success" },
     ],
