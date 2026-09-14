@@ -127,7 +127,7 @@ export function SalesTrendComboChart({ data, height = 260 }) {
             in hrh.series[2] instead — blue/teal stacked bars stay clearly
             distinct from the orange GMV line. */}
         <Bar yAxisId="orders" dataKey="orders" name="Orders" stackId="volume" fill={hrh.blue} radius={[0, 0, 0, 0]} maxBarSize={24} />
-        <Bar yAxisId="orders" dataKey="units" name="Units" stackId="volume" fill={hrh.series[2]} radius={[2, 2, 0, 0]} maxBarSize={24} />
+        <Bar yAxisId="orders" dataKey="units" name="Units Sold" stackId="volume" fill={hrh.series[2]} radius={[2, 2, 0, 0]} maxBarSize={24} />
         <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>

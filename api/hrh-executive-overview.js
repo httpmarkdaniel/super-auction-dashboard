@@ -110,6 +110,9 @@ function enumerateDatesISO(from, to) {
   }
   return dates;
 }
+function daysInRange(from, to) {
+  return enumerateDatesISO(from, to).length;
+}
 
 export default async function handler(req, res) {
   try {
@@ -160,6 +163,11 @@ export default async function handler(req, res) {
     const prevUnits = toNum(k.prev_units);
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
+    // Average Sales / Day — GMV spread evenly across the window's calendar
+    // days (not just days with sales), so a slow custom range reads as
+    // genuinely slower rather than averaging only its active days.
+    const curAvgSalesPerDay = safeDivide(curGmv, daysInRange(current.from, current.to));
+    const prevAvgSalesPerDay = safeDivide(prevGmv, daysInRange(previous.from, previous.to));
 
     // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
     // the CURRENT window only. Zero-filled below so a day with no sales
@@ -408,6 +416,7 @@ export default async function handler(req, res) {
         aov: { value: curAov, previous: prevAov, delta: pctDelta(curAov, prevAov) },
         orders: { value: curOrders, previous: prevOrders, delta: pctDelta(curOrders, prevOrders) },
         units: { value: curUnits, previous: prevUnits, delta: pctDelta(curUnits, prevUnits) },
+        avgSalesPerDay: { value: curAvgSalesPerDay, previous: prevAvgSalesPerDay, delta: pctDelta(curAvgSalesPerDay, prevAvgSalesPerDay) },
       },
       salesTrend,
       channelMix,

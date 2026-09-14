@@ -16,6 +16,7 @@ const KPI_CARDS = [
   { key: "aov", label: "AOV", formatter: formatPeso },
   { key: "orders", label: "Orders", formatter: formatNum },
   { key: "units", label: "Units", formatter: formatNum },
+  { key: "avgSalesPerDay", label: "Avg Sales / Day", formatter: formatPeso },
 ];
 
 // "Compare to" — an explicit, independent choice of comparison basis for
@@ -193,7 +194,7 @@ export default function ExecutiveOverview({ filters }) {
 
           <Panel
             title="Sales Trend"
-            subtitle={`GMV, Orders, and Units for the selected period, bucketed by ${trendBucket}`}
+            subtitle={`GMV, Orders, and Units Sold for the selected period, bucketed by ${trendBucket}`}
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
