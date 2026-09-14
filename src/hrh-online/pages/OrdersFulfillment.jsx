@@ -325,18 +325,6 @@ export default function OrdersFulfillment({ filters }) {
               rateKey="cancellationRate"
               rateName="Cancellation Rate"
             />
-            <div className="mt-3">
-              <DataTable
-                columns={[
-                  { key: "dateLabel", label: "Period" },
-                  { key: "received", label: "Orders Received", render: (r) => formatNum(r.received) },
-                  { key: "cancelled", label: "Cancelled", render: (r) => formatNum(r.cancelled) },
-                  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatPct(r.cancellationRate) },
-                ]}
-                rows={cancellationPerf}
-                emptyLabel="No orders in this period."
-              />
-            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
@@ -395,19 +383,6 @@ export default function OrdersFulfillment({ filters }) {
               rateKey="returnRateCount"
               rateName="Return Rate (count)"
             />
-            <div className="mt-3">
-              <DataTable
-                columns={[
-                  { key: "dateLabel", label: "Period" },
-                  { key: "salesCount", label: "Sales", render: (r) => formatNum(r.salesCount) },
-                  { key: "returns", label: "Returns", render: (r) => formatNum(r.returns) },
-                  { key: "returnRateCount", label: "Rate (count)", render: (r) => formatPct(r.returnRateCount) },
-                  { key: "returnRateValue", label: "Rate (value)", render: (r) => formatPct(r.returnRateValue) },
-                ]}
-                rows={returnsPerf}
-                emptyLabel="No sales or returns in this period."
-              />
-            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
