@@ -166,8 +166,10 @@ export default async function handler(req, res) {
     // Average Sales / Day — GMV spread evenly across the window's calendar
     // days (not just days with sales), so a slow custom range reads as
     // genuinely slower rather than averaging only its active days.
-    const curAvgSalesPerDay = safeDivide(curGmv, daysInRange(current.from, current.to));
-    const prevAvgSalesPerDay = safeDivide(prevGmv, daysInRange(previous.from, previous.to));
+    const curDayCount = daysInRange(current.from, current.to);
+    const prevDayCount = daysInRange(previous.from, previous.to);
+    const curAvgSalesPerDay = safeDivide(curGmv, curDayCount);
+    const prevAvgSalesPerDay = safeDivide(prevGmv, prevDayCount);
 
     // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
     // the CURRENT window only. Zero-filled below so a day with no sales
@@ -220,6 +222,33 @@ export default async function handler(req, res) {
       })
     ).json();
     const channelGmv = new Map(channelRows.map((r) => [r.ch, toNum(r.gmv)]));
+
+    // Avg Sales/Day by Channel — same "always all 3 real channels" pattern
+    // as Sales by Channel above, so the 3 channels are visible side by side
+    // without switching the page's Channel filter. Reuses channelGmv (cur)
+    // and queries the comparison window's per-channel GMV the same way.
+    const prevChannelRows = await (
+      await client.query({
+        query: `
+          SELECT sales_channel AS ch, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel IN {allChannels:Array(String)}
+            AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}
+          GROUP BY sales_channel
+        `,
+        query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], prevFrom: previous.from, prevTo: previous.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const prevChannelGmv = new Map(prevChannelRows.map((r) => [r.ch, toNum(r.gmv)]));
+    const avgSalesPerDayByChannel = CHANNEL_MAP["All Channels"].map((ch) => {
+      const curChGmv = channelGmv.get(ch) || 0;
+      const prevChGmv = prevChannelGmv.get(ch) || 0;
+      const curAvg = safeDivide(curChGmv, curDayCount);
+      const prevAvg = safeDivide(prevChGmv, prevDayCount);
+      return { channel: ch, value: curAvg, previous: prevAvg, delta: pctDelta(curAvg, prevAvg) };
+    });
     const channelMix =
       channel === "All Channels"
         ? CHANNEL_MAP["All Channels"].map((ch) => ({
@@ -419,6 +448,7 @@ export default async function handler(req, res) {
         avgSalesPerDay: { value: curAvgSalesPerDay, previous: prevAvgSalesPerDay, delta: pctDelta(curAvgSalesPerDay, prevAvgSalesPerDay) },
       },
       salesTrend,
+      avgSalesPerDayByChannel,
       channelMix,
       orderStatus,
       customerSegments,

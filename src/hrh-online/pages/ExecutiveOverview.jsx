@@ -52,6 +52,12 @@ const ORDER_STATUS_COLOR = {
   "Unmapped (Shopee)": "#8b95a3",
 };
 
+const CHANNEL_LABEL = {
+  "HMRPH ONLINE": "HMRPH Online",
+  TIKTOK: "TikTok",
+  SHOPEE: "Shopee",
+};
+
 // HMRPH Online only — verified every TikTok/Shopee order carries
 // customer_name = 'WALK IN' (no real buyer identity captured on HMR's
 // side for marketplace orders), so this panel is fixed to HMRPH Online
@@ -199,6 +205,24 @@ export default function ExecutiveOverview({ filters }) {
             className="mb-4"
           >
             <SalesTrendComboChart data={salesTrend} />
+          </Panel>
+
+          <Panel
+            title="Avg Sales / Day by Channel"
+            subtitle="All 3 channels, always — not affected by the Channel filter above"
+            className="mb-4"
+          >
+            <KpiRow>
+              {data.avgSalesPerDayByChannel.map((c) => (
+                <KpiCard
+                  key={c.channel}
+                  label={CHANNEL_LABEL[c.channel] || c.channel}
+                  value={formatPeso(c.value)}
+                  delta={c.delta}
+                  previousLabel={formatPeso(c.previous)}
+                />
+              ))}
+            </KpiRow>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
