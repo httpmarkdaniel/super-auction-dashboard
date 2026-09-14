@@ -3,6 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import Modal, { ModalRow } from "../components/Modal";
+import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart } from "../components/Charts";
@@ -139,30 +140,6 @@ function LifecycleBarRow({ label, value, total, color }) {
   );
 }
 
-function SubTabNav({ value, onChange }) {
-  return (
-    <div className="flex gap-1.5 mb-4 border-b overflow-x-auto" style={{ borderColor: hrh.border }}>
-      {SUB_TABS.map((t) => {
-        const active = t.key === value;
-        return (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => onChange(t.key)}
-            className="text-[12.5px] font-semibold px-3.5 py-2 -mb-px whitespace-nowrap shrink-0"
-            style={
-              active
-                ? { color: hrh.accentText, borderBottom: `2px solid ${hrh.accent}` }
-                : { color: hrh.ink2, borderBottom: "2px solid transparent" }
-            }
-          >
-            {t.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 const PERIOD_CANCEL_COLUMNS = [
   { key: "dateLabel", label: "Period", align: "left" },
@@ -342,7 +319,7 @@ export default function OrdersFulfillment({ filters }) {
       {error && <ErrorState label={`Couldn't load Orders & Fulfillment: ${error}`} />}
 
       {data && !error && (
-        <SubTabNav value={subTab} onChange={setSubTab} />
+        <SubTabNav tabs={SUB_TABS} value={subTab} onChange={setSubTab} />
       )}
 
       {data && !error && (subTab === "fulfillment" || subTab === "cancellation") && data.meta?.unsupportedChannel && (

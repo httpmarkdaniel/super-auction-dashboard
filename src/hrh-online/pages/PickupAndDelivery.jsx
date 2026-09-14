@@ -3,6 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import ShareBar from "../components/ShareBar";
+import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart, BarComparisonChart } from "../components/Charts";
@@ -11,6 +12,12 @@ import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso, formatCompactPeso } from "../format";
 
 const METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2], Unknown: hrh.muted };
+
+const SUB_TABS = [
+  { key: "overview", label: "Overview" },
+  { key: "pickup", label: "Pickup" },
+  { key: "delivery", label: "Delivery" },
+];
 
 const METHOD_TABLE_COLUMNS = [
   { key: "method", label: "Method" },
@@ -40,13 +47,17 @@ function formatTimestamp(raw) {
   return d.toLocaleString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-const TIMING_STAGE_COLUMNS = [
+const TIMING_STAGE_COLUMNS_BOTH = [
   { key: "stage", label: "Stage" },
   { key: "pickup", label: "Pickup (avg)", render: (r) => formatDuration(r.pickup) },
   { key: "delivery", label: "Delivery (avg)", render: (r) => formatDuration(r.delivery) },
 ];
+const TIMING_STAGE_COLUMNS_SINGLE = [
+  { key: "stage", label: "Stage" },
+  { key: "value", label: "Avg Duration", render: (r) => formatDuration(r.value) },
+];
 
-const TIMELINE_COLUMNS = [
+const TIMELINE_COLUMNS_BOTH = [
   { key: "orderId", label: "Order #" },
   { key: "method", label: "Method" },
   { key: "orderPlacedAt", label: "Order Placed", render: (r) => formatTimestamp(r.orderPlacedAt) },
@@ -56,6 +67,8 @@ const TIMELINE_COLUMNS = [
   { key: "shippedAt", label: "Shipped / Ready", render: (r) => formatTimestamp(r.shippedAt) },
   { key: "courier", label: "Courier", render: (r) => r.courier || "—" },
 ];
+const TIMELINE_COLUMNS_PICKUP = TIMELINE_COLUMNS_BOTH.filter((c) => c.key !== "method" && c.key !== "courier");
+const TIMELINE_COLUMNS_DELIVERY = TIMELINE_COLUMNS_BOTH.filter((c) => c.key !== "method");
 
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
@@ -76,15 +89,20 @@ function isDateRangeReady(dateRange) {
 // checkout_method on xv3.mart_xv3_order_report, joined to sales in
 // xv3.mart_net_sales by order_no (direct match only) — orders that don't
 // match (mostly TikTok/Shopee, which never populate that table) show as
-// Unknown rather than a guess. xv3.mart_order_fulfilment_journey was
-// investigated as an alternative source and rejected — its
-// courier_service field is an imperfect proxy and only ~55% of its rows
-// even link back to a real order.
+// Unknown rather than a guess. xv3.mart_order_fulfilment_journey (real
+// pick/pack/dispatch timestamps) was investigated and confirmed usable
+// for timing, but has no "delivered to customer" event — see Data
+// Quality on the Pickup/Delivery tabs.
+//
+// Three sub-tabs, same pattern as Orders & Fulfillment: Overview (the
+// side-by-side comparison) plus a dedicated Pickup and Delivery tab each
+// focused on just that method's own numbers.
 export default function PickupAndDelivery({ filters }) {
   const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [subTab, setSubTab] = useState("overview");
   const [trendBucket, setTrendBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
@@ -118,6 +136,9 @@ export default function PickupAndDelivery({ filters }) {
   const methodSegments = data?.methodSummary?.map((m) => ({ label: m.method, value: m.gmv, color: METHOD_COLOR[m.method] || hrh.muted })) || [];
   const trendRows = bucketRows(data?.trend, trendBucket, ["pickupGmv", "deliveryGmv", "pickupOrders", "deliveryOrders"]);
 
+  const pickupSummary = data?.methodSummary?.find((m) => m.method === "Pickup");
+  const deliverySummary = data?.methodSummary?.find((m) => m.method === "Delivery");
+
   const pickupPaymentSegments =
     data?.paymentTypeByMethod?.Pickup?.map((p, i) => ({ label: p.label, value: p.value, color: hrh.series[i % hrh.series.length] })) || [];
   const deliveryPaymentSegments =
@@ -125,12 +146,14 @@ export default function PickupAndDelivery({ filters }) {
 
   const pickupStage = data?.timing?.stageSummary?.find((s) => s.method === "Pickup");
   const deliveryStage = data?.timing?.stageSummary?.find((s) => s.method === "Delivery");
-  const timingStageRows = [
-    { stage: "Order Placed → Packed", pickup: pickupStage?.avgOrderToPackSeconds, delivery: deliveryStage?.avgOrderToPackSeconds },
-    { stage: "Packed → Dispatched", pickup: pickupStage?.avgPackToDispatchSeconds, delivery: deliveryStage?.avgPackToDispatchSeconds },
-    { stage: "Dispatched → Shipped / Ready", pickup: pickupStage?.avgDispatchToShipSeconds, delivery: deliveryStage?.avgDispatchToShipSeconds },
-    { stage: "Order Placed → Shipped / Ready (Total)", pickup: pickupStage?.avgOrderToShipSeconds, delivery: deliveryStage?.avgOrderToShipSeconds },
-  ];
+  const STAGE_LABELS = ["Order Placed → Packed", "Packed → Dispatched", "Dispatched → Shipped / Ready", "Order Placed → Shipped / Ready (Total)"];
+  const STAGE_KEYS = ["avgOrderToPackSeconds", "avgPackToDispatchSeconds", "avgDispatchToShipSeconds", "avgOrderToShipSeconds"];
+  const timingStageRowsBoth = STAGE_LABELS.map((stage, i) => ({ stage, pickup: pickupStage?.[STAGE_KEYS[i]], delivery: deliveryStage?.[STAGE_KEYS[i]] }));
+  const timingStageRowsPickup = STAGE_LABELS.map((stage, i) => ({ stage, value: pickupStage?.[STAGE_KEYS[i]] }));
+  const timingStageRowsDelivery = STAGE_LABELS.map((stage, i) => ({ stage, value: deliveryStage?.[STAGE_KEYS[i]] }));
+
+  const pickupTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Pickup");
+  const deliveryTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Delivery");
 
   return (
     <div>
@@ -142,12 +165,17 @@ export default function PickupAndDelivery({ filters }) {
       {ready && loading && !data && <LoadingState label="Loading Pickup and Delivery…" />}
       {error && <ErrorState label={`Couldn't load Pickup and Delivery: ${error}`} />}
 
-      {data && !error && (
-        <>
-          <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            {data.meta?.methodologyNote}
-          </div>
+      {data && !error && <SubTabNav tabs={SUB_TABS} value={subTab} onChange={setSubTab} />}
 
+      {data && !error && (
+        <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
+          {data.meta?.methodologyNote}
+        </div>
+      )}
+
+      {/* ============================== OVERVIEW ============================== */}
+      {data && !error && subTab === "overview" && (
+        <>
           <KpiRow>
             <KpiCard label="Pickup Orders" value={formatNum(data.kpis.pickupOrders.value)} />
             <KpiCard label="Delivery Orders" value={formatNum(data.kpis.deliveryOrders.value)} />
@@ -181,50 +209,80 @@ export default function PickupAndDelivery({ filters }) {
             </Panel>
           </div>
 
-          <Panel title="Payment Type by Fulfillment Method" subtitle="Share of GMV within each method" className="mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-                  Within Pickup
-                </div>
-                <ShareBar segments={pickupPaymentSegments} />
-              </div>
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-                  Within Delivery
-                </div>
-                <ShareBar segments={deliveryPaymentSegments} />
-              </div>
-            </div>
-          </Panel>
-
-          <Panel title="Category Mix by Fulfillment Method" subtitle="Top categories by GMV within each method" className="mb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-                  Within Pickup
-                </div>
-                <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Pickup || []} emptyLabel="No pickup sales in this period." />
-              </div>
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-                  Within Delivery
-                </div>
-                <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Delivery || []} emptyLabel="No delivery sales in this period." />
-              </div>
-            </div>
-          </Panel>
-
           <Panel
             title="Fulfillment Timing"
-            subtitle={'Real pick/pack/dispatch timestamps — no confirmed "delivered to customer" event exists in this data; see Data Quality'}
+            subtitle={'Real pick/pack/dispatch timestamps — no confirmed "delivered to customer" event exists in this data; see Data Quality on the Pickup/Delivery tabs'}
             className="mb-4"
           >
-            <DataTable columns={TIMING_STAGE_COLUMNS} rows={timingStageRows} />
+            <DataTable columns={TIMING_STAGE_COLUMNS_BOTH} rows={timingStageRowsBoth} />
+          </Panel>
+        </>
+      )}
+
+      {/* ============================== PICKUP ============================== */}
+      {data && !error && subTab === "pickup" && (
+        <>
+          <KpiRow>
+            <KpiCard label="Pickup Orders" value={formatNum(pickupSummary?.orders)} />
+            <KpiCard label="Pickup GMV" value={formatPeso(pickupSummary?.gmv)} />
+            <KpiCard label="Pickup AOV" value={formatPeso(pickupSummary?.aov)} />
+            <KpiCard label="Share of GMV" value={formatPct(pickupSummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+          </KpiRow>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
+            <Panel title="Payment Type" subtitle="Share of GMV within Pickup">
+              <ShareBar segments={pickupPaymentSegments} />
+            </Panel>
+            <Panel title="Category Mix" subtitle="Top categories by GMV within Pickup">
+              <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Pickup || []} emptyLabel="No pickup sales in this period." />
+            </Panel>
+          </div>
+
+          <Panel title="Fulfillment Timing" subtitle="Real pick/pack/dispatch timestamps for Pickup orders" className="mb-4">
+            <DataTable columns={TIMING_STAGE_COLUMNS_SINGLE} rows={timingStageRowsPickup} />
           </Panel>
 
-          <Panel title="Recent Fulfillment Timeline" subtitle="Most recent 200 orders with a pick/pack/dispatch record" className="mb-4">
-            <DataTable columns={TIMELINE_COLUMNS} rows={data.timing?.timeline || []} paginate pageSize={10} emptyLabel="No fulfillment records in this period." />
+          <Panel title="Recent Pickup Timeline" subtitle="Most recent pickup orders with a pick/pack/dispatch record" className="mb-4">
+            <DataTable columns={TIMELINE_COLUMNS_PICKUP} rows={pickupTimeline} paginate pageSize={10} emptyLabel="No pickup fulfillment records in this period." />
+          </Panel>
+
+          {data.dataQuality?.length > 0 && (
+            <Panel title="Data Quality Notes">
+              <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: hrh.ink2 }}>
+                {data.dataQuality.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            </Panel>
+          )}
+        </>
+      )}
+
+      {/* ============================== DELIVERY ============================== */}
+      {data && !error && subTab === "delivery" && (
+        <>
+          <KpiRow>
+            <KpiCard label="Delivery Orders" value={formatNum(deliverySummary?.orders)} />
+            <KpiCard label="Delivery GMV" value={formatPeso(deliverySummary?.gmv)} />
+            <KpiCard label="Delivery AOV" value={formatPeso(deliverySummary?.aov)} />
+            <KpiCard label="Share of GMV" value={formatPct(deliverySummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+          </KpiRow>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
+            <Panel title="Payment Type" subtitle="Share of GMV within Delivery">
+              <ShareBar segments={deliveryPaymentSegments} />
+            </Panel>
+            <Panel title="Category Mix" subtitle="Top categories by GMV within Delivery">
+              <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Delivery || []} emptyLabel="No delivery sales in this period." />
+            </Panel>
+          </div>
+
+          <Panel title="Fulfillment Timing" subtitle="Real pick/pack/dispatch timestamps for Delivery orders" className="mb-4">
+            <DataTable columns={TIMING_STAGE_COLUMNS_SINGLE} rows={timingStageRowsDelivery} />
+          </Panel>
+
+          <Panel title="Recent Delivery Timeline" subtitle="Most recent delivery orders with a pick/pack/dispatch record" className="mb-4">
+            <DataTable columns={TIMELINE_COLUMNS_DELIVERY} rows={deliveryTimeline} paginate pageSize={10} emptyLabel="No delivery fulfillment records in this period." />
           </Panel>
 
           {data.dataQuality?.length > 0 && (
