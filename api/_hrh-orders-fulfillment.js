@@ -429,11 +429,41 @@ export async function handleOrdersFulfillment(req, res) {
       sharePct: safeDivide(count, allRealCancelledOrders.length) * 100,
     })).sort((a, b) => b.count - a.count);
 
+    // Order-level detail for the Cancellation Reasons drilldown (click a
+    // category row, see its orders) — same fields already computed above,
+    // no new calculation.
+    const cancellationsOrders = allRealCancelledOrders.map((o) => ({
+      orderNumber: o.order_number,
+      customer: o.customer_name,
+      orderDate: o.created_at,
+      amount: o.net_total,
+      checkoutMethod: o.checkout_method || "Unknown",
+      category: o.category,
+      cancellationReason: o.cancellation_reason,
+    }));
+
     const cancellations = {
       total: allRealCancelledOrders.length,
       reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
       byFulfillmentMethod: cancelledByFulfillmentMethod,
+      orders: cancellationsOrders,
     };
+
+    // Raw Cancelled / Dev-test-Cancelled — for the Cancelled Orders
+    // breakdown modal (Raw − Dev/test = Real, same shape as Real Orders
+    // Received's own breakdown). devTestOrders can include non-cancelled
+    // TEST ACCOUNT orders too, so this filters to just the cancelled ones.
+    const devTestCancelledCount = m.devTestOrders.filter((o) => o.order_status === "Cancelled").length;
+    const rawCancelledCount = allRealCancelledOrders.length + devTestCancelledCount;
+    const cancellationRate = safeDivide(m.allRealCancelled, m.realOrdersReceived) * 100;
+
+    // Still Awaiting Fulfillment, split by payment_status — same shape as
+    // the methodology's "Paid, no invoice" / "Pending (COD), no invoice"
+    // breakdown, from orders already classified as unresolved above.
+    const allUnresolved = [...m.noInvoiceUnresolved, ...m.ambiguousUnresolved];
+    const sumAmount = (arr) => arr.reduce((s, o) => s + o.net_total, 0);
+    const paidUnresolved = allUnresolved.filter((o) => o.payment_status === "Paid");
+    const pendingUnresolved = allUnresolved.filter((o) => o.payment_status !== "Paid");
 
     // Fulfillment Trend — daily Real Received / Fulfilled / Cancelled,
     // reusing the same orders already fetched above (no extra query).
@@ -491,11 +521,27 @@ export async function handleOrdersFulfillment(req, res) {
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        realOrdersReceived: { value: m.realOrdersReceived, sub: `${m.rawDedupedCount} raw deduped` },
+        realOrdersReceived: {
+          value: m.realOrdersReceived,
+          sub: `${m.rawDedupedCount} raw deduped`,
+          raw: m.rawDedupedCount,
+          devTestExcluded: m.devTestOrders.length,
+          customerInitiatedExcluded: m.customerInitiatedCancelled.length,
+          duplicateRetriesExcluded: m.duplicateRetryOrders.length,
+        },
         fulfilledOrders: { value: m.fulfilled },
         completionRate: { value: completionRate },
-        cancelledOrders: { value: m.allRealCancelled },
-        stillAwaitingFulfillment: { value: m.stillAwaiting },
+        cancelledOrders: {
+          value: m.allRealCancelled,
+          raw: rawCancelledCount,
+          devTestExcluded: devTestCancelledCount,
+          cancellationRate,
+        },
+        stillAwaitingFulfillment: {
+          value: m.stillAwaiting,
+          paid: { count: paidUnresolved.length, value: sumAmount(paidUnresolved) },
+          pending: { count: pendingUnresolved.length, value: sumAmount(pendingUnresolved) },
+        },
       },
       lifecycle,
       fulfillmentTrend,

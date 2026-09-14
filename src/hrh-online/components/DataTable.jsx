@@ -22,7 +22,7 @@ import Pagination from "./Pagination";
 // column defs; columns without one default to 120px.
 const DEFAULT_STICKY_WIDTH = 120;
 
-export default function DataTable({ columns, rows, paginate = false, pageSize = 10, emptyLabel, stickyColumns = 0 }) {
+export default function DataTable({ columns, rows, paginate = false, pageSize = 10, emptyLabel, stickyColumns = 0, onRowClick }) {
   const [page, setPage] = useState(1);
 
   // A new `rows` reference (new filter/channel/date selection) should land
@@ -75,7 +75,12 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
           </thead>
           <tbody>
             {visibleRows.map((r, i) => (
-              <tr key={r.id ?? i} style={{ borderBottom: `1px solid ${hrh.border}` }}>
+              <tr
+                key={r.id ?? i}
+                style={{ borderBottom: `1px solid ${hrh.border}`, cursor: onRowClick ? "pointer" : undefined }}
+                onClick={onRowClick ? () => onRowClick(r) : undefined}
+                className={onRowClick ? "hover:bg-black/[0.03]" : undefined}
+              >
                 {columns.map((c, ci) => (
                   <td
                     key={c.key}
