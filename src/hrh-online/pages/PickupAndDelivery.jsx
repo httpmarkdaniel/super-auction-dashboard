@@ -25,6 +25,38 @@ const CATEGORY_COLUMNS = [
   { key: "value", label: "GMV", render: (r) => formatPeso(r.value) },
 ];
 
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return "—";
+  const mins = seconds / 60;
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const hrs = mins / 60;
+  if (hrs < 48) return `${hrs.toFixed(1)}h`;
+  return `${(hrs / 24).toFixed(1)}d`;
+}
+function formatTimestamp(raw) {
+  if (!raw) return "—";
+  const d = new Date(`${raw.replace(" ", "T")}Z`);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+const TIMING_STAGE_COLUMNS = [
+  { key: "stage", label: "Stage" },
+  { key: "pickup", label: "Pickup (avg)", render: (r) => formatDuration(r.pickup) },
+  { key: "delivery", label: "Delivery (avg)", render: (r) => formatDuration(r.delivery) },
+];
+
+const TIMELINE_COLUMNS = [
+  { key: "orderId", label: "Order #" },
+  { key: "method", label: "Method" },
+  { key: "orderPlacedAt", label: "Order Placed", render: (r) => formatTimestamp(r.orderPlacedAt) },
+  { key: "pickedAt", label: "Picked", render: (r) => formatTimestamp(r.pickedAt) },
+  { key: "packedAt", label: "Packed", render: (r) => formatTimestamp(r.packedAt) },
+  { key: "dispatchedAt", label: "Dispatched", render: (r) => formatTimestamp(r.dispatchedAt) },
+  { key: "shippedAt", label: "Shipped / Ready", render: (r) => formatTimestamp(r.shippedAt) },
+  { key: "courier", label: "Courier", render: (r) => r.courier || "—" },
+];
+
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
     return { range: "custom", from: dateRange.from, to: dateRange.to };
@@ -90,6 +122,15 @@ export default function PickupAndDelivery({ filters }) {
     data?.paymentTypeByMethod?.Pickup?.map((p, i) => ({ label: p.label, value: p.value, color: hrh.series[i % hrh.series.length] })) || [];
   const deliveryPaymentSegments =
     data?.paymentTypeByMethod?.Delivery?.map((p, i) => ({ label: p.label, value: p.value, color: hrh.series[i % hrh.series.length] })) || [];
+
+  const pickupStage = data?.timing?.stageSummary?.find((s) => s.method === "Pickup");
+  const deliveryStage = data?.timing?.stageSummary?.find((s) => s.method === "Delivery");
+  const timingStageRows = [
+    { stage: "Order Placed → Packed", pickup: pickupStage?.avgOrderToPackSeconds, delivery: deliveryStage?.avgOrderToPackSeconds },
+    { stage: "Packed → Dispatched", pickup: pickupStage?.avgPackToDispatchSeconds, delivery: deliveryStage?.avgPackToDispatchSeconds },
+    { stage: "Dispatched → Shipped / Ready", pickup: pickupStage?.avgDispatchToShipSeconds, delivery: deliveryStage?.avgDispatchToShipSeconds },
+    { stage: "Order Placed → Shipped / Ready (Total)", pickup: pickupStage?.avgOrderToShipSeconds, delivery: deliveryStage?.avgOrderToShipSeconds },
+  ];
 
   return (
     <div>
@@ -172,6 +213,18 @@ export default function PickupAndDelivery({ filters }) {
                 <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Delivery || []} emptyLabel="No delivery sales in this period." />
               </div>
             </div>
+          </Panel>
+
+          <Panel
+            title="Fulfillment Timing"
+            subtitle={'Real pick/pack/dispatch timestamps — no confirmed "delivered to customer" event exists in this data; see Data Quality'}
+            className="mb-4"
+          >
+            <DataTable columns={TIMING_STAGE_COLUMNS} rows={timingStageRows} />
+          </Panel>
+
+          <Panel title="Recent Fulfillment Timeline" subtitle="Most recent 200 orders with a pick/pack/dispatch record" className="mb-4">
+            <DataTable columns={TIMELINE_COLUMNS} rows={data.timing?.timeline || []} paginate pageSize={10} emptyLabel="No fulfillment records in this period." />
           </Panel>
 
           {data.dataQuality?.length > 0 && (

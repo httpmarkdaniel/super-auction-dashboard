@@ -87,6 +87,99 @@ function makePaymentTypeNormalizer() {
   };
 }
 
+// ---------------------------------------------------------------------
+// Fulfillment Timing — real pick/pack/dispatch/ship timestamps from
+// xv3.mart_order_fulfilment_journey, joined to checkout_method by
+// order_id -> order_number (same direct join as the rest of this file).
+// Scoped to HMRPH Online implicitly, same as everywhere else that reads
+// xv3.mart_xv3_order_report — the join itself only ever matches HMRPH
+// Online orders.
+//
+// IMPORTANT — there is no "delivered to customer" timestamp anywhere in
+// this data. The last real milestone is shipped_at, which the raw
+// timestamps confirm means "handed off to the courier" for Delivery
+// orders (shipped_at lands within seconds of dispatch_finalized_at, and
+// courier_service is populated) — not proof the customer actually
+// received it. For Pickup orders there's no courier at all
+// (courier_service is null), so shipped_at there almost certainly means
+// something like "marked ready/collected in-store", not a delivery
+// event — inferred from the pattern, not a documented field definition.
+// Labeled accordingly rather than calling either one "Delivered".
+async function computeFulfillmentTiming(from, to) {
+  const rows = await (
+    await client.query({
+      query: `
+        SELECT
+          o.checkout_method,
+          avgIf(j.order_to_pack_seconds, j.order_to_pack_seconds IS NOT NULL) AS avg_order_to_pack,
+          avgIf(j.packing_to_dispatch_finalized_seconds, j.packing_to_dispatch_finalized_seconds IS NOT NULL) AS avg_pack_to_dispatch,
+          avgIf(j.dispatch_finalized_to_ship_seconds, j.dispatch_finalized_to_ship_seconds IS NOT NULL) AS avg_dispatch_to_ship,
+          avgIf(j.order_to_ship_seconds, j.order_to_ship_seconds IS NOT NULL) AS avg_order_to_ship,
+          count() AS n,
+          countIf(j.shipped_at IS NOT NULL) AS n_shipped
+        FROM xv3.mart_order_fulfilment_journey j
+        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
+        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+          AND o.checkout_method IN ('Pickup', 'Delivery')
+        GROUP BY o.checkout_method
+      `,
+      query_params: { from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const byMethod = new Map(rows.map((r) => [r.checkout_method, r]));
+
+  const detailRows = await (
+    await client.query({
+      query: `
+        SELECT
+          j.order_id,
+          o.checkout_method,
+          j.order_placed_at,
+          j.picking_started_at,
+          j.packing_finished_at,
+          j.dispatch_finalized_at,
+          j.shipped_at,
+          j.courier_service
+        FROM xv3.mart_order_fulfilment_journey j
+        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
+        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+          AND o.checkout_method IN ('Pickup', 'Delivery')
+        ORDER BY j.order_placed_at DESC
+        LIMIT 200
+      `,
+      query_params: { from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+
+  const stageSummary = ["Pickup", "Delivery"].map((method) => {
+    const r = byMethod.get(method);
+    return {
+      method,
+      orders: toNum(r?.n),
+      avgOrderToPackSeconds: toNum(r?.avg_order_to_pack),
+      avgPackToDispatchSeconds: toNum(r?.avg_pack_to_dispatch),
+      avgDispatchToShipSeconds: toNum(r?.avg_dispatch_to_ship),
+      avgOrderToShipSeconds: toNum(r?.avg_order_to_ship),
+      shippedCount: toNum(r?.n_shipped),
+    };
+  });
+
+  const timeline = detailRows.map((r) => ({
+    orderId: r.order_id,
+    method: r.checkout_method,
+    orderPlacedAt: r.order_placed_at,
+    pickedAt: r.picking_started_at,
+    packedAt: r.packing_finished_at,
+    dispatchedAt: r.dispatch_finalized_at,
+    shippedAt: r.shipped_at,
+    courier: r.courier_service,
+  }));
+
+  return { stageSummary, timeline };
+}
+
 export async function handlePickupDelivery(req, res) {
   try {
     const channel = req.query.channel || "All Channels";
@@ -100,6 +193,8 @@ export async function handlePickupDelivery(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
+
+    const timing = await computeFulfillmentTiming(range_.from, range_.to);
 
     const salesRows = await (
       await client.query({
@@ -232,10 +327,12 @@ export async function handlePickupDelivery(req, res) {
       paymentTypeByMethod,
       categoryByMethod,
       trend,
+      timing,
       dataQuality: [
         `${unknown.orders} of ${totalOrders} orders (${safeDivide(unknown.orders, totalOrders) * 100 < 1 ? "<1" : (safeDivide(unknown.orders, totalOrders) * 100).toFixed(1)}%) couldn't be matched to a checkout_method — mostly TikTok/Shopee sales, which don't flow through xv3.mart_xv3_order_report at all (verified elsewhere), plus a small number of HMRPH Online invoices with no order_no populated. Shown as "Unknown", not guessed as Pickup or Delivery.`,
         "This uses direct order_no matching only (no probable/fuzzy matching), unlike Orders & Fulfillment's completion-rate logic — Pickup/Delivery is a reporting split here, not a fulfillment-completion determination, so the stricter direct match is enough and keeps this page independent of that page's methodology.",
         "Payment type case variants (e.g. \"GCash\" / \"Gcash\") are merged case-insensitively, displayed using whichever casing appeared first.",
+        "Fulfillment Timing has no \"delivered to customer\" timestamp — the last real milestone is \"Shipped\", which the raw data confirms means handed off to the courier for Delivery orders (it lands seconds after Dispatched, alongside a real courier_service). For Pickup orders there's no courier at all, so \"Shipped\" there most likely means marked ready/collected in-store, not a delivery event — inferred from the timestamp pattern, not a documented field definition.",
       ],
     });
   } catch (err) {
