@@ -77,9 +77,9 @@ function autoGranularity(dateRange) {
     if (days <= 90) return "week";
     return "month";
   }
-  if (dateRange === "mtd") return "week";
-  if (dateRange === "ytd") return "month";
-  return "day"; // wtd (default)
+  if (dateRange === "mtd" || dateRange === "prevMonth") return "week";
+  if (dateRange === "ytd" || dateRange === "prevYear") return "month";
+  return "day"; // wtd / prevWeek (default) — both ~7-day spans
 }
 
 // Report-style table (uppercase headers, right-aligned numeric columns,

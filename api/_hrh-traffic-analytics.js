@@ -126,6 +126,27 @@ function resolveRange(range, fromParam, toParam) {
     const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
     return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
   }
+  // Full prior calendar week/month/year — NOT "to date" (see the shared
+  // preset added to src/hrh-online/dateRange.js). Unlike wtd/mtd/ytd these
+  // are already whole periods, so "previous" is simply the same full-period
+  // shift repeated once more (no partial/elapsed-day clamping needed).
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    const from = addDaysISO(thisWeekMonday, -7);
+    const to = addDaysISO(thisWeekMonday, -1);
+    return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    const from = firstOfMonthISO(to);
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = firstOfMonthISO(prevTo);
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { current: { from: `${y}-01-01`, to: `${y}-12-31` }, previous: { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` } };
+  }
   const to = today;
   const from = mondayOfWeek(to);
   return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };

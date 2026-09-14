@@ -15,7 +15,7 @@ import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
 import OperationalFlags from "./pages/OperationalFlags";
 import { OPERATIONAL_FLAGS_KEY } from "./nav";
 import { hrh } from "./theme";
-import { defaultDateRange } from "../utils/dateRange";
+import { defaultDateRange } from "./dateRange";
 
 const PAGES = {
   overview: ExecutiveOverview,

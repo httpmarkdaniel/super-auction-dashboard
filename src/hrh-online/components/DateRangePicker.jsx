@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { RANGE_PRESETS, resolveDateRange } from "../../utils/dateRange";
+import { RANGE_PRESETS, resolveDateRange } from "../dateRange";
 import { hrh } from "../theme";
 
 const FILTER_FONT = { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em" };
 
 // Same button+popover interaction as the Auction Dashboard's DateRangePicker
-// (src/components/Topbar.jsx) and the SAME shared ../../utils/dateRange.js
-// preset/comparison logic — not a parallel date-range implementation,
-// just restyled with HRH Online's own fixed dark-navy palette (this module
-// has its own chrome, independent of Auction's light/dark theme toggle;
-// see theme.js). `value` is either a preset key ("wtd"/"mtd"/"ytd") or
-// { key: "custom", from, to } — identical shape to Auction's own usage.
+// (src/components/Topbar.jsx), but its OWN forked ../dateRange.js preset/
+// comparison logic (not the shared ../../utils/dateRange.js) — HRH Online
+// has 3 extra presets (Previous Week/Month/Year) that Auction's own date
+// picker doesn't and shouldn't get, so this is a deliberate fork, not an
+// accidental divergence. Restyled with HRH Online's own fixed dark-navy
+// palette (this module has its own chrome, independent of Auction's
+// light/dark theme toggle; see theme.js). `value` is either a preset key
+// ("wtd"/"mtd"/"ytd"/"prevWeek"/"prevMonth"/"prevYear") or
+// { key: "custom", from, to }.
 export default function DateRangePicker({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);

@@ -74,6 +74,23 @@ function resolveCurrentRange(range, fromParam, toParam) {
   }
   if (range === "mtd") return { from: firstOfMonthISO(today), to: today };
   if (range === "ytd") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  // Full prior calendar week/month/year — NOT "to date" (see the shared
+  // preset added to src/hrh-online/dateRange.js): Previous Week is
+  // Monday-Sunday of the week before this one; Previous Month is the 1st
+  // through the last day of the month before this one; Previous Year is
+  // Jan 1 - Dec 31 of last year.
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    return { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  }
+  if (range === "prevMonth") {
+    const lastDayPrevMonth = addDaysISO(firstOfMonthISO(today), -1);
+    return { from: firstOfMonthISO(lastDayPrevMonth), to: lastDayPrevMonth };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { from: `${y}-01-01`, to: `${y}-12-31` };
+  }
   return { from: mondayOfWeek(today), to: today }; // wtd
 }
 
