@@ -613,6 +613,7 @@ export async function handleOrdersFulfillment(req, res) {
         lifecycle: null,
         fulfillmentTrend: [],
         cancellations: null,
+        cancellationByPeriodDaily: [],
         unresolvedOrders: [],
         returns,
         dataQuality: [],
@@ -636,6 +637,43 @@ export async function handleOrdersFulfillment(req, res) {
     // "confirmed customer-initiated" ones excluded from it) — matches the
     // methodology's own Cancellation tab population.
     const allRealCancelledOrders = [...m.stayingCancelled, ...m.customerInitiatedCancelled];
+
+    // Cancelled Orders by Period — daily Raw Orders Placed / Real Cancelled
+    // (count + value), for the frontend to bucket by day/week/month based
+    // on the selected range's length. Raw Orders Placed reuses the exact
+    // same canonical deduped order population computeHmrphOnlineLifecycle
+    // already classified above (every order falls into exactly one of
+    // these sub-arrays — verified: their combined length always equals
+    // rawDedupedCount) rather than re-querying or reclassifying anything.
+    const allRawOrders = [
+      ...m.devTestOrders,
+      ...m.stayingCancelled,
+      ...m.customerInitiatedCancelled,
+      ...m.duplicateRetryOrders,
+      ...m.directFulfilled,
+      ...m.probableFulfilled,
+      ...m.noInvoiceUnresolved,
+      ...m.ambiguousUnresolved,
+    ];
+    const rawByDate = new Map();
+    for (const o of allRawOrders) {
+      rawByDate.set(o.created_at, (rawByDate.get(o.created_at) || 0) + 1);
+    }
+    const cancelledByDate = new Map();
+    for (const o of allRealCancelledOrders) {
+      const bucket = cancelledByDate.get(o.created_at) || { count: 0, value: 0 };
+      bucket.count += 1;
+      bucket.value += o.net_total;
+      cancelledByDate.set(o.created_at, bucket);
+    }
+    const allCancelDates = new Set([...rawByDate.keys(), ...cancelledByDate.keys()]);
+    const cancellationByPeriodDaily = Array.from(allCancelDates, (date) => ({
+      date,
+      rawOrdersPlaced: rawByDate.get(date) || 0,
+      cancelledCount: cancelledByDate.get(date)?.count || 0,
+      cancelledValue: cancelledByDate.get(date)?.value || 0,
+    })).sort((a, b) => (a.date < b.date ? -1 : 1));
+
     const CATEGORY_ORDER = [
       "System-Initiated (Expired)",
       "Payment Issues",
@@ -658,12 +696,16 @@ export async function handleOrdersFulfillment(req, res) {
     const byCheckoutMethod = new Map();
     for (const o of allRealCancelledOrders) {
       const method = o.checkout_method || "Unknown";
-      byCheckoutMethod.set(method, (byCheckoutMethod.get(method) || 0) + 1);
+      const bucket = byCheckoutMethod.get(method) || { count: 0, value: 0 };
+      bucket.count += 1;
+      bucket.value += o.net_total;
+      byCheckoutMethod.set(method, bucket);
     }
-    const cancelledByFulfillmentMethod = Array.from(byCheckoutMethod, ([method, count]) => ({
+    const cancelledByFulfillmentMethod = Array.from(byCheckoutMethod, ([method, v]) => ({
       method,
-      count,
-      sharePct: safeDivide(count, allRealCancelledOrders.length) * 100,
+      count: v.count,
+      value: v.value,
+      sharePct: safeDivide(v.count, allRealCancelledOrders.length) * 100,
     })).sort((a, b) => b.count - a.count);
 
     // Order-level detail for the Cancellation Reasons drilldown (click a
@@ -783,6 +825,7 @@ export async function handleOrdersFulfillment(req, res) {
       lifecycle,
       fulfillmentTrend,
       cancellations,
+      cancellationByPeriodDaily,
       unresolvedOrders,
       returns,
       dataQuality: [

@@ -38,6 +38,77 @@ function safeDivide(a, b) {
   return b ? a / b : 0;
 }
 
+// Auto granularity for "Cancelled Orders by Period" — WTD/MTD/YTD map
+// directly to day/week/month (their own typical span always falls in
+// that bucket anyway); Custom derives it from the actual selected span
+// so a short custom range still reads day-by-day and a long one doesn't
+// render hundreds of daily rows.
+function daysBetweenISO(fromIso, toIso) {
+  return Math.round((new Date(`${toIso}T00:00:00Z`) - new Date(`${fromIso}T00:00:00Z`)) / 86400000) + 1;
+}
+function autoGranularity(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    const days = daysBetweenISO(dateRange.from, dateRange.to);
+    if (days <= 14) return "day";
+    if (days <= 90) return "week";
+    return "month";
+  }
+  if (dateRange === "mtd") return "week";
+  if (dateRange === "ytd") return "month";
+  return "day"; // wtd (default)
+}
+
+// Report-style table (uppercase headers, right-aligned numeric columns,
+// a bold Total row with a stronger top border) — matches the reference
+// methodology report's own table styling more closely than the shared
+// DataTable component (which has no bold-total-row concept), used only
+// for the two small report tables that explicitly need it.
+function ReportTable({ columns, rows, totalRow }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[13px] border-collapse">
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${hrh.border}` }}>
+            {columns.map((c) => (
+              <th
+                key={c.key}
+                className={`px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.04em] whitespace-nowrap ${c.align === "right" ? "text-right" : "text-left"}`}
+                style={{ color: hrh.ink2 }}
+              >
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderBottom: `1px solid ${hrh.border}` }}>
+              {columns.map((c) => (
+                <td key={c.key} className={`px-3 py-2 tabular-nums whitespace-nowrap ${c.align === "right" ? "text-right" : "text-left"}`} style={{ color: hrh.ink }}>
+                  {c.render ? c.render(r) : r[c.key]}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {totalRow && (
+            <tr style={{ borderTop: `2px solid ${hrh.ink}` }}>
+              {columns.map((c) => (
+                <td
+                  key={c.key}
+                  className={`px-3 py-2 tabular-nums whitespace-nowrap font-bold ${c.align === "right" ? "text-right" : "text-left"}`}
+                  style={{ color: hrh.ink }}
+                >
+                  {c.render ? c.render(totalRow) : totalRow[c.key]}
+                </td>
+              ))}
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Pill({ text, map }) {
   const c = map[text] || { bg: "#f0f1f5", text: hrh.ink2 };
   return (
@@ -92,6 +163,20 @@ function SubTabNav({ value, onChange }) {
     </div>
   );
 }
+
+const PERIOD_CANCEL_COLUMNS = [
+  { key: "dateLabel", label: "Period", align: "left" },
+  { key: "rawOrdersPlaced", label: "Raw Orders Placed", align: "right", render: (r) => formatNum(r.rawOrdersPlaced) },
+  { key: "cancelledReal", label: "Cancelled (Real)", align: "right", render: (r) => `${formatNum(r.cancelledCount)} (${formatPeso(r.cancelledValue)})` },
+  { key: "cancellationRate", label: "Cancellation Rate", align: "right", render: (r) => formatPct(r.cancellationRate) },
+];
+
+const METHOD_TABLE_COLUMNS = [
+  { key: "method", label: "Fulfillment Method", align: "left" },
+  { key: "count", label: "Cancelled Orders", align: "right", render: (r) => formatNum(r.count) },
+  { key: "value", label: "Cancelled Value", align: "right", render: (r) => formatPeso(r.value) },
+  { key: "sharePct", label: "Share", align: "right", render: (r) => formatPct(r.sharePct) },
+];
 
 const CANCEL_REASON_COLUMNS = [
   { key: "category", label: "Category" },
@@ -208,6 +293,20 @@ export default function OrdersFulfillment({ filters }) {
     ...r,
     cancellationRate: safeDivide(r.cancelled, r.received) * 100,
   }));
+  const cancellationPeriodGranularity = autoGranularity(dateRange);
+  const cancellationPeriodRows = bucketRows(data?.cancellationByPeriodDaily, cancellationPeriodGranularity, [
+    "rawOrdersPlaced",
+    "cancelledCount",
+    "cancelledValue",
+  ]).map((r) => ({ ...r, cancellationRate: safeDivide(r.cancelledCount, r.rawOrdersPlaced) * 100 }));
+  const cancellationPeriodTotals = (data?.cancellationByPeriodDaily || []).reduce(
+    (acc, r) => ({
+      rawOrdersPlaced: acc.rawOrdersPlaced + r.rawOrdersPlaced,
+      cancelledCount: acc.cancelledCount + r.cancelledCount,
+      cancelledValue: acc.cancelledValue + r.cancelledValue,
+    }),
+    { rawOrdersPlaced: 0, cancelledCount: 0, cancelledValue: 0 }
+  );
   const returnsPerf = bucketRows(data?.returns?.trend, returnsBucket, ["salesCount", "salesValue", "returns", "returnsValue"]).map((r) => ({
     ...r,
     returnRateCount: safeDivide(r.returns, r.salesCount) * 100,
@@ -216,6 +315,10 @@ export default function OrdersFulfillment({ filters }) {
 
   const cancelledByMethodSegments =
     data?.cancellations?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
+  const cancelledMethodTotals = (data?.cancellations?.byFulfillmentMethod || []).reduce(
+    (acc, m) => ({ count: acc.count + m.count, value: acc.value + m.value }),
+    { count: 0, value: 0 }
+  );
   const returnsByMethodSegments =
     data?.returns?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
   const lifecycleCancelledInDenominator = data?.lifecycle?.find((l) => l.label === "Cancelled")?.value ?? 0;
@@ -325,20 +428,32 @@ export default function OrdersFulfillment({ filters }) {
               rateKey="cancellationRate"
               rateName="Cancellation Rate"
             />
+            <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
+                Detail — granularity auto-selected from the Date Range filter ({cancellationPeriodGranularity})
+              </div>
+              <ReportTable
+                columns={PERIOD_CANCEL_COLUMNS}
+                rows={cancellationPeriodRows}
+                totalRow={{
+                  dateLabel: "Total",
+                  rawOrdersPlaced: cancellationPeriodTotals.rawOrdersPlaced,
+                  cancelledCount: cancellationPeriodTotals.cancelledCount,
+                  cancelledValue: cancellationPeriodTotals.cancelledValue,
+                  cancellationRate: safeDivide(cancellationPeriodTotals.cancelledCount, cancellationPeriodTotals.rawOrdersPlaced) * 100,
+                }}
+              />
+            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
             <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of all real cancellations">
               <DonutChart segments={cancelledByMethodSegments} centerValue={formatNum(data.cancellations.total)} centerLabel="Cancelled Orders" />
               <div className="mt-3">
-                <DataTable
-                  columns={[
-                    { key: "method", label: "Method" },
-                    { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
-                    { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
-                  ]}
+                <ReportTable
+                  columns={METHOD_TABLE_COLUMNS}
                   rows={data.cancellations?.byFulfillmentMethod || []}
-                  emptyLabel="No cancellations in this period."
+                  totalRow={{ method: "Total", count: cancelledMethodTotals.count, value: cancelledMethodTotals.value, sharePct: 100 }}
                 />
               </div>
             </Panel>
