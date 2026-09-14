@@ -134,6 +134,55 @@ export function SalesTrendComboChart({ data, height = 260 }) {
   );
 }
 
+function FulfillmentTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span style={{ color: "#a3adba" }}>{p.name}:</span>
+          <span className="font-semibold">{p.dataKey === "completionRate" ? `${p.value.toFixed(1)}%` : p.value.toLocaleString("en-PH")}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Fulfilled/Cancelled/Awaiting (stacked bars, left axis, whole-number
+// counts) + Completion Rate (line, right axis, %) — same "GMV + Orders"
+// combo pattern as SalesTrendComboChart, applied to Orders & Fulfillment's
+// own metrics instead. `data`: [{ dateLabel, fulfilled, cancelled,
+// awaiting, completionRate }].
+export function FulfillmentTrendComboChart({ data, height = 260 }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={hrh.border} vertical={false} />
+        <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <YAxis yAxisId="count" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} allowDecimals={false} width={36} />
+        <YAxis
+          yAxisId="rate"
+          orientation="right"
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={(v) => `${v}%`}
+          domain={[0, 100]}
+          width={44}
+        />
+        <Tooltip content={<FulfillmentTooltip />} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar yAxisId="count" dataKey="fulfilled" name="Fulfilled" stackId="orders" fill={hrh.good} radius={[0, 0, 0, 0]} maxBarSize={24} />
+        <Bar yAxisId="count" dataKey="cancelled" name="Cancelled" stackId="orders" fill={hrh.bad} radius={[0, 0, 0, 0]} maxBarSize={24} />
+        <Bar yAxisId="count" dataKey="awaiting" name="Awaiting" stackId="orders" fill={hrh.muted} radius={[2, 2, 0, 0]} maxBarSize={24} />
+        <Line yAxisId="rate" type="monotone" dataKey="completionRate" name="Completion Rate" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 // Area trend for same-unit series on one shared axis (e.g. Order Value vs.
 // Discount Value). `stacked` (default false) draws each area independently,
 // overlapping with partial opacity so both are readable at once — turn it

@@ -33,6 +33,15 @@ const client = createClient({
 // ---------------------------------------------------------------------
 const HRH_STORE = "HRH ONLINE";
 const HMRPH_CHANNEL = "HMRPH ONLINE";
+// Returns (mart_net_sales) has a real sales_channel column covering all 3
+// channels, unlike the order/cancellation source table above — same map
+// as api/hrh-executive-overview.js's CHANNEL_MAP.
+const CHANNEL_MAP = {
+  "All Channels": ["HMRPH ONLINE", "TIKTOK", "SHOPEE"],
+  "HMRPH Online": ["HMRPH ONLINE"],
+  TikTok: ["TIKTOK"],
+  Shopee: ["SHOPEE"],
+};
 
 // Dev/test exclusions — centralized here and reused by both Orders &
 // Fulfillment and Executive Overview (see computeHmrphOnlineLifecycle
@@ -342,36 +351,230 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   };
 }
 
+// Return Reasons — 10 categories, built from invoice_remarks (free text,
+// inconsistent RET/REF prefixes and spelling) — same keyword-matching
+// approach as cancellation reasons, against the methodology report's own
+// 10-category list.
+function categorizeReturnReason(remarks) {
+  const r = (remarks || "").toLowerCase().trim();
+  if (!r) return "No Reason Logged";
+  if (r.includes("cancel")) return "Cancelled by Customer";
+  if (r.includes("refuse") || r.includes("consignee") || r.includes("closed") || r.includes("no answer") || r.includes("didn't pick") || r.includes("didnt pick")) {
+    return "Refused / Could Not Deliver (Consignee)";
+  }
+  if (r.includes("not working") || r.includes("defective") || r.includes("deffective") || r.includes("not functional") || r.includes("not properly functional") || r.includes("weak battery") || r.includes("not original")) {
+    return "Not Working / Defective";
+  }
+  if (r.includes("damag") || r.includes("broken")) return "Damaged Items";
+  if (r.includes("no actual item") || r.includes("shortage")) return "No Actual Items (Shortage)";
+  if (r.includes("wrong size")) return "Wrong Size";
+  if (r.includes("wrong item") || r.includes("wrong description") || r.includes("order error") || r.includes("do not fit") || r.includes("doesn't fit") || r.includes("doesnt fit")) {
+    return "Wrong Item / Order Error";
+  }
+  if (r.includes("address")) return "Address Issue";
+  return "Other / Miscellaneous";
+}
+
+// ---------------------------------------------------------------------
+// Returns tab — xv3.mart_net_sales, transaction_type = 'return'. Unlike
+// the Fulfillment/Cancellation lifecycle above, mart_net_sales has a real
+// sales_channel column that covers TikTok/Shopee too, so Returns respects
+// the page's Channel filter properly instead of being fixed to HMRPH
+// Online. Independent from the order/cancellation lifecycle (returns are
+// post-fulfillment sales reversals, methodology explicitly keeps them out
+// of Cancelled).
+// ---------------------------------------------------------------------
+export async function computeReturnsAnalysis(from, to, channels) {
+  const salesRows = await (
+    await client.query({
+      query: `
+        SELECT uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+          AND transaction_date BETWEEN {from:String} AND {to:String}
+      `,
+      query_params: { store: HRH_STORE, channels, from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const salesCount = toNum(salesRows[0]?.cnt);
+  const salesValue = toNum(salesRows[0]?.amt);
+
+  const returnRows = await (
+    await client.query({
+      query: `
+        SELECT
+          invoice_no, invoice_id, order_no, transaction_date, net_sales_amount,
+          invoice_remarks, product_name, customer_firstname, customer_lastname
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'return'
+          AND transaction_date BETWEEN {from:String} AND {to:String}
+        ORDER BY transaction_date
+      `,
+      query_params: { store: HRH_STORE, channels, from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+
+  // Returns by Fulfillment Method — order_no -> checkout_method, same
+  // linking gap as unresolved orders elsewhere (blank/unmatched order_no
+  // shows as "Unknown", not guessed).
+  const orderNos = [...new Set(returnRows.map((r) => r.order_no).filter(Boolean))];
+  let checkoutByOrderNo = new Map();
+  if (orderNos.length) {
+    const checkoutRows = await (
+      await client.query({
+        query: `SELECT order_number, any(checkout_method) AS checkout_method FROM xv3.mart_xv3_order_report WHERE order_number IN ({ids:Array(String)}) GROUP BY order_number`,
+        query_params: { ids: orderNos },
+        format: "JSONEachRow",
+      })
+    ).json();
+    checkoutByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.checkout_method]));
+  }
+
+  // "Did Returned Items Get Replaced?" — matched to a LATER sale by the
+  // same normalized customer name for the exact same product_name, within
+  // 30 days of the return (product_name is already on mart_net_sales, no
+  // need for a separate item-name join).
+  const productNames = [...new Set(returnRows.map((r) => r.product_name).filter(Boolean))];
+  let replacementCandidates = [];
+  if (productNames.length) {
+    replacementCandidates = await (
+      await client.query({
+        query: `
+          SELECT transaction_date, product_name, customer_firstname, customer_lastname
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+            AND product_name IN ({names:Array(String)})
+            AND transaction_date BETWEEN {from:String} AND {toExt:String}
+        `,
+        query_params: { store: HRH_STORE, channels, names: productNames, from, toExt: addDaysISO(to, 30) },
+        format: "JSONEachRow",
+      })
+    ).json();
+  }
+  const candidatesByNameProduct = new Map();
+  for (const c of replacementCandidates) {
+    const key = `${normalizeName(`${c.customer_firstname || ""} ${c.customer_lastname || ""}`)}|${c.product_name}`;
+    if (!candidatesByNameProduct.has(key)) candidatesByNameProduct.set(key, []);
+    candidatesByNameProduct.get(key).push(String(c.transaction_date).slice(0, 10));
+  }
+
+  const CATEGORY_ORDER = [
+    "Cancelled by Customer",
+    "Refused / Could Not Deliver (Consignee)",
+    "Not Working / Defective",
+    "Damaged Items",
+    "No Actual Items (Shortage)",
+    "Wrong Item / Order Error",
+    "Wrong Size",
+    "Address Issue",
+    "No Reason Logged",
+    "Other / Miscellaneous",
+  ];
+  const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0 }]));
+  const byMethod = new Map();
+  let replacedCount = 0;
+
+  const returnOrders = returnRows.map((r) => {
+    const amount = Math.abs(toNum(r.net_sales_amount));
+    const category = categorizeReturnReason(r.invoice_remarks);
+    const method = checkoutByOrderNo.get(r.order_no) || "Unknown";
+    const returnDate = String(r.transaction_date).slice(0, 10);
+    const key = `${normalizeName(`${r.customer_firstname || ""} ${r.customer_lastname || ""}`)}|${r.product_name}`;
+    const laterSaleDates = candidatesByNameProduct.get(key) || [];
+    const replaced = laterSaleDates.some((d) => {
+      const diff = daysBetween(returnDate, d);
+      return diff > 0 && diff <= 30;
+    });
+    if (replaced) replacedCount += 1;
+
+    const catBucket = byCategory.get(category) || byCategory.get("Other / Miscellaneous");
+    catBucket.count += 1;
+    catBucket.value += amount;
+    const methodBucket = byMethod.get(method) || { count: 0, value: 0 };
+    methodBucket.count += 1;
+    methodBucket.value += amount;
+    byMethod.set(method, methodBucket);
+
+    return {
+      invoiceNo: r.invoice_no,
+      customer: `${r.customer_firstname || ""} ${r.customer_lastname || ""}`.trim(),
+      productName: r.product_name,
+      returnDate,
+      amount,
+      checkoutMethod: method,
+      category,
+      remarks: r.invoice_remarks,
+      replaced,
+    };
+  });
+
+  const returnsCount = returnRows.length;
+  const returnsValue = returnOrders.reduce((s, o) => s + o.amount, 0);
+
+  const dailySalesRows = await (
+    await client.query({
+      query: `
+        SELECT transaction_date AS d, uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+          AND transaction_date BETWEEN {from:String} AND {to:String}
+        GROUP BY transaction_date
+      `,
+      query_params: { store: HRH_STORE, channels, from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const dailySales = new Map(dailySalesRows.map((r) => [String(r.d).slice(0, 10), { count: toNum(r.cnt), value: toNum(r.amt) }]));
+
+  const dailyMap = new Map();
+  for (const r of returnRows) {
+    const d = String(r.transaction_date).slice(0, 10);
+    if (!dailyMap.has(d)) dailyMap.set(d, { count: 0, value: 0 });
+    const bucket = dailyMap.get(d);
+    bucket.count += 1;
+    bucket.value += Math.abs(toNum(r.net_sales_amount));
+  }
+  const allDates = new Set([...dailyMap.keys(), ...dailySales.keys()]);
+  const trend = Array.from(allDates, (date) => ({
+    date,
+    salesCount: dailySales.get(date)?.count || 0,
+    salesValue: dailySales.get(date)?.value || 0,
+    returns: dailyMap.get(date)?.count || 0,
+    returnsValue: dailyMap.get(date)?.value || 0,
+  })).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  return {
+    kpis: {
+      totalSalesInvoiced: { value: salesCount, sub: formatPesoPlain(salesValue) },
+      totalReturns: { value: returnsCount, sub: formatPesoPlain(returnsValue) },
+      returnRateByCount: { value: safeDivide(returnsCount, salesCount) * 100 },
+      returnRateByValue: { value: safeDivide(returnsValue, salesValue) * 100 },
+    },
+    trend,
+    byFulfillmentMethod: Array.from(byMethod, ([method, v]) => ({ method, count: v.count, value: v.value, sharePct: safeDivide(v.count, returnsCount) * 100 })).sort(
+      (a, b) => b.count - a.count
+    ),
+    reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
+    orders: returnOrders,
+    replacement: {
+      totalReturns: returnsCount,
+      replacedCount,
+      replacedSharePct: safeDivide(replacedCount, returnsCount) * 100,
+    },
+  };
+}
+function formatPesoPlain(n) {
+  return `₱${toNum(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 export async function handleOrdersFulfillment(req, res) {
   try {
     const channel = req.query.channel || "All Channels";
+    const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
-
-    // CHANNEL SCOPE: this methodology (order_report + net_sales order_no
-    // linkage) is verified only for HMRPH Online. TikTok/Shopee orders
-    // don't flow through xv3.mart_xv3_order_report at all (no equivalent
-    // source validated), so this page reports that limitation rather than
-    // fabricating a lifecycle for those channels.
-    if (channel === "TikTok" || channel === "Shopee") {
-      res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
-      return res.status(200).json({
-        meta: {
-          channel,
-          range,
-          unsupportedChannel: true,
-          limitationNote:
-            "This methodology (order-to-invoice fulfillment matching) is validated for HMRPH Online only — TikTok and Shopee orders don't flow through the same order/cancellation source table, so no equivalent lifecycle can be computed for them here without separate validation.",
-          generatedAt: new Date().toISOString(),
-        },
-        kpis: null,
-        lifecycle: null,
-        fulfillmentTrend: [],
-        cancellations: null,
-        unresolvedOrders: [],
-        dataQuality: [],
-      });
-    }
 
     let range_;
     try {
@@ -380,7 +583,41 @@ export async function handleOrdersFulfillment(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
-    const m = await computeHmrphOnlineLifecycle(range_.from, range_.to);
+    // CHANNEL SCOPE: the Fulfillment/Cancellation methodology (order_report
+    // + net_sales order_no linkage) is verified only for HMRPH Online.
+    // TikTok/Shopee orders don't flow through xv3.mart_xv3_order_report at
+    // all (no equivalent source validated), so those two tabs report that
+    // limitation rather than fabricating a lifecycle. Returns is NOT
+    // limited this way — mart_net_sales has a real sales_channel column —
+    // so it's computed for whatever channel scope is selected regardless.
+    const fulfillmentUnsupported = channel === "TikTok" || channel === "Shopee";
+
+    const [m, returns] = await Promise.all([
+      fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(range_.from, range_.to),
+      computeReturnsAnalysis(range_.from, range_.to, channels),
+    ]);
+
+    if (fulfillmentUnsupported) {
+      res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+      return res.status(200).json({
+        meta: {
+          channel,
+          range,
+          current: { from: range_.from, to: range_.to },
+          unsupportedChannel: true,
+          limitationNote:
+            "This methodology (order-to-invoice fulfillment matching) is validated for HMRPH Online only — TikTok and Shopee orders don't flow through the same order/cancellation source table, so no equivalent lifecycle can be computed for them here without separate validation. Returns below still reflects this channel.",
+          generatedAt: new Date().toISOString(),
+        },
+        kpis: null,
+        lifecycle: null,
+        fulfillmentTrend: [],
+        cancellations: null,
+        unresolvedOrders: [],
+        returns,
+        dataQuality: [],
+      });
+    }
 
     const completionRate = safeDivide(m.fulfilled, m.realOrdersReceived) * 100;
 
@@ -547,6 +784,7 @@ export async function handleOrdersFulfillment(req, res) {
       fulfillmentTrend,
       cancellations,
       unresolvedOrders,
+      returns,
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
         `"Cancelled Orders" KPI (${m.allRealCancelled}) is ALL real cancellations this period (including the ${m.customerInitiatedCancelled.length} customer-initiated ones already excluded from Real Orders Received above) — it is a broader population than the "Cancelled" slice in the Fulfillment Status Breakdown (${m.stayingCancelled.length}), which only counts cancellations that stay inside Real Orders Received (System-Initiated Expired + No Reason Logged). These are intentionally different populations, not a reconciliation error.`,
