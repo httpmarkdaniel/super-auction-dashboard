@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ShareBar from "../components/ShareBar";
 import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
@@ -231,7 +230,7 @@ export default function PickupAndDelivery({ filters }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
             <Panel title="Payment Type" subtitle="Share of GMV within Pickup">
-              <ShareBar segments={pickupPaymentSegments} />
+              <DonutChart segments={pickupPaymentSegments} centerValue={formatCompactPeso(pickupSummary?.gmv)} centerLabel="Pickup GMV" />
             </Panel>
             <Panel title="Category Mix" subtitle="Top categories by GMV within Pickup">
               <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Pickup || []} emptyLabel="No pickup sales in this period." />
@@ -270,7 +269,7 @@ export default function PickupAndDelivery({ filters }) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
             <Panel title="Payment Type" subtitle="Share of GMV within Delivery">
-              <ShareBar segments={deliveryPaymentSegments} />
+              <DonutChart segments={deliveryPaymentSegments} centerValue={formatCompactPeso(deliverySummary?.gmv)} centerLabel="Delivery GMV" />
             </Panel>
             <Panel title="Category Mix" subtitle="Top categories by GMV within Delivery">
               <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Delivery || []} emptyLabel="No delivery sales in this period." />
