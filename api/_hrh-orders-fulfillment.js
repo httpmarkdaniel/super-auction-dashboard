@@ -49,16 +49,18 @@ const CHANNEL_MAP = {
 // hardcoded to specific September order numbers: any cancellation by
 // customer_id 70700 tagged "Dev test"/"Devtest"/"devtest", any
 // cancellation reason "FOR TESTING", or any order under customer name
-// "TEST ACCOUNT" (cancelled or not — TEST ACCOUNT orders are dev/test
-// regardless of outcome).
+// "TEST ACCOUNT" or "JOHN DOE" (cancelled or not — blanket-excluded
+// regardless of outcome; "JOHN DOE" is customer_id 70700's own display
+// name, confirmed dev/test — see order 250960, previously the one real
+// order left under that account, now excluded like the rest).
 const DEV_TEST_CUSTOMER_ID = 70700;
 const DEV_TEST_CANCEL_REASONS = new Set(["dev test", "devtest"]);
-const TEST_ACCOUNT_NAME = "TEST ACCOUNT";
+const DEV_TEST_CUSTOMER_NAMES = new Set(["TEST ACCOUNT", "JOHN DOE"]);
 const FOR_TESTING_REASON = "for testing";
 
 function isDevTestOrder(o) {
   const name = (o.customer_name || "").trim().toUpperCase();
-  if (name === TEST_ACCOUNT_NAME) return true;
+  if (DEV_TEST_CUSTOMER_NAMES.has(name)) return true;
   if (o.order_status !== "Cancelled") return false;
   const reason = (o.cancellation_reason || "").trim().toLowerCase();
   if (Number(o.customer_id) === DEV_TEST_CUSTOMER_ID && DEV_TEST_CANCEL_REASONS.has(reason)) return true;
