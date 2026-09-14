@@ -8,38 +8,94 @@ const client = createClient({
 });
 
 // Underscore-prefixed (see api/_hrh-traffic-analytics.js's comment) — the
-// Vercel project's Hobby plan caps deployments at 12 Serverless Functions
-// and is already exactly at that cap, so this can't be its own route.
+// Vercel project's Hobby plan caps deployments at 12 Serverless Functions.
 // api/hrh-sales-analytics.js dispatches here on `?report=ordersFulfillment`.
 //
-// Two real source tables, both live operational snapshots (not sales-over-
-// time), so — same as Barcode Analytics/Inventory Aging/Markdown Analytics
-// — this ignores the page's Date Range/Channel filter:
-//
-// xv3.mart_xv3_order_pickability — has a real store_name column (unlike
-// the journey table below), one row per order LINE ITEM, with
-// picking_status (PENDING/PICKED) and stock-availability fields
-// (is_pickable, shortage). Drives "Orders Requiring Pick"/"Pick Rate"/
-// "Pending Picks"/the Pending Pick Queue table.
-//
-// xv3.mart_order_fulfilment_journey — one row per order, no store_name
-// column at all, but verified: the half that joins to sales_order_item is
-// 100% store_id 160 (HRH Online), and the other half has 18-digit order
-// IDs matching HRH Online's TikTok/Shopee external order-ID format — so
-// treated as exclusively HRH Online's own fulfillment ops, not filtered
-// by store (there's nothing to filter by). Drives the funnel, Avg Pick
-// Time, Fulfillment Rate, courier performance, and pick-to-dispatch
-// timing. is_packed/is_shipped/current_status are used for the funnel
-// (not raw timestamp presence) because order_placed_at and
-// waybill_printed_at both have real population gaps that make raw
-// timestamp presence non-monotonic (e.g. more rows have packing_finished_at
-// than waybill_printed_at) — the boolean flags are clean and consistent.
+// ---------------------------------------------------------------------
+// METHODOLOGY — ported from the HMR MART / HMRPH ONLINE Sep 2026 MTD
+// report (source of truth for every definition below). Two real source
+// tables:
+//   xv3.mart_xv3_order_report — orders, cancellations, customer/checkout
+//     detail. One row per order, occasional exact-duplicate CDC rows
+//     (deduped below via GROUP BY order_number). No sales_channel column
+//     at all — verified against live data that store_name = 'HRH ONLINE'
+//     alone reproduces the report's HMRPH-ONLINE-only order counts exactly
+//     (88 distinct orders, Sep 1-10 2026), meaning this table only ever
+//     contains HMRPH Online's own website orders; TikTok/Shopee orders
+//     never enter it. That's why this whole page is scoped to HMRPH
+//     Online only (see CHANNEL SCOPE below) — there is no equivalent
+//     order/cancellation source for the other two channels to validate
+//     this methodology against.
+//   xv3.mart_net_sales — invoices (transaction_type = 'sale'), used only
+//     to determine FULFILLMENT. order_status on the order table is
+//     explicitly NOT used for that — it can sit at "Paid" or "Processing"
+//     long after an order has actually been invoiced and sold.
+// ---------------------------------------------------------------------
 const HRH_STORE = "HRH ONLINE";
-// Orders still genuinely in the pick pipeline — excludes Cancelled (never
-// picked, correctly so) and Completed (fulfilled already; this table's
-// picking_status often never got backfilled to PICKED for older completed
-// orders, a data-completeness gap, not a real still-pending order).
-const ACTIVE_ORDER_STATUSES = ["Paid", "Processing", "For Delivery", "Pending"];
+const HMRPH_CHANNEL = "HMRPH ONLINE";
+
+// Dev/test exclusions — centralized here and reused by both Orders &
+// Fulfillment and Executive Overview (see computeHmrphOnlineLifecycle
+// below, imported by api/hrh-executive-overview.js). Reusable rule, not
+// hardcoded to specific September order numbers: any cancellation by
+// customer_id 70700 tagged "Dev test"/"Devtest"/"devtest", any
+// cancellation reason "FOR TESTING", or any order under customer name
+// "TEST ACCOUNT" (cancelled or not — TEST ACCOUNT orders are dev/test
+// regardless of outcome).
+const DEV_TEST_CUSTOMER_ID = 70700;
+const DEV_TEST_CANCEL_REASONS = new Set(["dev test", "devtest"]);
+const TEST_ACCOUNT_NAME = "TEST ACCOUNT";
+const FOR_TESTING_REASON = "for testing";
+
+function isDevTestOrder(o) {
+  const name = (o.customer_name || "").trim().toUpperCase();
+  if (name === TEST_ACCOUNT_NAME) return true;
+  if (o.order_status !== "Cancelled") return false;
+  const reason = (o.cancellation_reason || "").trim().toLowerCase();
+  if (Number(o.customer_id) === DEV_TEST_CUSTOMER_ID && DEV_TEST_CANCEL_REASONS.has(reason)) return true;
+  if (reason === FOR_TESTING_REASON) return true;
+  return false;
+}
+
+// Cancellation Reasons — 7 categories, built from the free-text
+// cancellation_reason field (~30 distinct raw values customers can pick
+// from). Keyword-matched against the categories' own descriptions in the
+// methodology report rather than an exhaustive enumeration of every raw
+// string (that full list wasn't in the report) — see dataQuality caveats
+// in the response for this limitation.
+function categorizeCancellationReason(reason) {
+  const r = (reason || "").toLowerCase().trim();
+  if (!r) return "No Reason Logged";
+  if (r.includes("expired")) return "System-Initiated (Expired)";
+  if (r.includes("change") && r.includes("mind")) return "Changed Mind / No Longer Needed";
+  if (r.includes("no longer need") || (r.includes("need") && (r.includes("didn") || r.includes("don")))) {
+    return "Changed Mind / No Longer Needed";
+  }
+  if (r.includes("payment") || r.includes("gcash") || r.includes("insufficient") || r.includes("cod")) return "Payment Issues";
+  if (r.includes("website") || r.includes("technical") || r.includes("checkout") || r.includes("login") || r.includes("cart") || r.includes("glitch") || r.includes("site error")) {
+    return "Technical / Website Issues";
+  }
+  if (r.includes("duplicate") || r.includes("add item") || r.includes("promo") || r.includes("modif")) return "Order Modification";
+  return "Other / Miscellaneous";
+}
+
+// "Customer-initiated" (methodology's own footnote definition): cancelled
+// with a stated reason OTHER than an "Expired Order" auto-cancel. These
+// are excluded from Real Orders Received entirely (not treated as real
+// demand) — distinct from System-Initiated (Expired) and No Reason
+// Logged, both of which stay INSIDE Real Orders Received as genuine
+// demand that entered the funnel.
+function isCustomerInitiatedCancellation(category) {
+  return category !== "System-Initiated (Expired)" && category !== "No Reason Logged";
+}
+
+function normalizeName(name) {
+  return (name || "")
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 function toNum(v) {
   const n = Number(v);
@@ -48,157 +104,394 @@ function toNum(v) {
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
+function addDaysISO(iso, days) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+function daysBetween(aIso, bIso) {
+  return Math.round((new Date(`${bIso}T00:00:00Z`) - new Date(`${aIso}T00:00:00Z`)) / 86400000);
+}
+function manilaTodayISODate() {
+  const d = new Date(Date.now() + 8 * 3600 * 1000);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+function mondayOfWeek(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return addDaysISO(iso, dow === 0 ? -6 : 1 - dow);
+}
+function firstOfMonthISO(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  return `${y}-${String(m).padStart(2, "0")}-01`;
+}
+function resolveRange(range, fromParam, toParam) {
+  const today = manilaTodayISODate();
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    return { from, to };
+  }
+  if (range === "mtd") return { from: firstOfMonthISO(today), to: today };
+  if (range === "ytd") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  return { from: mondayOfWeek(today), to: today }; // wtd (default)
+}
+
+// ---------------------------------------------------------------------
+// Core methodology, shared by Orders & Fulfillment and Executive
+// Overview's lifecycle card (imported there) so the two pages can never
+// drift onto different definitions for the same date range.
+// ---------------------------------------------------------------------
+export async function computeHmrphOnlineLifecycle(from, to) {
+  const orderRows = await (
+    await client.query({
+      query: `
+        SELECT
+          order_number,
+          any(order_status) AS order_status,
+          any(payment_status) AS payment_status,
+          any(customer_name) AS customer_name,
+          any(customer_id) AS customer_id,
+          any(net_total) AS net_total,
+          any(created_at) AS order_created_at,
+          any(cancellation_reason) AS cancellation_reason,
+          any(order_id) AS order_id
+        FROM xv3.mart_xv3_order_report
+        WHERE store_name = {store:String}
+          AND toDate(created_at) BETWEEN {from:String} AND {to:String}
+        GROUP BY order_number
+      `,
+      query_params: { store: HRH_STORE, from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+
+  const rawDedupedCount = orderRows.length;
+
+  const devTestOrders = [];
+  const stayingCancelled = []; // System-Initiated (Expired) + No Reason Logged — real demand, stays inside Real Orders Received
+  const customerInitiatedCancelled = []; // stated non-expiry reason — excluded from Real Orders Received per methodology
+  const nonCancelled = [];
+
+  for (const o of orderRows) {
+    o.net_total = toNum(o.net_total);
+    o.created_at = o.order_created_at ? String(o.order_created_at).slice(0, 10) : null;
+    if (isDevTestOrder(o)) {
+      devTestOrders.push(o);
+      continue;
+    }
+    if (o.order_status === "Cancelled") {
+      const category = categorizeCancellationReason(o.cancellation_reason);
+      o.category = category;
+      if (isCustomerInitiatedCancellation(category)) customerInitiatedCancelled.push(o);
+      else stayingCancelled.push(o);
+    } else {
+      nonCancelled.push(o);
+    }
+  }
+
+  // Orders Received — Duplicate Check: same customer_id + same calendar
+  // day + same item ordered more than once (validated via
+  // sales_order_item, not assumed from order count alone) — normal
+  // multi-item/multi-day shopping by the same customer is NOT collapsed.
+  let duplicateRetryOrders = [];
+  const orderIds = nonCancelled.map((o) => toNum(o.order_id)).filter((id) => id > 0);
+  if (orderIds.length) {
+    const itemRows = await (
+      await client.query({
+        query: `SELECT order_id, groupUniqArray(name) AS items FROM xv3.sales_order_item WHERE order_id IN ({ids:Array(Int64)}) GROUP BY order_id`,
+        query_params: { ids: orderIds },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const itemsByOrderId = new Map(itemRows.map((r) => [String(r.order_id), r.items || []]));
+    const byCustDay = new Map();
+    for (const o of nonCancelled) {
+      const key = `${o.customer_id}|${o.created_at}`;
+      if (!byCustDay.has(key)) byCustDay.set(key, []);
+      byCustDay.get(key).push(o);
+    }
+    const dupSet = new Set();
+    for (const group of byCustDay.values()) {
+      if (group.length < 2) continue;
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const itemsA = itemsByOrderId.get(String(group[i].order_id)) || [];
+          const itemsB = itemsByOrderId.get(String(group[j].order_id)) || [];
+          if (itemsA.some((x) => itemsB.includes(x))) {
+            dupSet.add(group[i].order_number);
+            dupSet.add(group[j].order_number);
+          }
+        }
+      }
+    }
+    duplicateRetryOrders = nonCancelled.filter((o) => dupSet.has(o.order_number));
+  }
+  const dupSetFinal = new Set(duplicateRetryOrders.map((o) => o.order_number));
+  const realNonCancelled = nonCancelled.filter((o) => !dupSetFinal.has(o.order_number));
+
+  const realOrdersReceived = realNonCancelled.length + stayingCancelled.length;
+
+  // Fulfilled — order_no matched directly in xv3.mart_net_sales, OR a
+  // probable match (customer name + date window + fee-adjusted amount
+  // gap) for invoices with no order_no populated. order_status is never
+  // used for this determination.
+  const directMatchRows = await (
+    await client.query({
+      query: `
+        SELECT DISTINCT order_no
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
+          AND order_no IS NOT NULL AND order_no != ''
+      `,
+      query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const directMatchedSet = new Set(directMatchRows.map((r) => r.order_no));
+
+  const directFulfilled = [];
+  const needsProbable = [];
+  for (const o of realNonCancelled) {
+    if (directMatchedSet.has(o.order_number)) directFulfilled.push(o);
+    else needsProbable.push(o);
+  }
+
+  // Probable-match candidate pool: invoices with no order_no, in an
+  // extended window (order date -1 to +11 days) so a valid invoice just
+  // outside the selected range can still resolve an order inside it.
+  const extendedFrom = addDaysISO(from, -1);
+  const extendedTo = addDaysISO(to, 11);
+  const blankOrderInvoiceRows = await (
+    await client.query({
+      query: `
+        SELECT
+          invoice_no,
+          any(transaction_date) AS invoice_transaction_date,
+          any(customer_firstname) AS fn,
+          any(customer_lastname) AS ln,
+          sum(net_sales_amount) AS amount
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
+          AND (order_no IS NULL OR order_no = '')
+          AND transaction_date BETWEEN {from:String} AND {to:String}
+        GROUP BY invoice_no
+      `,
+      query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL, from: extendedFrom, to: extendedTo },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const candidatesByName = new Map();
+  for (const inv of blankOrderInvoiceRows) {
+    const name = normalizeName(`${inv.fn || ""} ${inv.ln || ""}`);
+    if (!candidatesByName.has(name)) candidatesByName.set(name, []);
+    candidatesByName.get(name).push({
+      invoiceNo: inv.invoice_no,
+      date: inv.invoice_transaction_date ? String(inv.invoice_transaction_date).slice(0, 10) : null,
+      amount: toNum(inv.amount),
+      used: false,
+    });
+  }
+
+  const probableFulfilled = [];
+  const noInvoiceUnresolved = [];
+  const ambiguousUnresolved = [];
+  for (const o of needsProbable) {
+    const name = normalizeName(o.customer_name);
+    const pool = candidatesByName.get(name) || [];
+    const qualifying = pool.filter((c) => {
+      if (c.used || !c.date) return false;
+      const dayDiff = daysBetween(o.created_at, c.date);
+      return dayDiff >= -1 && dayDiff <= 10 && c.amount <= o.net_total && o.net_total - c.amount <= 500;
+    });
+    if (qualifying.length === 1) {
+      qualifying[0].used = true;
+      probableFulfilled.push({ ...o, probableInvoice: qualifying[0].invoiceNo });
+    } else if (qualifying.length > 1) {
+      // Methodology: ambiguous nearby matches for the same customer are
+      // not force-matched.
+      ambiguousUnresolved.push(o);
+    } else {
+      noInvoiceUnresolved.push(o);
+    }
+  }
+
+  const fulfilled = directFulfilled.length + probableFulfilled.length;
+  const stillAwaiting = noInvoiceUnresolved.length + ambiguousUnresolved.length;
+  const allRealCancelled = stayingCancelled.length + customerInitiatedCancelled.length;
+
+  return {
+    from,
+    to,
+    rawDedupedCount,
+    devTestOrders,
+    duplicateRetryOrders,
+    customerInitiatedCancelled,
+    stayingCancelled,
+    allRealCancelled,
+    realOrdersReceived,
+    directFulfilled,
+    probableFulfilled,
+    fulfilled,
+    noInvoiceUnresolved,
+    ambiguousUnresolved,
+    stillAwaiting,
+  };
+}
 
 export async function handleOrdersFulfillment(req, res) {
   try {
-    // Orders Requiring Pick / Pick Rate / Pending Picks — order-level
-    // (deduped by order_number; this table is one row per line item),
-    // scoped to ACTIVE_ORDER_STATUSES.
-    const pickRows = await (
-      await client.query({
-        query: `
-          SELECT any(picking_status) AS picking_status
-          FROM xv3.mart_xv3_order_pickability
-          WHERE store_name = {store:String} AND order_status IN ({statuses:Array(String)})
-          GROUP BY order_number
-        `,
-        query_params: { store: HRH_STORE, statuses: ACTIVE_ORDER_STATUSES },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const ordersRequiringPick = pickRows.length;
-    const pendingPicks = pickRows.filter((r) => r.picking_status === "PENDING").length;
-    const pickedCount = pickRows.filter((r) => r.picking_status === "PICKED").length;
-    const pickRate = safeDivide(pickedCount, ordersRequiringPick) * 100;
+    const channel = req.query.channel || "All Channels";
+    const { from = "", to = "" } = req.query;
+    const range = req.query.range || (from && to ? "custom" : "wtd");
 
-    // Avg Pick Time — journey table's picking_to_qc_seconds, a real
-    // precomputed duration (picking start to QC start), 99.96% coverage.
-    // Fulfillment Rate — is_shipped=1 share of the whole journey table.
-    const journeyKpiRows = await (
-      await client.query({
-        query: `
-          SELECT
-            avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
-            countIf(is_shipped = 1) AS shipped,
-            count() AS total
-          FROM xv3.mart_order_fulfilment_journey
-        `,
-        format: "JSONEachRow",
-      })
-    ).json();
-    const jk = journeyKpiRows[0] || {};
-    const avgPickMinutes = toNum(jk.avg_pick_seconds) / 60;
-    const fulfillmentRate = safeDivide(toNum(jk.shipped), toNum(jk.total)) * 100;
+    // CHANNEL SCOPE: this methodology (order_report + net_sales order_no
+    // linkage) is verified only for HMRPH Online. TikTok/Shopee orders
+    // don't flow through xv3.mart_xv3_order_report at all (no equivalent
+    // source validated), so this page reports that limitation rather than
+    // fabricating a lifecycle for those channels.
+    if (channel === "TikTok" || channel === "Shopee") {
+      res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+      return res.status(200).json({
+        meta: {
+          channel,
+          range,
+          unsupportedChannel: true,
+          limitationNote:
+            "This methodology (order-to-invoice fulfillment matching) is validated for HMRPH Online only — TikTok and Shopee orders don't flow through the same order/cancellation source table, so no equivalent lifecycle can be computed for them here without separate validation.",
+          generatedAt: new Date().toISOString(),
+        },
+        kpis: null,
+        lifecycle: null,
+        fulfillmentTrend: [],
+        cancellations: null,
+        unresolvedOrders: [],
+        dataQuality: [],
+      });
+    }
 
-    // Order Fulfillment Funnel — is_packed/is_shipped flags (clean,
-    // monotonic), not raw timestamp presence (see file header comment).
-    const funnelRows = await (
-      await client.query({
-        query: `
-          SELECT
-            count() AS total,
-            countIf(picking_started_at IS NOT NULL) AS picked,
-            countIf(is_packed = 1) AS packed,
-            countIf(is_shipped = 1) AS shipped
-          FROM xv3.mart_order_fulfilment_journey
-        `,
-        format: "JSONEachRow",
-      })
-    ).json();
-    const f = funnelRows[0] || {};
-    const funnel = [
-      { label: "Orders", value: toNum(f.total) },
-      { label: "Picked", value: toNum(f.picked) },
-      { label: "Packed", value: toNum(f.packed) },
-      { label: "Shipped", value: toNum(f.shipped) },
+    let range_;
+    try {
+      range_ = resolveRange(range, from, to);
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+
+    const m = await computeHmrphOnlineLifecycle(range_.from, range_.to);
+
+    const completionRate = safeDivide(m.fulfilled, m.realOrdersReceived) * 100;
+
+    // Fulfillment Status Breakdown — reconciles exactly to Real Orders
+    // Received (Fulfilled + Cancelled-that-stays-in + Still Awaiting).
+    // NOTE: this is a DIFFERENT, narrower "Cancelled" population than the
+    // "Cancelled Orders" KPI card below — see dataQuality note.
+    const lifecycle = [
+      { label: "Fulfilled", value: m.fulfilled },
+      { label: "Cancelled", value: m.stayingCancelled.length },
+      { label: "Still Awaiting Fulfillment / No Invoice", value: m.stillAwaiting },
     ];
 
-    // Pending Pick Queue — order-level, oldest first, real shortage flag
-    // from the pickability table (whether current stock can cover it).
-    const queueRows = await (
-      await client.query({
-        query: `
-          SELECT order_number, min(created_at) AS created_at, sum(shortage) AS total_shortage, any(order_status) AS order_status_out
-          FROM xv3.mart_xv3_order_pickability
-          WHERE store_name = {store:String} AND order_status IN ({statuses:Array(String)}) AND picking_status = 'PENDING'
-          GROUP BY order_number
-          ORDER BY created_at ASC
-          LIMIT 50
-        `,
-        query_params: { store: HRH_STORE, statuses: ACTIVE_ORDER_STATUSES },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const pendingPickQueue = queueRows.map((r) => ({
-      order: r.order_number,
-      ageHours: r.created_at ? Math.round((Date.now() - new Date(r.created_at).getTime()) / 3600000) : null,
-      shortage: toNum(r.total_shortage),
-      status: r.order_status_out,
-    }));
-
-    // Fulfillment Performance by Courier — replaces the mock's "by Store"
-    // (HRH Online is a single online store with no branch dimension in
-    // either source table), avg total fulfillment duration per courier.
-    // J&T Express (the biggest, ~44% of shipments) runs ~4 days on
-    // average vs ~1 day for the others — a real, actionable gap.
-    const courierRows = await (
-      await client.query({
-        query: `
-          SELECT coalesce(courier_service, 'No Courier Logged') AS courier, avgIf(total_duration_seconds, total_duration_seconds IS NOT NULL) AS avg_seconds
-          FROM xv3.mart_order_fulfilment_journey
-          GROUP BY courier
-          ORDER BY avg_seconds DESC
-        `,
-        format: "JSONEachRow",
-      })
-    ).json();
-    const performanceByCourier = courierRows.map((r) => ({ label: r.courier, avgHours: Math.round((toNum(r.avg_seconds) / 3600) * 10) / 10 }));
-
-    // Pick / Dispatch Time Distribution — dateDiff between picking_started_at
-    // and dispatch_finalized_at, bucketed in hours. 2,530 of 2,723 rows have
-    // both timestamps.
-    const DIST_BUCKETS = [
-      { label: "≤1h", where: "hrs <= 1" },
-      { label: "1-6h", where: "hrs > 1 AND hrs <= 6" },
-      { label: "6-24h", where: "hrs > 6 AND hrs <= 24" },
-      { label: "24-48h", where: "hrs > 24 AND hrs <= 48" },
-      { label: "48h+", where: "hrs > 48" },
+    // Cancellation Reasons — 7 categories, over ALL real cancellations
+    // (both the ones that stay inside Real Orders Received and the
+    // "confirmed customer-initiated" ones excluded from it) — matches the
+    // methodology's own Cancellation tab population.
+    const allRealCancelledOrders = [...m.stayingCancelled, ...m.customerInitiatedCancelled];
+    const CATEGORY_ORDER = [
+      "System-Initiated (Expired)",
+      "Payment Issues",
+      "Technical / Website Issues",
+      "Changed Mind / No Longer Needed",
+      "Order Modification",
+      "No Reason Logged",
+      "Other / Miscellaneous",
     ];
-    const distRows = await (
-      await client.query({
-        query: `
-          SELECT ${DIST_BUCKETS.map((b, i) => `countIf(${b.where}) AS b${i}`).join(", ")}
-          FROM (
-            SELECT dateDiff('second', picking_started_at, dispatch_finalized_at) / 3600.0 AS hrs
-            FROM xv3.mart_order_fulfilment_journey
-            WHERE picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
-          )
-        `,
-        format: "JSONEachRow",
-      })
-    ).json();
-    const distRow = distRows[0] || {};
-    const pickDispatchTimeDistribution = DIST_BUCKETS.map((b, i) => ({ label: b.label, value: toNum(distRow[`b${i}`]) }));
+    const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0 }]));
+    for (const o of allRealCancelledOrders) {
+      const bucket = byCategory.get(o.category) || byCategory.get("Other / Miscellaneous");
+      bucket.count += 1;
+      bucket.value += o.net_total;
+    }
+    const cancellations = {
+      total: allRealCancelledOrders.length,
+      reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
+    };
+
+    // Fulfillment Trend — daily Real Received / Fulfilled / Cancelled,
+    // reusing the same orders already fetched above (no extra query).
+    const allRealOrders = [
+      ...m.directFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
+      ...m.probableFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
+      ...m.noInvoiceUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
+      ...m.ambiguousUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
+      ...m.stayingCancelled.map((o) => ({ ...o, bucket: "cancelled" })),
+    ];
+    const byDate = new Map();
+    for (const o of allRealOrders) {
+      const d = o.created_at;
+      if (!byDate.has(d)) byDate.set(d, { date: d, received: 0, fulfilled: 0, cancelled: 0, awaiting: 0 });
+      const row = byDate.get(d);
+      row.received += 1;
+      row[o.bucket] += 1;
+    }
+    const fulfillmentTrend = Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    // Unresolved Orders — post-reconciliation only (both direct AND
+    // probable matching failed); ambiguous multi-candidate cases are
+    // flagged as such rather than silently force-matched.
+    const unresolvedOrders = [
+      ...m.noInvoiceUnresolved.map((o) => ({
+        orderNumber: o.order_number,
+        orderStatus: o.order_status,
+        paymentStatus: o.payment_status,
+        customer: o.customer_name,
+        orderDate: o.created_at,
+        amount: o.net_total,
+        probableInvoice: null,
+        reason: "No invoice or probable match found",
+      })),
+      ...m.ambiguousUnresolved.map((o) => ({
+        orderNumber: o.order_number,
+        orderStatus: o.order_status,
+        paymentStatus: o.payment_status,
+        customer: o.customer_name,
+        orderDate: o.created_at,
+        amount: o.net_total,
+        probableInvoice: null,
+        reason: "Ambiguous — multiple possible invoice matches for this customer, not force-matched",
+      })),
+    ].sort((a, b) => (a.orderDate < b.orderDate ? -1 : 1));
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
-        snapshotNote:
-          "Live fulfillment-operations snapshot for HRH Online — not affected by the Date Range or Channel filter above, since both source tables are operational state, not dated sales transactions.",
-        pendingNote: "Orders Requiring Pick / Pick Rate / Pending Picks are scoped to orders still active in the pipeline (Paid, Processing, For Delivery, Pending) — excludes Cancelled and already-Completed orders.",
+        channel: "HMRPH Online",
+        range,
+        current: { from: range_.from, to: range_.to },
+        methodologyNote:
+          "Fulfillment is determined from invoices in xv3.mart_net_sales (direct order_no match, or a probable match by customer name + date + fee-adjusted amount), never from order_status — see dataQuality for known matching caveats.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        ordersRequiringPick: { value: ordersRequiringPick },
-        pickRate: { value: pickRate },
-        pendingPicks: { value: pendingPicks },
-        avgPickTime: { value: Math.round(avgPickMinutes), sub: "min" },
-        fulfillmentRate: { value: fulfillmentRate },
+        realOrdersReceived: { value: m.realOrdersReceived, sub: `${m.rawDedupedCount} raw deduped` },
+        fulfilledOrders: { value: m.fulfilled },
+        completionRate: { value: completionRate },
+        cancelledOrders: { value: m.allRealCancelled },
+        stillAwaitingFulfillment: { value: m.stillAwaiting },
       },
-      funnel,
-      pendingPickQueue,
-      performanceByCourier,
-      pickDispatchTimeDistribution,
+      lifecycle,
+      fulfillmentTrend,
+      cancellations,
+      unresolvedOrders,
+      dataQuality: [
+        `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
+        `"Cancelled Orders" KPI (${m.allRealCancelled}) is ALL real cancellations this period (including the ${m.customerInitiatedCancelled.length} customer-initiated ones already excluded from Real Orders Received above) — it is a broader population than the "Cancelled" slice in the Fulfillment Status Breakdown (${m.stayingCancelled.length}), which only counts cancellations that stay inside Real Orders Received (System-Initiated Expired + No Reason Logged). These are intentionally different populations, not a reconciliation error.`,
+        "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
+        "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",
+        "Cancellation reason categorization is keyword-based against the methodology's 7-category descriptions, not an exhaustive enumeration of every raw dropdown value.",
+        "This is a live warehouse — counts can shift slightly between queries as new transactions land.",
+      ],
     });
   } catch (err) {
     console.error("HRH Orders & Fulfillment API error:", err);

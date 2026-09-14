@@ -31,25 +31,15 @@ const COMPARE_OPTIONS = [
   { key: "month", label: "Month" },
 ];
 
-// Real order_status values from xv3.mart_xv3_order_report (verified, not
-// assumed), plus a per-channel "Unmapped (Channel)" bucket the API assigns
-// to a canonical order with no match in that table — see
-// api/hrh-executive-overview.js's comment for why the Order Status donut
-// classifies the SAME canonical order population as the Orders KPI (so the
-// two always sum to the same total), rather than a separate one, and why
-// Unmapped is split by channel (it means something different per channel —
-// TikTok/Shopee orders are never tracked in that table at all, HMRPH Online
-// unmapped orders are a real smaller coverage gap).
-const ORDER_STATUS_COLOR = {
-  Paid: hrh.good,
-  Completed: hrh.series[2],
-  "For Delivery": hrh.series[1],
-  Processing: hrh.accent,
-  Pending: hrh.muted,
+// Canonical lifecycle buckets (Fulfilled/Cancelled/Still Awaiting) — same
+// definitions as Orders & Fulfillment (api/_hrh-orders-fulfillment.js's
+// computeHmrphOnlineLifecycle), never the raw order_status field. See
+// api/hrh-executive-overview.js's comment for why this is fixed to HMRPH
+// Online regardless of the page's Channel filter.
+const ORDER_LIFECYCLE_COLOR = {
+  Fulfilled: hrh.good,
   Cancelled: hrh.bad,
-  "Unmapped (HMRPH Online)": "#c7cdd6",
-  "Unmapped (TikTok)": "#a9b1bd",
-  "Unmapped (Shopee)": "#8b95a3",
+  "Still Awaiting Fulfillment": hrh.muted,
 };
 
 const CHANNEL_LABEL = {
@@ -141,8 +131,8 @@ export default function ExecutiveOverview({ filters }) {
   const salesTrend = bucketRows(data?.salesTrend, trendBucket, ["gmv", "orders", "units"]);
   const channelSegments =
     data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
-  const orderStatusSegments = data?.orderStatus.map((s) => ({ label: s.status, value: s.count, color: ORDER_STATUS_COLOR[s.status] || hrh.muted })) || [];
-  const totalOrderStatusCount = orderStatusSegments.reduce((s, x) => s + x.value, 0);
+  const orderLifecycleSegments =
+    data?.orderLifecycle.map((s) => ({ label: s.status, value: s.count, color: ORDER_LIFECYCLE_COLOR[s.status] || hrh.muted })) || [];
   const customerSegments =
     data?.customerSegments.map((s) => ({ label: s.segment, value: s.orders, color: SEGMENT_COLOR[s.segment] || hrh.muted })) || [];
   const totalCustomerSegmentCount = customerSegments.reduce((s, x) => s + x.value, 0);
@@ -230,10 +220,14 @@ export default function ExecutiveOverview({ filters }) {
               <DonutChart segments={channelSegments} centerValue={formatCompactPeso(data.kpis.gmv.value)} centerLabel="Total GMV" />
             </Panel>
             <Panel
-              title="Order Status"
-              subtitle={data.meta?.orderStatusNote || "Status breakdown of the selected period's Orders"}
+              title="Order Lifecycle"
+              subtitle={data.meta?.orderLifecycleNote || "Fulfilled / Cancelled / Still Awaiting Fulfillment"}
             >
-              <DonutChart segments={orderStatusSegments} centerValue={formatNum(totalOrderStatusCount)} centerLabel="Total Orders" />
+              <DonutChart
+                segments={orderLifecycleSegments}
+                centerValue={formatNum(data.orderLifecycleTotal)}
+                centerLabel="Real Orders Received"
+              />
             </Panel>
             <Panel title="Customer Segments" subtitle="HMRPH Online only — not affected by the Channel filter above">
               <DonutChart segments={customerSegments} centerValue={formatNum(totalCustomerSegmentCount)} centerLabel="HMRPH Online Orders" />

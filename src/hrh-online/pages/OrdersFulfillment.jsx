@@ -1,38 +1,74 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import FunnelList from "../components/FunnelList";
-import { BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
+import { DonutChart, StackedAreaChart } from "../components/Charts";
+import { formatShortDateLabel } from "../trendBucket";
 import { hrh } from "../theme";
-import { formatPct, formatNum } from "../format";
+import { formatPct, formatNum, formatPeso } from "../format";
 
-const QUEUE_COLUMNS = [
-  { key: "order", label: "Order" },
-  { key: "ageHours", label: "Age (hours)", render: (r) => (r.ageHours === null ? "—" : formatNum(r.ageHours)) },
-  { key: "shortage", label: "Shortage (units)", render: (r) => formatNum(r.shortage) },
-  { key: "status", label: "Status" },
+const LIFECYCLE_COLOR = {
+  Fulfilled: hrh.good,
+  Cancelled: hrh.bad,
+  "Still Awaiting Fulfillment / No Invoice": hrh.muted,
+};
+
+const CANCEL_REASON_COLUMNS = [
+  { key: "category", label: "Category" },
+  { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
+  { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
 ];
+
+const UNRESOLVED_COLUMNS = [
+  { key: "orderNumber", label: "Order #" },
+  { key: "orderStatus", label: "Order Status" },
+  { key: "paymentStatus", label: "Payment" },
+  { key: "customer", label: "Customer" },
+  { key: "orderDate", label: "Order Date" },
+  { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
+  { key: "probableInvoice", label: "Probable Invoice", render: (r) => r.probableInvoice || "—" },
+  { key: "reason", label: "Reason / Flag" },
+];
+
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
+function isDateRangeReady(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return Boolean(dateRange.from && dateRange.to && dateRange.from <= dateRange.to);
+  }
+  return Boolean(dateRange);
+}
 
 // Real ClickHouse-backed Orders & Fulfillment — see
 // api/_hrh-orders-fulfillment.js (dispatched from api/hrh-sales-analytics.js
-// via ?report=ordersFulfillment) for the queries. Sourced from two real
-// operational tables (xv3.mart_xv3_order_pickability for pick status/stock
-// shortage, xv3.mart_order_fulfilment_journey for pick->pack->ship timing),
-// both live snapshots — same locked contract as Barcode Analytics/
-// Inventory Aging/Markdown Analytics: ignores the Date Range/Channel filter,
-// always "as of right now" for HRH Online.
-export default function OrdersFulfillment() {
+// via ?report=ordersFulfillment) for the full methodology, ported from the
+// HMR MART / HMRPH ONLINE report: fulfillment is determined from invoices
+// in xv3.mart_net_sales (direct order_no match, or a probable match by
+// customer name + date + fee-adjusted amount), never from order_status.
+// HMRPH Online only — TikTok/Shopee orders don't flow through the same
+// order/cancellation source table, so this page reports that limitation
+// instead of fabricating a lifecycle for those channels. No Pick Rate —
+// HMR MART runs its own WMS, PickApp picking_status isn't meaningful here.
+export default function OrdersFulfillment({ filters }) {
+  const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async (signal) => {
+  const ready = isDateRangeReady(dateRange);
+  const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
+
+  const load = useCallback(async (ch, p, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/hrh-sales-analytics?report=ordersFulfillment`, { signal });
+      const qs = new URLSearchParams({ channel: ch, ...p, report: "ordersFulfillment" });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
@@ -46,14 +82,21 @@ export default function OrdersFulfillment() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
     const controller = new AbortController();
-    load(controller.signal);
+    load(channel, params, controller.signal);
     return () => controller.abort();
-  }, [load]);
+  }, [channel, params, ready, load]);
 
-  const funnel = data?.funnel || [];
-  const performanceByCourier = data?.performanceByCourier || [];
-  const pickDispatchTimeDistribution = data?.pickDispatchTimeDistribution || [];
+  const lifecycleSegments =
+    data?.lifecycle?.map((l) => ({ label: l.label, value: l.value, color: LIFECYCLE_COLOR[l.label] || hrh.muted })) || [];
+  const fulfillmentTrend =
+    data?.fulfillmentTrend?.map((d) => ({
+      dateLabel: formatShortDateLabel(d.date),
+      fulfilled: d.fulfilled,
+      cancelled: d.cancelled,
+      awaiting: d.awaiting,
+    })) || [];
 
   return (
     <div>
@@ -61,39 +104,74 @@ export default function OrdersFulfillment() {
         Orders &amp; Fulfillment
       </div>
 
-      {loading && !data && <LoadingState label="Loading Orders & Fulfillment…" />}
+      {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
+      {ready && loading && !data && <LoadingState label="Loading Orders & Fulfillment…" />}
       {error && <ErrorState label={`Couldn't load Orders & Fulfillment: ${error}`} />}
 
-      {data && !error && (
+      {data && !error && data.meta?.unsupportedChannel && (
+        <ErrorState label={data.meta.limitationNote} />
+      )}
+
+      {data && !error && !data.meta?.unsupportedChannel && (
         <>
           <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            {data.meta?.snapshotNote}
+            {data.meta?.methodologyNote}
           </div>
 
           <KpiRow>
-            <KpiCard label="Orders Requiring Pick" value={formatNum(data.kpis.ordersRequiringPick.value)} sub="active orders" />
-            <KpiCard label="Pick Rate" value={formatPct(data.kpis.pickRate.value)} />
-            <KpiCard label="Pending Picks" value={formatNum(data.kpis.pendingPicks.value)} />
-            <KpiCard label="Avg Pick Time" value={`${data.kpis.avgPickTime.value} ${data.kpis.avgPickTime.sub}`} />
-            <KpiCard label="Fulfillment Rate" value={formatPct(data.kpis.fulfillmentRate.value)} sub="shipped / all orders" />
+            <KpiCard label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} sub={data.kpis.realOrdersReceived.sub} />
+            <KpiCard label="Fulfilled Orders" value={formatNum(data.kpis.fulfilledOrders.value)} />
+            <KpiCard label="Completion Rate" value={formatPct(data.kpis.completionRate.value)} />
+            <KpiCard label="Cancelled Orders" value={formatNum(data.kpis.cancelledOrders.value)} />
+            <KpiCard label="Still Awaiting Fulfillment" value={formatNum(data.kpis.stillAwaitingFulfillment.value)} />
           </KpiRow>
 
-          <Panel title="Order Fulfillment Funnel" subtitle={data.meta?.pendingNote} className="mb-4">
-            <FunnelList stages={funnel} />
-          </Panel>
-
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Pending Pick Queue" subtitle="Active orders, oldest first">
-              <DataTable columns={QUEUE_COLUMNS} rows={data.pendingPickQueue} paginate pageSize={10} emptyLabel="No active orders waiting to be picked." />
+            <Panel title="Fulfillment Status Breakdown" subtitle="Reconciles to Real Orders Received above">
+              <DonutChart segments={lifecycleSegments} centerValue={formatNum(data.kpis.realOrdersReceived.value)} centerLabel="Real Orders Received" />
             </Panel>
-            <Panel title="Fulfillment Performance by Courier" subtitle="Avg total fulfillment time (hours)">
-              <BarComparisonChart data={performanceByCourier} series={[{ key: "avgHours", name: "Avg Hours" }]} valueFormatter={formatNum} horizontal />
+            <Panel title="Fulfillment Trend" subtitle="Fulfilled / Cancelled / Still Awaiting, by order date">
+              <StackedAreaChart
+                data={fulfillmentTrend}
+                xKey="dateLabel"
+                stacked
+                valueFormatter={formatNum}
+                categories={[
+                  { key: "fulfilled", name: "Fulfilled", color: hrh.good },
+                  { key: "cancelled", name: "Cancelled", color: hrh.bad },
+                  { key: "awaiting", name: "Still Awaiting", color: hrh.muted },
+                ]}
+              />
             </Panel>
           </div>
 
-          <Panel title="Pick / Dispatch Time Distribution" subtitle="Picking start to dispatch finalized">
-            <BarComparisonChart data={pickDispatchTimeDistribution} series={[{ key: "value", name: "Orders", color: hrh.accent }]} valueFormatter={formatNum} />
+          <Panel title="Cancellation Reasons" subtitle="All real cancellations this period — 7-category grouping" className="mb-4">
+            <DataTable columns={CANCEL_REASON_COLUMNS} rows={data.cancellations?.reasons || []} emptyLabel="No cancellations in this period." />
           </Panel>
+
+          <Panel
+            title="Unresolved Orders"
+            subtitle="Still awaiting fulfillment after both direct and probable invoice matching"
+            className="mb-4"
+          >
+            <DataTable
+              columns={UNRESOLVED_COLUMNS}
+              rows={data.unresolvedOrders}
+              paginate
+              pageSize={10}
+              emptyLabel="Every real order this period has a direct or probable invoice match."
+            />
+          </Panel>
+
+          {data.dataQuality?.length > 0 && (
+            <Panel title="Data Quality Notes">
+              <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: hrh.ink2 }}>
+                {data.dataQuality.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            </Panel>
+          )}
         </>
       )}
     </div>

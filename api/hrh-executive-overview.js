@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { computeHmrphOnlineLifecycle } from "./_hrh-orders-fulfillment.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -302,78 +303,32 @@ export default async function handler(req, res) {
           }))
         : [{ channel: channels[0], gmv: curGmv, sharePct: curGmv > 0 ? 100 : 0 }];
 
-    // Order Status — MUST classify the exact same canonical order population
-    // as the Orders KPI (uniqExactIf(invoice_id, net_sales_amount > 0) on
-    // mart_net_sales, same store/channel/date scope), never a different,
-    // smaller population, so SUM(orderStatus.count) === kpis.orders always.
+    // Order Lifecycle — replaces the old order_status-heavy donut (Paid/
+    // Processing/Unknown-Unmapped described raw system state, not real
+    // fulfillment — order_status can sit at "Paid" or "Processing" long
+    // after an order is actually invoiced and sold). Uses the SAME
+    // canonical Fulfilled/Cancelled/Still Awaiting definitions as Orders &
+    // Fulfillment (see api/_hrh-orders-fulfillment.js's
+    // computeHmrphOnlineLifecycle — fulfillment determined from invoices
+    // in xv3.mart_net_sales, direct order_no match or a probable name+
+    // date+amount match, never from order_status), for the SAME date
+    // range as this page's Date Range filter, so the two pages always
+    // reconcile for HMRPH Online.
     //
-    // Each canonical invoice_id gets exactly one status (single GROUP BY
-    // over the canonical set, not separate additive queries, so there is
-    // no double-counting by construction):
-    //   1. order_status from xv3.mart_xv3_order_report, LEFT JOINed on
-    //      invoice_id (the same field Recent Orders already joins on) —
-    //      real values only (Paid/Cancelled/Completed/For Delivery/
-    //      Processing/Pending).
-    //   2. "Unknown/Unmapped" for every canonical invoice_id with no match
-    //      in that table (investigated: TikTok/Shopee orders and a
-    //      majority of HMRPH Online orders aren't tracked there at all —
-    //      that table is HMRPH's own storefront checkout system, not a
-    //      universal order ledger, so this is expected, not a bug).
-    // "Returned" was investigated and deliberately NOT added: a return's
-    // invoice_id does not match its original sale's invoice_id in
-    // mart_net_sales (checked directly — zero overlap), so there is no
-    // reliable way to tag a canonical order as returned without guessing.
-    const orderStatusRows = await (
-      await client.query({
-        query: `
-          WITH canonical AS (
-            SELECT DISTINCT invoice_id, sales_channel
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String}
-              AND sales_channel IN {channels:Array(String)}
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-              AND net_sales_amount > 0 AND invoice_id IS NOT NULL
-          ),
-          statuses AS (
-            SELECT invoice_id, argMax(order_status, created_at) AS order_status
-            FROM xv3.mart_xv3_order_report
-            WHERE invoice_id IS NOT NULL
-            GROUP BY invoice_id
-          )
-          SELECT
-            multiIf(s.order_status != '', s.order_status, 'Unknown/Unmapped') AS status,
-            c.sales_channel AS channel,
-            count() AS c
-          FROM canonical c
-          LEFT JOIN statuses s ON c.invoice_id = s.invoice_id
-          GROUP BY status, channel
-          ORDER BY c DESC
-        `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
-    // Matched statuses (Paid/Processing/etc.) stay collapsed across channels
-    // — coverage in xv3.mart_xv3_order_report is essentially HMRPH Online
-    // only anyway (see comment above). "Unknown/Unmapped" is split per
-    // channel instead of one blob, since it means something different per
-    // channel: for TikTok/Shopee it's simply "this table never tracks
-    // marketplace orders at all" (100% of those orders, every period); for
-    // HMRPH Online it's a real (smaller) coverage gap in that table.
-    const CHANNEL_DISPLAY = { "HMRPH ONLINE": "HMRPH Online", TIKTOK: "TikTok", SHOPEE: "Shopee" };
-    const matchedTotals = new Map();
-    const orderStatus = [];
-    for (const r of orderStatusRows) {
-      const count = toNum(r.c);
-      if (r.status === "Unknown/Unmapped") {
-        orderStatus.push({ status: `Unmapped (${CHANNEL_DISPLAY[r.channel] || r.channel})`, count });
-      } else {
-        matchedTotals.set(r.status, (matchedTotals.get(r.status) || 0) + count);
-      }
-    }
-    for (const [status, count] of matchedTotals) orderStatus.push({ status, count });
-    orderStatus.sort((a, b) => b.count - a.count);
-    const hasUnmapped = orderStatus.some((r) => r.status.startsWith("Unmapped"));
+    // Fixed to HMRPH Online regardless of the page's Channel filter — same
+    // reasoning as Customer Segments below: xv3.mart_xv3_order_report (the
+    // order/cancellation source) only ever contains HMRPH Online's own
+    // website orders, TikTok/Shopee orders never flow through it, so there
+    // is no equivalent lifecycle to compute for those channels without
+    // separate validation (see api/_hrh-orders-fulfillment.js's channel-
+    // scope comment).
+    const lifecycleData = await computeHmrphOnlineLifecycle(current.from, current.to);
+    const orderLifecycle = [
+      { status: "Fulfilled", count: lifecycleData.fulfilled },
+      { status: "Cancelled", count: lifecycleData.stayingCancelled.length },
+      { status: "Still Awaiting Fulfillment", count: lifecycleData.stillAwaiting },
+    ];
+    const orderLifecycleTotal = lifecycleData.realOrdersReceived;
 
     // Customer Segments — deliberately HARD-CODED to sales_channel =
     // 'HMRPH ONLINE', ignoring the page's channel filter entirely. Verified
@@ -479,9 +434,8 @@ export default async function handler(req, res) {
         previous,
         salesAsOf: k.sales_as_of || null,
         generatedAt: new Date().toISOString(),
-        orderStatusNote: hasUnmapped
-          ? "Status coverage based on matched order records; unmatched sales orders are shown as Unmapped, split by channel."
-          : null,
+        orderLifecycleNote:
+          "HMRPH Online only, not affected by the Channel filter above — same Fulfilled/Cancelled/Still Awaiting definitions as Orders & Fulfillment (fulfillment from invoices, not order_status).",
       },
       kpis: {
         gmv: { value: curGmv, previous: prevGmv, delta: pctDelta(curGmv, prevGmv) },
@@ -498,7 +452,8 @@ export default async function handler(req, res) {
       salesTrend,
       avgSalesPerDayByChannel,
       channelMix,
-      orderStatus,
+      orderLifecycle,
+      orderLifecycleTotal,
       customerSegments,
     });
   } catch (err) {
