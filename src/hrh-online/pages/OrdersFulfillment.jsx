@@ -29,8 +29,8 @@ const YES_NO_PILL = { Yes: { bg: "#e6f4ea", text: hrh.good }, No: { bg: "#f0f1f5
 
 const SUB_TABS = [
   { key: "fulfillment", label: "Fulfillment" },
-  { key: "cancellation", label: "Cancellation" },
-  { key: "returns", label: "Returns" },
+  { key: "cancellation", label: "Cancellation (Pre-Fulfillment)" },
+  { key: "returns", label: "Returns (Post-Fulfillment)" },
   { key: "methodology", label: "Methodology" },
 ];
 
@@ -141,7 +141,7 @@ function LifecycleBarRow({ label, value, total, color }) {
 
 function SubTabNav({ value, onChange }) {
   return (
-    <div className="flex gap-1.5 mb-4 border-b" style={{ borderColor: hrh.border }}>
+    <div className="flex gap-1.5 mb-4 border-b overflow-x-auto" style={{ borderColor: hrh.border }}>
       {SUB_TABS.map((t) => {
         const active = t.key === value;
         return (
@@ -149,7 +149,7 @@ function SubTabNav({ value, onChange }) {
             key={t.key}
             type="button"
             onClick={() => onChange(t.key)}
-            className="text-[12.5px] font-semibold px-3.5 py-2 -mb-px"
+            className="text-[12.5px] font-semibold px-3.5 py-2 -mb-px whitespace-nowrap shrink-0"
             style={
               active
                 ? { color: hrh.accentText, borderBottom: `2px solid ${hrh.accent}` }
@@ -404,6 +404,10 @@ export default function OrdersFulfillment({ filters }) {
       {/* ============================== CANCELLATION ============================== */}
       {data && !error && subTab === "cancellation" && !data.meta?.unsupportedChannel && (
         <>
+          <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
+            Source: xv3.mart_xv3_order_report (cancellation_reason) — pre-fulfillment order cancellations, before any invoice/sale exists. See Returns for post-fulfillment sales reversals.
+          </div>
+
           <KpiRow>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("cancelled")}>
               <KpiCard label="Total Cancelled (Real)" value={formatNum(data.kpis.cancelledOrders.value)} />
@@ -473,7 +477,7 @@ export default function OrdersFulfillment({ filters }) {
       {data && !error && subTab === "returns" && data.returns && (
         <>
           <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            Source: xv3.mart_net_sales (transaction_type = sale/return) — post-fulfillment sales reversals, kept separate from Cancelled orders above.
+            Source: xv3.mart_net_sales (transaction_type = sale/return) — post-fulfillment sales reversals, kept separate from Cancellation (pre-fulfillment) above.
           </div>
 
           <KpiRow>
