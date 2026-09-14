@@ -8,6 +8,7 @@ import CustomerAnalytics from "./pages/CustomerAnalytics";
 import ProductAnalytics from "./pages/ProductAnalytics";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
 import OrdersFulfillment from "./pages/OrdersFulfillment";
+import BarcodeAnalytics from "./pages/BarcodeAnalytics";
 import PickupAndDelivery from "./pages/PickupAndDelivery";
 import CustomerSuccess from "./pages/CustomerSuccess";
 import OperationalFlags from "./pages/OperationalFlags";
@@ -23,6 +24,7 @@ const PAGES = {
   productAnalytics: ProductAnalytics,
   markdown: MarkdownAnalytics,
   fulfillment: OrdersFulfillment,
+  barcodeAnalytics: BarcodeAnalytics,
   pickup: PickupAndDelivery,
   customerSuccess: CustomerSuccess,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,
@@ -60,7 +62,7 @@ export default function HrhOnlineApp() {
           onChannelChange={setChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
-          hideChannelFilter={page === "traffic" || page === "customerSuccess"}
+          hideChannelFilter={page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics"}
         />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />
