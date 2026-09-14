@@ -23,39 +23,76 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-// Simple horizontal progressive-bar funnel — no new chart dependency, just
-// width-proportional bars + conversion-from-previous-stage labels.
-function LifecycleFunnelBars({ stages }) {
-  const maxQty = Math.max(1, ...stages.map((s) => s.qty));
+// A real tapering funnel — plain SVG polygons, no new chart dependency.
+// Each stage is a trapezoid: top edge = this stage's share of the first
+// stage, bottom edge = the NEXT stage's share (so the shape actually narrows
+// stage-to-stage instead of just being a shorter bar); the last stage is a
+// straight-sided band since it has no next stage to taper into. Centered
+// horizontally, contiguous bands (no gaps) for a single continuous funnel
+// silhouette. Labels/qty/conversion sit outside the shape (left of a
+// pointer line) rather than on top of the fill, so they stay legible
+// regardless of the band's color or how thin it gets.
+const VB_W = 520;
+const BAND_H = 76;
+const MIN_FRAC = 0.05; // keep a sliver visible even for a near-zero stage
+
+function LifecycleFunnel({ stages }) {
+  const firstQty = stages[0]?.qty || 0;
+  const frac = (qty) => (firstQty > 0 ? Math.max(MIN_FRAC, Math.min(1, qty / firstQty)) : MIN_FRAC);
+  const vbH = stages.length * BAND_H;
+  const cx = VB_W / 2;
+
   return (
-    <div className="space-y-2.5">
-      {stages.map((s, i) => (
-        <div key={s.key}>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[12px] font-medium" style={{ color: hrh.ink }}>
-              {s.label}
-            </span>
-            <span className="text-[12px]" style={{ color: hrh.ink2 }}>
-              {formatNum(s.qty)}
-              {i > 0 && s.conversionFromPrev !== null && s.conversionFromPrev !== undefined && (
-                <span className="ml-2" style={{ color: hrh.muted }}>
-                  ({formatPct(s.conversionFromPrev)} of {stages[i - 1].label})
-                </span>
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
+      <svg viewBox={`0 0 ${VB_W} ${vbH}`} className="w-full" style={{ maxWidth: 420 }} preserveAspectRatio="xMidYMid meet">
+        {stages.map((s, i) => {
+          const topW = frac(s.qty) * VB_W;
+          const bottomW = i < stages.length - 1 ? frac(stages[i + 1].qty) * VB_W : topW;
+          const y0 = i * BAND_H;
+          const y1 = y0 + BAND_H;
+          const points = [
+            [cx - topW / 2, y0],
+            [cx + topW / 2, y0],
+            [cx + bottomW / 2, y1],
+            [cx - bottomW / 2, y1],
+          ]
+            .map((p) => p.join(","))
+            .join(" ");
+          return (
+            <g key={s.key}>
+              <polygon points={points} fill={hrh.series[i % hrh.series.length]} stroke={hrh.surface} strokeWidth={2} />
+              <text x={cx} y={y0 + BAND_H / 2 - 6} textAnchor="middle" fontSize="15" fontWeight="600" fill="#fff">
+                {formatNum(s.qty)}
+              </text>
+              <text x={cx} y={y0 + BAND_H / 2 + 14} textAnchor="middle" fontSize="11" fill="rgba(255,255,255,0.85)">
+                {s.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      <div className="space-y-2 lg:pt-2 lg:min-w-[180px]">
+        {stages.map((s, i) => (
+          <div key={s.key} className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: hrh.series[i % hrh.series.length] }} />
+            <span className="text-[11.5px]" style={{ color: hrh.ink2 }}>
+              {i === 0 ? (
+                <span style={{ color: hrh.muted }}>Cohort start</span>
+              ) : s.conversionFromPrev !== null && s.conversionFromPrev !== undefined ? (
+                <>
+                  <span className="font-semibold" style={{ color: hrh.ink }}>
+                    {formatPct(s.conversionFromPrev)}
+                  </span>{" "}
+                  of {stages[i - 1].label}
+                </>
+              ) : (
+                "—"
               )}
             </span>
           </div>
-          <div className="h-6 rounded" style={{ background: hrh.bg }}>
-            <div
-              className="h-6 rounded flex items-center"
-              style={{
-                width: `${Math.max(2, (s.qty / maxQty) * 100)}%`,
-                background: hrh.series[i % hrh.series.length],
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
@@ -124,7 +161,7 @@ export default function BarcodeAnalytics({ filters }) {
           title="Inventory Lifecycle Funnel"
           subtitle={`ASN → Barcoded → Posted → Sold — cohort received in this period, tracked to date (${funnel.cohort?.from} to ${funnel.cohort?.to})`}
         >
-          <LifecycleFunnelBars stages={funnel.stages} />
+          <LifecycleFunnel stages={funnel.stages} />
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
             <div>
