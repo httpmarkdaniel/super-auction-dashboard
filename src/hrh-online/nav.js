@@ -26,6 +26,10 @@ export const NAV_GROUPS = [
       { key: "customerSuccess", label: "Customer Success" },
     ],
   },
+  {
+    label: "Reports",
+    items: [{ key: "weeklyBusinessReview", label: "Weekly Business Review" }],
+  },
 ];
 
 export const OPERATIONAL_FLAGS_KEY = "operationalFlags";

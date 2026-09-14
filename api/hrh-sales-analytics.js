@@ -7,6 +7,7 @@ import { handleMarkdownAnalytics } from "./_hrh-markdown-analytics.js";
 import { handleOrdersFulfillment } from "./_hrh-orders-fulfillment.js";
 import { handleCustomerSuccess } from "./_hrh-customer-success.js";
 import { handlePickupDelivery } from "./_hrh-pickup-delivery.js";
+import { handleWeeklyBusinessReview } from "./_hrh-weekly-business-review.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -202,6 +203,7 @@ export default async function handler(req, res) {
   if (req.query.report === "ordersFulfillment") return handleOrdersFulfillment(req, res);
   if (req.query.report === "customerSuccess") return handleCustomerSuccess(req, res);
   if (req.query.report === "pickupDelivery") return handlePickupDelivery(req, res);
+  if (req.query.report === "weeklyBusinessReview") return handleWeeklyBusinessReview(req, res);
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
