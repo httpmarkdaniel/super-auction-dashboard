@@ -48,8 +48,24 @@ function effectivePeriodLabel(period) {
   return from === to ? from : `${from} – ${to}`;
 }
 
+// Same New (1 lifetime order) / Returning (2+) definition and colors as
+// the KPI cards and Customer Trend chart above — see
+// api/_hrh-customer-analytics.js's newCustomerDefinition note.
+function CustomerTypePill({ type }) {
+  const isNew = type === "New";
+  return (
+    <span
+      className="text-[10.5px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+      style={{ background: isNew ? hrh.blueSoft : hrh.accentSoft, color: isNew ? hrh.blueText : hrh.accentText }}
+    >
+      {type}
+    </span>
+  );
+}
+
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
+  { key: "customerType", label: "Customer Type", render: (r) => <CustomerTypePill type={r.customerType} /> },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
   { key: "units", label: "Units", render: (r) => formatNum(r.units) },
   { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
@@ -290,6 +306,12 @@ export default function CustomerAnalytics({ filters }) {
                       <span>Total mapped</span>
                       <span className="font-semibold" style={{ color: hrh.ink }}>
                         {formatNum(totalMappedCustomers)}
+                      </span>
+                    </div>
+                    <div className="text-[11.5px] flex items-center justify-between" style={{ color: hrh.muted }}>
+                      <span>No Address Provided</span>
+                      <span className="font-semibold" style={{ color: hrh.ink }}>
+                        {formatNum(data.noAddressCustomers)}
                       </span>
                     </div>
                   </div>

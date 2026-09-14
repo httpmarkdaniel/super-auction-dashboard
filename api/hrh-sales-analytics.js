@@ -608,6 +608,7 @@ export default async function handler(req, res) {
               voucher_code,
               any(voucher_name) AS voucher_name,
               count() AS orders,
+              uniqExact(customer_name) AS distinct_customers,
               sum(total_order_price) AS order_price,
               sum(total_discount_price) AS discount_price
             FROM cms.mart_cms_voucher_report
@@ -645,6 +646,7 @@ export default async function handler(req, res) {
         voucher: r.voucher_name || r.voucher_code,
         code: r.voucher_code,
         orders: toNum(r.orders),
+        customers: toNum(r.distinct_customers),
         orderPrice,
         discountPrice,
         discountRate: safeDivide(discountPrice, orderPrice) * 100,

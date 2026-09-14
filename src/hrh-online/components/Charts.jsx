@@ -122,13 +122,12 @@ export function SalesTrendComboChart({ data, height = 260 }) {
         />
         <Tooltip content={<ComboTooltip />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        {/* hrh.series[1] is close enough to hrh.accent's orange that it read
-            as the same color next to the GMV line, so Units uses the teal
-            in hrh.series[2] instead — blue/teal stacked bars stay clearly
-            distinct from the orange GMV line. */}
-        <Bar yAxisId="orders" dataKey="orders" name="Orders" stackId="volume" fill={hrh.blue} radius={[0, 0, 0, 0]} maxBarSize={24} />
-        <Bar yAxisId="orders" dataKey="units" name="Units Sold" stackId="volume" fill={hrh.series[2]} radius={[2, 2, 0, 0]} maxBarSize={24} />
-        <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
+        {/* Grouped (not stacked) bars — Orders and Units Sold are each their
+            own whole count, not parts of one total, so stacking them would
+            misrepresent the combined bar height as a meaningful sum. */}
+        <Bar yAxisId="orders" dataKey="orders" name="Orders" fill={hrh.series[0]} radius={[2, 2, 0, 0]} maxBarSize={20} />
+        <Bar yAxisId="orders" dataKey="units" name="Units Sold" fill={hrh.accent} radius={[2, 2, 0, 0]} maxBarSize={20} />
+        <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.good} strokeWidth={2.5} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );

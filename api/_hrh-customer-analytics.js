@@ -325,6 +325,7 @@ export async function handleCustomerAnalytics(req, res) {
       .slice(0, TOP_CUSTOMERS_SHOWN)
       .map((c) => ({
         customer: c.name,
+        customerType: c.isNew ? "New" : "Returning",
         orders: c.orders,
         units: c.units,
         gmv: c.gmv,
@@ -422,15 +423,15 @@ export async function handleCustomerAnalytics(req, res) {
     // to the same home address, and this avoids double-counting a customer
     // who ordered from two different addresses within the window.
     //
-    // checkout_method = 'Delivery' is an EXPLICIT filter, not an incidental
-    // one — verified xv3.sales_orders.checkout_method is only 'Pickup' or
-    // 'Delivery', and every single one of the 643 HMRPH Online orders that
-    // had a usable address was already 'Delivery' (Pickup orders never
-    // populate an address at all, since there's nothing to ship). Filtering
-    // on it explicitly rather than relying on that correlation means this
-    // can never silently start including in-store pickup orders (whose
-    // address, if ever populated, would be meaningless for a customer
-    // location map) if the data behind that correlation ever changes.
+    // Pickup orders are now INCLUDED (LEFT JOIN, no checkout_method filter)
+    // rather than silently dropped — verified xv3.sales_orders.address is
+    // never populated for checkout_method = 'Pickup' (nothing to ship), so
+    // every Pickup customer's latest candidate will have address = '' and
+    // is classified below as "No Address Provided" (a real, counted
+    // bucket) instead of just vanishing from the denominator the way it
+    // did before. Delivery orders that happen to have no captured address
+    // land in the same bucket for the same reason (no address to extract
+    // a province from).
     const provinceInvoiceRows = await (
       await client.query({
         query: `
@@ -454,22 +455,27 @@ export async function handleCustomerAnalytics(req, res) {
             FROM xv3.sales_orders
             WHERE invoice_id IN (SELECT invoice_id FROM hrh_invoices)
             GROUP BY invoice_id
-            HAVING address != '' AND checkout_method = 'Delivery'
           )
           SELECT
             h.customer_id AS customer_id,
             h.transaction_date AS transaction_date,
-            trim(replaceRegexpOne(
-              arrayElement(splitByChar(',', o.address), length(splitByChar(',', o.address))),
-              '\\\\s*[0-9]+\\\\s*$', ''
-            )) AS province_candidate,
+            coalesce(o.address, '') AS address,
+            coalesce(o.checkout_method, '') AS checkout_method,
             if(
-              length(splitByChar(',', o.address)) >= 2,
-              trim(arrayElement(splitByChar(',', o.address), length(splitByChar(',', o.address)) - 1)),
+              coalesce(o.address, '') != '',
+              trim(replaceRegexpOne(
+                arrayElement(splitByChar(',', coalesce(o.address, '')), length(splitByChar(',', coalesce(o.address, '')))),
+                '\\\\s*[0-9]+\\\\s*$', ''
+              )),
+              ''
+            ) AS province_candidate,
+            if(
+              coalesce(o.address, '') != '' AND length(splitByChar(',', coalesce(o.address, ''))) >= 2,
+              trim(arrayElement(splitByChar(',', coalesce(o.address, '')), length(splitByChar(',', coalesce(o.address, ''))) - 1)),
               ''
             ) AS city_candidate
           FROM hrh_invoices h
-          INNER JOIN order_address o ON h.invoice_id = o.invoice_id
+          LEFT JOIN order_address o ON h.invoice_id = o.invoice_id
         `,
         query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
         format: "JSONEachRow",
@@ -481,6 +487,7 @@ export async function handleCustomerAnalytics(req, res) {
       if (!existing || r.transaction_date > existing.date) {
         latestCandidateByCustomer.set(r.customer_id, {
           date: r.transaction_date,
+          hasAddress: r.address !== "",
           candidate: r.province_candidate,
           cityCandidate: r.city_candidate,
         });
@@ -519,7 +526,12 @@ export async function handleCustomerAnalytics(req, res) {
     const provinceCounts = new Map();
     const cityCountsByProvince = new Map(); // province -> Map(canonicalCity -> { key, isCity, count })
     let matchedCustomers = 0;
-    for (const { candidate, cityCandidate } of latestCandidateByCustomer.values()) {
+    let noAddressCustomers = 0;
+    for (const { hasAddress, candidate, cityCandidate } of latestCandidateByCustomer.values()) {
+      if (!hasAddress) {
+        noAddressCustomers += 1;
+        continue;
+      }
       const province = normalizeProvince(candidate);
       if (!province) continue;
       provinceCounts.set(province, (provinceCounts.get(province) || 0) + 1);
@@ -683,7 +695,7 @@ export async function handleCustomerAnalytics(req, res) {
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
         newCustomerDefinition:
           "New = this customer has placed exactly one order ever, across their entire history with HMR (any store, any channel) as of today. Returning = two or more lifetime orders. Not tied to the selected date range — a customer's label stays the same regardless of what period you're viewing.",
-        provinceScopeNote: `HMRPH Online Delivery orders only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems, and Pickup orders have no delivery address to map. Based on ${matchedCustomers} of ${hmrphOnlineTotalCustomers} HMRPH Online customers in this period whose checkout address could be matched to a province; the rest either placed no HMRPH Online delivery order this period or didn't have a usable address on file.`,
+        provinceScopeNote: `HMRPH Online only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems. Includes both Pickup and Delivery orders: ${matchedCustomers} of ${hmrphOnlineTotalCustomers} customers in this period matched to a real province, ${noAddressCustomers} have "No Address Provided" (every Pickup order, plus any Delivery order with no captured address — Pickup never has one, there's nothing to ship), and the remainder had an address that didn't match a recognized PH province.`,
         generatedAt: new Date().toISOString(),
       },
       kpis,
@@ -693,6 +705,7 @@ export async function handleCustomerAnalytics(req, res) {
       purchaseFrequency: Object.entries(frequencyBuckets).map(([bucket, count]) => ({ bucket, count })),
       customerTrend,
       customersByProvince,
+      noAddressCustomers,
       customerDemographics,
       topCustomers,
     });

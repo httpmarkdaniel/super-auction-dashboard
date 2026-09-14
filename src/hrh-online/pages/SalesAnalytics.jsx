@@ -119,6 +119,7 @@ const VOUCHER_TABLE_COLUMNS = [
   { key: "voucher", label: "Voucher", maxWidth: 260 },
   { key: "code", label: "Code" },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "customers", label: "Customers", render: (r) => formatNum(r.customers) },
   { key: "orderPrice", label: "Total Order Value", render: (r) => formatPeso(r.orderPrice) },
   { key: "discountPrice", label: "Total Discount Value", render: (r) => formatPeso(r.discountPrice) },
   { key: "discountRate", label: "Discount Rate", render: (r) => formatPct(r.discountRate) },
