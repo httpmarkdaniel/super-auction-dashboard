@@ -766,6 +766,12 @@ export async function handleOrdersFulfillment(req, res) {
     // Unresolved Orders — post-reconciliation only (both direct AND
     // probable matching failed); ambiguous multi-candidate cases are
     // flagged as such rather than silently force-matched.
+    //
+    // payment_status = Pending means COD — these orders are expected to
+    // sit with no invoice yet because HRH Online confirms COD orders by
+    // phone before handing them to the courier (business-confirmed, not
+    // a data gap), so they're labeled distinctly from a genuinely stuck
+    // order (e.g. Paid with no invoice for a while, like order 250960).
     const unresolvedOrders = [
       ...m.noInvoiceUnresolved.map((o) => ({
         orderNumber: o.order_number,
@@ -775,7 +781,10 @@ export async function handleOrdersFulfillment(req, res) {
         orderDate: o.created_at,
         amount: o.net_total,
         probableInvoice: null,
-        reason: "No invoice or probable match found",
+        reason:
+          o.payment_status === "Pending"
+            ? "COD — awaiting phone confirmation before courier handoff"
+            : "No invoice or probable match found",
       })),
       ...m.ambiguousUnresolved.map((o) => ({
         orderNumber: o.order_number,
@@ -832,6 +841,7 @@ export async function handleOrdersFulfillment(req, res) {
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
         `"Cancelled Orders" KPI (${m.allRealCancelled}) is ALL real cancellations this period (including the ${m.customerInitiatedCancelled.length} customer-initiated ones already excluded from Real Orders Received above) — it is a broader population than the "Cancelled" slice in the Fulfillment Status Breakdown (${m.stayingCancelled.length}), which only counts cancellations that stay inside Real Orders Received (System-Initiated Expired + No Reason Logged). These are intentionally different populations, not a reconciliation error.`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
+        "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",
         "Cancellation reason categorization is keyword-based against the methodology's 7-category descriptions, not an exhaustive enumeration of every raw dropdown value.",
         "This is a live warehouse — counts can shift slightly between queries as new transactions land.",
