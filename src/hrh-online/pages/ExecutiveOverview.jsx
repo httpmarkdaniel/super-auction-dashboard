@@ -16,7 +16,7 @@ const KPI_CARDS = [
   { key: "aov", label: "AOV", formatter: formatPeso },
   { key: "orders", label: "Orders", formatter: formatNum },
   { key: "units", label: "Units", formatter: formatNum },
-  { key: "avgSalesPerDay", label: "Avg Sales / Day", formatter: formatPeso },
+  { key: "projectedMonthEndSales", label: "Projected Month-End Sales", formatter: formatPeso },
 ];
 
 // "Compare to" — an explicit, independent choice of comparison basis for

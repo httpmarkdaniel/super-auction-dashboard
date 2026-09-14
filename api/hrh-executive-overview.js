@@ -163,13 +163,57 @@ export default async function handler(req, res) {
     const prevUnits = toNum(k.prev_units);
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
-    // Average Sales / Day — GMV spread evenly across the window's calendar
-    // days (not just days with sales), so a slow custom range reads as
-    // genuinely slower rather than averaging only its active days.
+    // Day counts for the current/comparison windows — used by Avg Sales/Day
+    // by Channel below (GMV spread evenly across the window's calendar
+    // days, not just days with sales, so a slow custom range reads as
+    // genuinely slower rather than averaging only its active days).
     const curDayCount = daysInRange(current.from, current.to);
     const prevDayCount = daysInRange(previous.from, previous.to);
-    const curAvgSalesPerDay = safeDivide(curGmv, curDayCount);
-    const prevAvgSalesPerDay = safeDivide(prevGmv, prevDayCount);
+
+    // Projected Month-End Sales — run-rate projection tied to the current
+    // Manila calendar month, independent of the page's Date Range filter
+    // (same reasoning as Avg Sales/Day by Channel above: "end of month"
+    // only means something against the real month). Average daily GMV is
+    // computed over ACTIVE days only (days with GMV > 0) — a day with no
+    // sales at all (no data, not just a slow day) would otherwise drag the
+    // average down and understate the projection — then that average is
+    // spread across every day in the month, elapsed or not.
+    const today = manilaTodayISODate();
+    const monthStart = firstOfMonthISO(today);
+    const prevMonthStart = shiftMonthsClampedISO(monthStart, -1);
+    const [y, m] = monthStart.split("-").map(Number);
+    const totalDaysInMonth = daysInMonth(y, m);
+
+    const monthGmvRows = await (
+      await client.query({
+        query: `
+          SELECT
+            transaction_date AS d,
+            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel IN {channels:Array(String)}
+            AND transaction_date BETWEEN {from:String} AND {to:String}
+          GROUP BY transaction_date
+        `,
+        query_params: { store: HRH_STORE, channels, from: prevMonthStart, to: today },
+        format: "JSONEachRow",
+      })
+    ).json();
+    let mtdGmv = 0;
+    let activeDaysThisMonth = 0;
+    let lastMonthGmv = 0;
+    for (const r of monthGmvRows) {
+      const rowGmv = toNum(r.gmv);
+      if (r.d >= monthStart) {
+        mtdGmv += rowGmv;
+        if (rowGmv > 0) activeDaysThisMonth += 1;
+      } else {
+        lastMonthGmv += rowGmv;
+      }
+    }
+    const avgGmvPerActiveDay = safeDivide(mtdGmv, activeDaysThisMonth);
+    const projectedMonthEndSales = avgGmvPerActiveDay * totalDaysInMonth;
 
     // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
     // the CURRENT window only. Zero-filled below so a day with no sales
@@ -445,7 +489,11 @@ export default async function handler(req, res) {
         aov: { value: curAov, previous: prevAov, delta: pctDelta(curAov, prevAov) },
         orders: { value: curOrders, previous: prevOrders, delta: pctDelta(curOrders, prevOrders) },
         units: { value: curUnits, previous: prevUnits, delta: pctDelta(curUnits, prevUnits) },
-        avgSalesPerDay: { value: curAvgSalesPerDay, previous: prevAvgSalesPerDay, delta: pctDelta(curAvgSalesPerDay, prevAvgSalesPerDay) },
+        projectedMonthEndSales: {
+          value: projectedMonthEndSales,
+          previous: lastMonthGmv,
+          delta: pctDelta(projectedMonthEndSales, lastMonthGmv),
+        },
       },
       salesTrend,
       avgSalesPerDayByChannel,
