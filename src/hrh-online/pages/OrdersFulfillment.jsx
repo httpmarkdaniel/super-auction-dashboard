@@ -14,6 +14,12 @@ const LIFECYCLE_COLOR = {
   "Still Awaiting Fulfillment / No Invoice": hrh.muted,
 };
 
+const CHECKOUT_METHOD_COLOR = {
+  Pickup: hrh.blue,
+  Delivery: hrh.series[2],
+  Unknown: hrh.muted,
+};
+
 const CANCEL_REASON_COLUMNS = [
   { key: "category", label: "Category" },
   { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
@@ -90,6 +96,8 @@ export default function OrdersFulfillment({ filters }) {
 
   const lifecycleSegments =
     data?.lifecycle?.map((l) => ({ label: l.label, value: l.value, color: LIFECYCLE_COLOR[l.label] || hrh.muted })) || [];
+  const cancelledByMethodSegments =
+    data?.cancellations?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
   const fulfillmentTrend =
     data?.fulfillmentTrend?.map((d) => ({
       dateLabel: formatShortDateLabel(d.date),
@@ -145,9 +153,27 @@ export default function OrdersFulfillment({ filters }) {
             </Panel>
           </div>
 
-          <Panel title="Cancellation Reasons" subtitle="All real cancellations this period — 7-category grouping" className="mb-4">
-            <DataTable columns={CANCEL_REASON_COLUMNS} rows={data.cancellations?.reasons || []} emptyLabel="No cancellations in this period." />
-          </Panel>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <Panel title="Cancellation Reasons" subtitle="All real cancellations this period — 7-category grouping">
+              <DataTable columns={CANCEL_REASON_COLUMNS} rows={data.cancellations?.reasons || []} emptyLabel="No cancellations in this period." />
+            </Panel>
+            <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of all real cancellations">
+              <DonutChart
+                segments={cancelledByMethodSegments}
+                centerValue={formatNum(data.cancellations?.total || 0)}
+                centerLabel="Cancelled Orders"
+              />
+              <DataTable
+                columns={[
+                  { key: "method", label: "Method" },
+                  { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
+                  { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
+                ]}
+                rows={data.cancellations?.byFulfillmentMethod || []}
+                emptyLabel="No cancellations in this period."
+              />
+            </Panel>
+          </div>
 
           <Panel
             title="Unresolved Orders"

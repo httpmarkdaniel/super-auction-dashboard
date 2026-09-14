@@ -157,6 +157,7 @@ export async function computeHmrphOnlineLifecycle(from, to) {
           any(net_total) AS net_total,
           any(created_at) AS order_created_at,
           any(cancellation_reason) AS cancellation_reason,
+          any(checkout_method) AS checkout_method,
           any(order_id) AS order_id
         FROM xv3.mart_xv3_order_report
         WHERE store_name = {store:String}
@@ -413,9 +414,25 @@ export async function handleOrdersFulfillment(req, res) {
       bucket.count += 1;
       bucket.value += o.net_total;
     }
+    // Cancelled Orders by Fulfillment Method — Pickup vs Delivery share of
+    // the same ALL-real-cancellations population as the reasons breakdown
+    // above (methodology's own "Cancelled Orders by Fulfillment Method"
+    // table), from checkout_method on the order itself.
+    const byCheckoutMethod = new Map();
+    for (const o of allRealCancelledOrders) {
+      const method = o.checkout_method || "Unknown";
+      byCheckoutMethod.set(method, (byCheckoutMethod.get(method) || 0) + 1);
+    }
+    const cancelledByFulfillmentMethod = Array.from(byCheckoutMethod, ([method, count]) => ({
+      method,
+      count,
+      sharePct: safeDivide(count, allRealCancelledOrders.length) * 100,
+    })).sort((a, b) => b.count - a.count);
+
     const cancellations = {
       total: allRealCancelledOrders.length,
       reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
+      byFulfillmentMethod: cancelledByFulfillmentMethod,
     };
 
     // Fulfillment Trend — daily Real Received / Fulfilled / Cancelled,
