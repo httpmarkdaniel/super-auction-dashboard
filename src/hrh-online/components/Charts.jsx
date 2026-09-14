@@ -98,10 +98,12 @@ function ComboTooltip({ active, payload, label }) {
   );
 }
 
-// GMV (line, left axis, pesos) + Orders (bars, right axis, whole-number
-// count) on one combined time-series chart — two genuinely different units,
-// so two independent y-axes rather than forcing one scale or normalizing to
-// percentages. `data`: [{ dateLabel, gmv, orders }].
+// GMV (line, left axis, pesos) + Orders/Units (stacked bars, right axis,
+// whole-number counts) on one combined time-series chart — GMV is a
+// genuinely different unit (pesos) from the other two, so it keeps its own
+// left axis rather than forcing one scale; Orders and Units are both
+// "count" so they share the right axis and stack into one bar per bucket.
+// `data`: [{ dateLabel, gmv, orders, units }].
 export function SalesTrendComboChart({ data, height = 260 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -120,10 +122,12 @@ export function SalesTrendComboChart({ data, height = 260 }) {
         />
         <Tooltip content={<ComboTooltip />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        {/* hrh.series[1] is the same orange as hrh.accent — using it here
-            made the Orders bars visually indistinguishable from the GMV
-            line. Blue bars / orange line instead, clearly distinct. */}
-        <Bar yAxisId="orders" dataKey="orders" name="Orders" fill={hrh.blue} radius={[2, 2, 0, 0]} maxBarSize={24} />
+        {/* hrh.series[1] is close enough to hrh.accent's orange that it read
+            as the same color next to the GMV line, so Units uses the teal
+            in hrh.series[2] instead — blue/teal stacked bars stay clearly
+            distinct from the orange GMV line. */}
+        <Bar yAxisId="orders" dataKey="orders" name="Orders" stackId="volume" fill={hrh.blue} radius={[0, 0, 0, 0]} maxBarSize={24} />
+        <Bar yAxisId="orders" dataKey="units" name="Units" stackId="volume" fill={hrh.series[2]} radius={[2, 2, 0, 0]} maxBarSize={24} />
         <Line yAxisId="gmv" type="monotone" dataKey="gmv" name="GMV" stroke={hrh.accent} strokeWidth={2.5} dot={false} />
       </ComposedChart>
     </ResponsiveContainer>

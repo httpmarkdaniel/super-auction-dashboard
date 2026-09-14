@@ -131,7 +131,7 @@ export default function ExecutiveOverview({ filters }) {
     return () => controller.abort();
   }, [channel, params, compareTo, ready, load]);
 
-  const salesTrend = bucketRows(data?.salesTrend, trendBucket, ["gmv", "orders"]);
+  const salesTrend = bucketRows(data?.salesTrend, trendBucket, ["gmv", "orders", "units"]);
   const channelSegments =
     data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
   const orderStatusSegments = data?.orderStatus.map((s) => ({ label: s.status, value: s.count, color: ORDER_STATUS_COLOR[s.status] || hrh.muted })) || [];
@@ -193,7 +193,7 @@ export default function ExecutiveOverview({ filters }) {
 
           <Panel
             title="Sales Trend"
-            subtitle={`GMV and Orders for the selected period, bucketed by ${trendBucket}`}
+            subtitle={`GMV, Orders, and Units for the selected period, bucketed by ${trendBucket}`}
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >

@@ -161,16 +161,17 @@ export default async function handler(req, res) {
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
 
-    // Sales Trend — daily GMV (gross, sale-side only) + Orders for the
-    // CURRENT window only. Zero-filled below so a day with no sales doesn't
-    // create a gap in the x-axis.
+    // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
+    // the CURRENT window only. Zero-filled below so a day with no sales
+    // doesn't create a gap in the x-axis.
     const trendRows = await (
       await client.query({
         query: `
           SELECT
             transaction_date AS d,
             sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
-            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders
+            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+            sumIf(net_quantity, net_sales_amount > 0) AS units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {channels:Array(String)}
@@ -181,11 +182,14 @@ export default async function handler(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const trendByDate = new Map(trendRows.map((r) => [r.d, { gmv: toNum(r.gmv), orders: toNum(r.orders) }]));
+    const trendByDate = new Map(
+      trendRows.map((r) => [r.d, { gmv: toNum(r.gmv), orders: toNum(r.orders), units: toNum(r.units) }])
+    );
     const salesTrend = enumerateDatesISO(current.from, current.to).map((d) => ({
       date: d,
       gmv: trendByDate.get(d)?.gmv ?? 0,
       orders: trendByDate.get(d)?.orders ?? 0,
+      units: trendByDate.get(d)?.units ?? 0,
     }));
 
     // Sales by Channel — real per-channel GMV for the current window,
