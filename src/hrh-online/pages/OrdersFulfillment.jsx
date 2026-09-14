@@ -62,6 +62,50 @@ function safeDivide(a, b) {
   return b ? a / b : 0;
 }
 
+function formatDays(days) {
+  if (days === null || days === undefined) return "—";
+  if (days < 1) return `${Math.round(days * 24)}h`;
+  return `${days.toFixed(1)}d`;
+}
+
+// Simple horizontal progressive-bar funnel — no new chart dependency, just
+// width-proportional bars + conversion-from-previous-stage labels. Handles
+// a zero first stage (empty cohort) without dividing by zero.
+function LifecycleFunnelBars({ stages }) {
+  const maxQty = Math.max(1, ...stages.map((s) => s.qty));
+  return (
+    <div className="space-y-2.5">
+      {stages.map((s, i) => (
+        <div key={s.key}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[12px] font-medium" style={{ color: hrh.ink }}>
+              {s.label}
+            </span>
+            <span className="text-[12px]" style={{ color: hrh.ink2 }}>
+              {formatNum(s.qty)}
+              {i > 0 && s.conversionFromPrev !== null && s.conversionFromPrev !== undefined && (
+                <span className="ml-2" style={{ color: hrh.muted }}>
+                  ({formatPct(s.conversionFromPrev)} of {stages[i - 1].label})
+                </span>
+              )}
+            </span>
+          </div>
+          <div className="h-6 rounded" style={{ background: hrh.bg }}>
+            <div
+              className="h-6 rounded flex items-center"
+              style={{
+                width: `${Math.max(2, (s.qty / maxQty) * 100)}%`,
+                background: hrh.series[i % hrh.series.length],
+                transition: "width 0.3s ease",
+              }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Auto granularity for "Cancelled Orders by Period" — WTD/MTD/YTD map
 // directly to day/week/month (their own typical span always falls in
 // that bucket anyway); Custom derives it from the actual selected span
@@ -492,6 +536,60 @@ export default function OrdersFulfillment({ filters }) {
                   series={[{ key: "value", name: "Orders", color: hrh.accent }]}
                 />
               </Panel>
+
+              {whData.lifecycleFunnel && (
+                <Panel
+                  title="Inventory Lifecycle Funnel"
+                  subtitle={`ASN → Barcoded → Posted → Sold — cohort received in this period, tracked to date (${whData.lifecycleFunnel.cohort?.from} to ${whData.lifecycleFunnel.cohort?.to})`}
+                  className="mb-4"
+                >
+                  <LifecycleFunnelBars stages={whData.lifecycleFunnel.stages} />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                    <div>
+                      <div className="text-[11px]" style={{ color: hrh.muted }}>
+                        Received → Barcoded
+                      </div>
+                      <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                        {(() => {
+                          const hrs = whData.lifecycleFunnel.cycleTimeDays?.receivedToBarcodedHours;
+                          return hrs === null || hrs === undefined ? "—" : formatDays(hrs / 24);
+                        })()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px]" style={{ color: hrh.muted }}>
+                        Barcoded → Posted
+                      </div>
+                      <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                        {formatDays(whData.lifecycleFunnel.cycleTimeDays?.barcodedToPostedDays ?? null)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px]" style={{ color: hrh.muted }}>
+                        Posted → First Sale
+                      </div>
+                      <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                        {formatDays(whData.lifecycleFunnel.cycleTimeDays?.postedToFirstSaleDays ?? null)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {whData.lifecycleFunnel.unmatched?.soldButNeverPosted > 0 && (
+                    <div className="text-[11px] mt-3" style={{ color: hrh.muted }}>
+                      {formatNum(whData.lifecycleFunnel.unmatched.soldButNeverPosted)} unit(s) in this cohort sold with no matching "Published" record — a real but unexplained gap between the sales data and the CMS listing data, not folded into the Posted count above.
+                    </div>
+                  )}
+
+                  {whData.lifecycleFunnel.dataQuality?.length > 0 && (
+                    <ul className="list-disc pl-5 space-y-1.5 text-[11px] mt-3" style={{ color: hrh.ink2 }}>
+                      {whData.lifecycleFunnel.dataQuality.map((note, i) => (
+                        <li key={i}>{note}</li>
+                      ))}
+                    </ul>
+                  )}
+                </Panel>
+              )}
 
               {whData.dataQuality?.length > 0 && (
                 <Panel title="Data Quality Notes">

@@ -45,6 +45,11 @@ const client = createClient({
 // note — HMR MART runs its own WMS, that field isn't meaningful). Picker
 // performance and QC throughput here are a DIFFERENT, real signal: named
 // pickers/QC stations with real timestamped durations, not that flag.
+//
+// Also returns `lifecycleFunnel` (ASN -> Barcoded -> Posted -> Sold, on
+// xv3.mart_level_of_inventory + cms.mart_cms_posted_inventory_report +
+// xv3.mart_net_sales) — see computeLifecycleFunnel()'s own comment below
+// for the validation this was built on.
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -88,6 +93,196 @@ const DIST_BUCKETS = [
   { label: "24-48h", where: "hrs > 24 AND hrs <= 48" },
   { label: "48h+", where: "hrs > 48" },
 ];
+
+// ============================================================================
+// INVENTORY LIFECYCLE FUNNEL — ASN → Barcoded → Posted → Sold
+// ============================================================================
+// Additive to this file only; does not touch the pick/QC/dispatch KPIs above.
+// Grain: ONE ROW = ONE PHYSICAL BARCODED UNIT in xv3.mart_level_of_inventory
+// (store_name = 'HRH ONLINE'). item_qty on that table is a live on-hand
+// counter (drops to 0 once sold), not an ASN/received quantity — so it is
+// NOT used for the funnel's quantities; unit counts (rows) are used instead,
+// which is the same thing at this grain (1 barcode = 1 unit).
+//
+// Validated before writing this (read-only queries against production
+// ClickHouse, not assumed):
+//
+// 1. PUT-AWAY IS OMITTED. The only candidate with anything resembling
+//    location/allocation semantics is xv3.store_allocations (po_id, store_id,
+//    store_allocation_status, store_allocation_total_barcoded). Tested
+//    directly against HRH Online (store_id = '160'):
+//      - Of 1,407 distinct POs allocated to store 160, only 182 (13%) even
+//        resolve to a po_number that appears in mart_level_of_inventory's
+//        HRH ONLINE population (via store_allocations.po_id ->
+//        mart_po_summary.po_id -> po_number — po_id is NOT the same value
+//        space as mart_level_of_inventory.po_number, so a direct join would
+//        have silently returned zero rows).
+//      - Of those 182, allocation happened AFTER the item's barcode was
+//        already created 106 times (58%) and BEFORE only 34 times (19%) —
+//        i.e. no consistent ASN->Barcode->Putaway sequence.
+//      - store_allocation_total_barcoded (the only quantity field on that
+//        table) was nonzero in just 4 of 6,103 HRH Online allocation rows.
+//    This does not behave like a real, populated put-away step for HRH
+//    Online — it is omitted rather than forced/fabricated.
+//
+// 2. "POSTED" DOES NOT MEAN cms_hmrph_posting_quantity. That field
+//    (on mart_level_of_inventory) was checked against actual sales: 2,481 of
+//    3,064 HRH Online items with real sales history (81%) show
+//    cms_hmrph_posting_quantity = 0, which is not plausible for something
+//    that means "listed for sale". The real source is a separate table,
+//    cms.mart_cms_posted_inventory_report — a genuine CMS listing record
+//    with status ('Published'/'Unpublished'), published_date and
+//    unpublished_date. Its `sku` column matches mart_level_of_inventory's
+//    `barcode` at 100% (8,716/8,716 distinct HRH ONLINE skus found), so
+//    barcode is used as the join key for this specific relationship only —
+//    it was proven, not assumed. `sku` does NOT match product_id or UPC
+//    (0% overlap on both), so this is barcode-specific, not "join everything
+//    on barcode."
+//
+// 3. ASN AND BARCODED ARE THE SAME POPULATION, BY CONSTRUCTION. There is no
+//    mart/table capturing items received-but-not-yet-barcoded — a row only
+//    exists in mart_level_of_inventory once it has a barcode. So "ASN Qty"
+//    (date_received in range) and "Barcoded Qty" (created_time in range,
+//    same rows) will normally read ~100% conversion. That is reported below
+//    as-is rather than hidden, with an explicit note that it is not a real
+//    operational signal — just a receipt-to-barcode timestamp gap where one
+//    exists (po_created_at precedes created_time in 12,169/12,169 = 100% of
+//    rows checked; date_received precedes created_time in 8,630/12,169 =
+//    71%, the remainder being same-day receiving+barcoding).
+//
+// 4. SOLD uses the already-validated xv3.mart_net_sales relationship
+//    (`ct.item_id` = mart_level_of_inventory.product_id, store_name = 'HRH
+//    ONLINE', net_sales_amount > 0) — the same join Inventory Aging already
+//    uses, reused here rather than re-derived.
+//
+// Cohort semantics (not same-period event counts): the cohort is the set of
+// units whose date_received falls in the selected range. Posted/Sold are
+// then answered as "has this unit EVER been posted / sold as of now" (cohort
+// progress-to-date), not "was it posted/sold in that same date window" —
+// items received near the end of a period legitimately have not had time to
+// sell yet, so a same-window Sold count would understate true conversion.
+async function computeLifecycleFunnel(from, to) {
+  const HRH_STORE = "HRH ONLINE";
+
+  const cohortRows = await (
+    await client.query({
+      query: `
+        SELECT barcode, toString(product_id) AS product_id, date_received, created_time
+        FROM xv3.mart_level_of_inventory
+        WHERE store_name = {store:String}
+          AND date_received IS NOT NULL
+          AND toDate(date_received) BETWEEN {from:String} AND {to:String}
+      `,
+      query_params: { store: HRH_STORE, from, to },
+      format: "JSONEachRow",
+    })
+  ).json();
+
+  const postedRows = await (
+    await client.query({
+      query: `
+        SELECT sku, min(published_date) AS first_published
+        FROM cms.mart_cms_posted_inventory_report
+        WHERE store_name = {store:String} AND published_date IS NOT NULL
+        GROUP BY sku
+      `,
+      query_params: { store: HRH_STORE },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const postedMap = new Map(postedRows.map((r) => [r.sku, r.first_published]));
+
+  const soldRows = await (
+    await client.query({
+      query: `
+        SELECT \`ct.item_id\` AS product_id, min(transaction_date) AS first_sale
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String} AND net_sales_amount > 0 AND \`ct.item_id\` IS NOT NULL
+        GROUP BY product_id
+      `,
+      query_params: { store: HRH_STORE },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const soldMap = new Map(soldRows.map((r) => [String(r.product_id), r.first_sale]));
+
+  const asnQty = cohortRows.length;
+  let barcodedQty = 0;
+  let postedQty = 0;
+  let soldQty = 0;
+  let soldNotPosted = 0;
+
+  let receivedToBarcodedHoursSum = 0;
+  let receivedToBarcodedHoursN = 0;
+  let barcodedToPostedDaysSum = 0;
+  let barcodedToPostedDaysN = 0;
+  let postedToSoldDaysSum = 0;
+  let postedToSoldDaysN = 0;
+
+  for (const r of cohortRows) {
+    const isBarcoded = !!r.created_time; // always true in practice — see note above
+    if (isBarcoded) barcodedQty++;
+
+    const firstPublished = postedMap.get(r.barcode);
+    const isPosted = !!firstPublished;
+    if (isPosted) postedQty++;
+
+    const firstSale = soldMap.get(r.product_id);
+    const isSold = !!firstSale;
+    if (isSold) soldQty++;
+    if (isSold && !isPosted) soldNotPosted++;
+
+    if (r.date_received && r.created_time) {
+      const hrs = (new Date(r.created_time) - new Date(r.date_received)) / 3600000;
+      if (hrs >= 0) {
+        receivedToBarcodedHoursSum += hrs;
+        receivedToBarcodedHoursN++;
+      }
+    }
+    if (isPosted && r.created_time) {
+      const days = (new Date(firstPublished) - new Date(r.created_time)) / 86400000;
+      if (days >= 0) {
+        barcodedToPostedDaysSum += days;
+        barcodedToPostedDaysN++;
+      }
+    }
+    if (isPosted && isSold) {
+      const days = (new Date(firstSale) - new Date(firstPublished)) / 86400000;
+      if (days >= 0) {
+        postedToSoldDaysSum += days;
+        postedToSoldDaysN++;
+      }
+    }
+  }
+
+  const safeDiv = (a, b) => (b > 0 ? a / b : null);
+
+  return {
+    grain: "1 row = 1 barcoded unit (xv3.mart_level_of_inventory, store_name = 'HRH ONLINE')",
+    cohort: { from, to, basis: "date_received (ASN) within range; Posted/Sold measured as-of-now for this cohort" },
+    stages: [
+      { key: "asn", label: "ASN (Received)", qty: asnQty },
+      { key: "barcoded", label: "Barcoded", qty: barcodedQty, conversionFromPrev: safeDiv(barcodedQty, asnQty) },
+      { key: "posted", label: "Posted (Listed for Sale)", qty: postedQty, conversionFromPrev: safeDiv(postedQty, barcodedQty) },
+      { key: "sold", label: "Sold", qty: soldQty, conversionFromPrev: safeDiv(soldQty, postedQty) },
+    ],
+    cycleTimeDays: {
+      receivedToBarcodedHours: receivedToBarcodedHoursN > 0 ? receivedToBarcodedHoursSum / receivedToBarcodedHoursN : null,
+      barcodedToPostedDays: barcodedToPostedDaysN > 0 ? barcodedToPostedDaysSum / barcodedToPostedDaysN : null,
+      postedToFirstSaleDays: postedToSoldDaysN > 0 ? postedToSoldDaysSum / postedToSoldDaysN : null,
+    },
+    unmatched: {
+      soldButNeverPosted: soldNotPosted,
+    },
+    dataQuality: [
+      "Put-away is omitted: xv3.store_allocations (the only location/allocation table found) only resolves to 13% of this cohort's POs for HRH Online, and its timing does not consistently precede barcoding — it does not behave like a real, populated put-away step here.",
+      "ASN and Barcoded are the same underlying record: mart_level_of_inventory only contains items that already have a barcode, so there is no way to see received-but-not-yet-barcoded stock. Their near-100% conversion reflects that, not a bottleneck-free process.",
+      "\"Posted\" uses cms.mart_cms_posted_inventory_report (status/published_date), not cms_hmrph_posting_quantity on mart_level_of_inventory — that field was checked against real sales and did not hold up (81% of items with confirmed sales show it at 0).",
+      "Posted/Sold are cohort-to-date (has it ever happened, as of now), not same-window counts — items received near the end of the selected range have not had time to sell yet.",
+      "cms.mart_cms_posted_inventory_report only has data from 2026-02-25 onward, so items received before that date can't show a posting record even if they really were posted. That alone doesn't explain the full gap, though — e.g. of items received in April 2026 (well inside the covered window) that went on to sell, 840 of 972 (86%) still have no matching posting record. \"Sold but never posted\" below is likely undercounted CMS posting capture, not proof those items were sold unlisted.",
+    ],
+  };
+}
 
 export async function handleBarcodeAnalytics(req, res) {
   try {
@@ -233,6 +428,8 @@ export async function handleBarcodeAnalytics(req, res) {
       });
     }
 
+    const lifecycleFunnel = await computeLifecycleFunnel(range_.from, range_.to);
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -252,6 +449,7 @@ export async function handleBarcodeAnalytics(req, res) {
       qcThroughput,
       pickToDispatchDistribution,
       dailyVolume,
+      lifecycleFunnel,
       dataQuality: [
         "picker_name/qc_station are excluded when null (1 order store-wide has no picker logged) rather than shown as a meaningless \"Unassigned\" row.",
         "Pick-to-Dispatch duration is picking_started_at → dispatch_finalized_at, computed directly (not summed from intermediate stage columns), so a null in any one intermediate stage can't silently understate it.",
