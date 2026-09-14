@@ -10,6 +10,13 @@ const client = createClient({
 // Underscore-prefixed (see api/_hrh-traffic-analytics.js's comment) — the
 // Vercel project's Hobby plan caps deployments at 12 Serverless Functions.
 // api/hrh-sales-analytics.js dispatches here on `?report=barcodeAnalytics`.
+// Consumed by Orders & Fulfillment's "Warehouse Operations" sub-tab (see
+// src/hrh-online/pages/OrdersFulfillment.jsx) — this used to be its own
+// standalone "Barcode Analytics" sidebar page, moved in since it's the
+// same warehouse-ops data as the rest of that page, just a different
+// angle (picker/QC/dispatch timing instead of order-level completion).
+// The report name (`barcodeAnalytics`) is kept as-is to avoid an
+// unrelated rename of this file/dispatch key.
 //
 // REBUILT on xv3.mart_order_fulfilment_journey (real warehouse-ops
 // timestamps: picker, QC station, pick/pack/dispatch durations) —

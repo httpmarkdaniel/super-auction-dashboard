@@ -6,7 +6,7 @@ import Modal, { ModalRow } from "../components/Modal";
 import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart } from "../components/Charts";
+import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart, BarComparisonChart } from "../components/Charts";
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
@@ -30,9 +30,32 @@ const YES_NO_PILL = { Yes: { bg: "#e6f4ea", text: hrh.good }, No: { bg: "#f0f1f5
 
 const SUB_TABS = [
   { key: "fulfillment", label: "Fulfillment" },
+  { key: "warehouseOps", label: "Warehouse Operations" },
   { key: "cancellation", label: "Cancellation (Pre-Fulfillment)" },
   { key: "returns", label: "Returns (Post-Fulfillment)" },
   { key: "methodology", label: "Methodology" },
+];
+
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return "—";
+  const mins = seconds / 60;
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const hrs = mins / 60;
+  if (hrs < 48) return `${hrs.toFixed(1)}h`;
+  return `${(hrs / 24).toFixed(1)}d`;
+}
+
+const PICKER_COLUMNS = [
+  { key: "picker", label: "Picker" },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "items", label: "Items Picked", render: (r) => formatNum(r.items) },
+  { key: "avgPickSeconds", label: "Avg Pick Time", render: (r) => formatDuration(r.avgPickSeconds) },
+];
+
+const QC_COLUMNS = [
+  { key: "station", label: "QC Station" },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "avgQcSeconds", label: "Avg QC Time", render: (r) => formatDuration(r.avgQcSeconds) },
 ];
 
 function safeDivide(a, b) {
@@ -231,8 +254,18 @@ export default function OrdersFulfillment({ filters }) {
   const [fulfillmentBucket, setFulfillmentBucket] = useState("day");
   const [cancellationBucket, setCancellationBucket] = useState("day");
   const [returnsBucket, setReturnsBucket] = useState("day");
+  const [warehouseOpsBucket, setWarehouseOpsBucket] = useState("day");
   const [activeModal, setActiveModal] = useState(null); // "received" | "completion" | "cancelled" | "awaiting" | null
   const [drilldown, setDrilldown] = useState(null); // { kind: "cancellation" | "return", category } | null
+
+  // Warehouse Operations — separate fetch/state: a different report
+  // (?report=barcodeAnalytics, moved here from the old standalone Barcode
+  // Analytics sidebar page) with no Channel dimension at all, only Date
+  // Range, so it's kept independent of the Fulfillment tab's own
+  // channel-scoped fetch rather than merged into one payload.
+  const [whData, setWhData] = useState(null);
+  const [whLoading, setWhLoading] = useState(true);
+  const [whError, setWhError] = useState(null);
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -255,6 +288,24 @@ export default function OrdersFulfillment({ filters }) {
     }
   }, []);
 
+  const loadWarehouseOps = useCallback(async (p, signal) => {
+    setWhLoading(true);
+    setWhError(null);
+    try {
+      const qs = new URLSearchParams({ ...p, report: "barcodeAnalytics" });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setWhData(json);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setWhError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWhLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
@@ -262,10 +313,18 @@ export default function OrdersFulfillment({ filters }) {
     return () => controller.abort();
   }, [channel, params, ready, load]);
 
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    loadWarehouseOps(params, controller.signal);
+    return () => controller.abort();
+  }, [params, ready, loadWarehouseOps]);
+
   const fulfillmentPerf = bucketRows(data?.fulfillmentTrend, fulfillmentBucket, ["received", "fulfilled", "cancelled", "awaiting"]).map((r) => ({
     ...r,
     completionRate: safeDivide(r.fulfilled, r.received) * 100,
   }));
+  const whDailyVolume = bucketRows(whData?.dailyVolume, warehouseOpsBucket, ["orders", "picked", "packed", "shipped"]);
   const cancellationPerf = bucketRows(data?.fulfillmentTrend, cancellationBucket, ["received", "cancelled"]).map((r) => ({
     ...r,
     cancellationRate: safeDivide(r.cancelled, r.received) * 100,
@@ -375,6 +434,76 @@ export default function OrdersFulfillment({ filters }) {
               />
             </Panel>
           </div>
+        </>
+      )}
+
+      {/* ============================== WAREHOUSE OPERATIONS ============================== */}
+      {subTab === "warehouseOps" && (
+        <>
+          {whLoading && !whData && <LoadingState label="Loading Warehouse Operations…" />}
+          {whError && <ErrorState label={`Couldn't load Warehouse Operations: ${whError}`} />}
+
+          {whData && !whError && (
+            <>
+              <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
+                {whData.meta?.methodologyNote}
+              </div>
+
+              <KpiRow>
+                <KpiCard label="Orders Processed" value={formatNum(whData.kpis.ordersProcessed.value)} />
+                <KpiCard label="Avg Pick Time" value={formatDuration(whData.kpis.avgPickTime.value)} sub="pick → QC" />
+                <KpiCard label="Avg QC Time" value={formatDuration(whData.kpis.avgQcTime.value)} sub="QC → waybill" />
+                <KpiCard label="Avg Pick-to-Dispatch" value={formatDuration(whData.kpis.avgPickToDispatch.value)} sub="picking start → dispatch" />
+              </KpiRow>
+
+              <Panel
+                title="Daily Fulfillment Volume"
+                subtitle="Orders placed / picked / packed / shipped, by order date"
+                action={<TrendBucketPills value={warehouseOpsBucket} onChange={setWarehouseOpsBucket} />}
+                className="mb-4"
+              >
+                <BarComparisonChart
+                  data={whDailyVolume}
+                  xKey="dateLabel"
+                  valueFormatter={formatNum}
+                  series={[
+                    { key: "orders", name: "Orders Placed", color: hrh.series[0] },
+                    { key: "picked", name: "Picked", color: hrh.blue },
+                    { key: "packed", name: "Packed", color: hrh.series[2] },
+                    { key: "shipped", name: "Shipped", color: hrh.accent },
+                  ]}
+                />
+              </Panel>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+                <Panel title="Picker Performance" subtitle="Ranked by orders picked">
+                  <DataTable columns={PICKER_COLUMNS} rows={whData.pickerPerformance} paginate pageSize={10} emptyLabel="No picking activity in this period." />
+                </Panel>
+                <Panel title="QC Station Throughput" subtitle="Ranked by orders processed">
+                  <DataTable columns={QC_COLUMNS} rows={whData.qcThroughput} emptyLabel="No QC activity in this period." />
+                </Panel>
+              </div>
+
+              <Panel title="Pick-to-Dispatch Time Distribution" subtitle="Picking start to dispatch finalized" className="mb-4">
+                <BarComparisonChart
+                  data={whData.pickToDispatchDistribution}
+                  xKey="label"
+                  valueFormatter={formatNum}
+                  series={[{ key: "value", name: "Orders", color: hrh.accent }]}
+                />
+              </Panel>
+
+              {whData.dataQuality?.length > 0 && (
+                <Panel title="Data Quality Notes">
+                  <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: hrh.ink2 }}>
+                    {whData.dataQuality.map((note, i) => (
+                      <li key={i}>{note}</li>
+                    ))}
+                  </ul>
+                </Panel>
+              )}
+            </>
+          )}
         </>
       )}
 
