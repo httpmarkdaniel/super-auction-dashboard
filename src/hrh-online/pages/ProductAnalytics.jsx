@@ -2,10 +2,17 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import SeverityBadge from "../components/SeverityBadge";
+import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
+import InventoryAging from "./InventoryAging";
+
+const PRODUCT_SUB_TABS = [
+  { key: "overview", label: "Product Analytics" },
+  { key: "inventoryAging", label: "Inventory Aging" },
+];
 
 const BUCKET_GRANULARITY_OPTIONS = [
   { key: "week", label: "Week" },
@@ -229,6 +236,7 @@ function isDateRangeReady(dateRange) {
 // is never sent to the API until both dates are picked and from <= to.
 export default function ProductAnalytics({ filters }) {
   const { channel, dateRange } = filters;
+  const [subTab, setSubTab] = useState("overview");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -271,41 +279,49 @@ export default function ProductAnalytics({ filters }) {
         <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
           Product Analytics
         </div>
-        <div className="flex items-center gap-3">
-          {data?.meta && (
-            <span className="text-[11.5px]" style={{ color: hrh.muted }}>
-              {formatAsOf(data.meta)}
-            </span>
-          )}
-          {data?.meta?.current && (
-            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
-              {effectivePeriodLabel(data.meta.current)}
-              <span className="font-normal" style={{ color: hrh.muted }}>
-                {" "}
-                vs {effectivePeriodLabel(data.meta.previous)}
+        {subTab === "overview" && (
+          <div className="flex items-center gap-3">
+            {data?.meta && (
+              <span className="text-[11.5px]" style={{ color: hrh.muted }}>
+                {formatAsOf(data.meta)}
               </span>
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => ready && load(channel, params, bucketGranularity, groupBy, comparisonGroupBy)}
-            disabled={loading || !ready}
-            className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
-            style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
-          >
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-        </div>
+            )}
+            {data?.meta?.current && (
+              <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+                {effectivePeriodLabel(data.meta.current)}
+                <span className="font-normal" style={{ color: hrh.muted }}>
+                  {" "}
+                  vs {effectivePeriodLabel(data.meta.previous)}
+                </span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => ready && load(channel, params, bucketGranularity, groupBy, comparisonGroupBy)}
+              disabled={loading || !ready}
+              className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md disabled:opacity-40"
+              style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        )}
       </div>
 
-      {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
-      {ready && loading && !data && <LoadingState label="Loading Product Analytics…" />}
-      {error && <ErrorState label={`Couldn't load Product Analytics: ${error}`} />}
+      <SubTabNav tabs={PRODUCT_SUB_TABS} value={subTab} onChange={setSubTab} />
 
-      {data && !error && (
+      {subTab === "inventoryAging" && <InventoryAging />}
+
+      {subTab === "overview" && (
         <>
-          <Panel
-            title="Repeat Sellers"
+          {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
+          {ready && loading && !data && <LoadingState label="Loading Product Analytics…" />}
+          {error && <ErrorState label={`Couldn't load Product Analytics: ${error}`} />}
+
+          {data && !error && (
+            <>
+              <Panel
+                title="Repeat Sellers"
             subtitle={`Positive sales in 2+ of the last 4 ${bucketGranularity === "month" ? "months" : "weeks"} — independent of the Date Range filter above`}
             action={
               <div className="flex items-center gap-3 flex-wrap">
@@ -341,6 +357,8 @@ export default function ProductAnalytics({ filters }) {
           >
             <DataTable columns={droppedProductColumns(comparisonGroupBy)} rows={data.droppedProducts} paginate pageSize={10} />
           </Panel>
+            </>
+          )}
         </>
       )}
     </div>
