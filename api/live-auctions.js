@@ -87,28 +87,73 @@ export default async function handler(req, res) {
 
     const auctionNumbers = auctionRows.map((r) => r.auction_number);
 
-    // Warehouse baseline: latest bid per lot (argMax by time) across every
-    // lot in these auctions — same "current/standing bid per lot" concept
-    // used everywhere else in this codebase (api/overview.js's
-    // lot_latest_bid CTE), not a naive sum of bid events.
-    const lotLatestResult = await client.query({
-      query: `
-        SELECT
-          auction_number,
-          lot_number,
-          argMax(bid_amount, bid_created_at) AS latest_bid_amount
+    // lotLatestRows / bidRows / liveResults are 3 fully independent things
+    // that all only need `auctionNumbers` from the query above — none
+    // depends on either of the other two's result (liveResults is an
+    // external cms.hmr.ph call, not ClickHouse, and previously ran dead
+    // last even though it has no dependency on lotLatest/bidHistory at
+    // all) — fired together instead of 3 more sequential steps.
+    const [lotLatestRows, bidRows, liveResults] = await Promise.all([
+      // Warehouse baseline: latest bid per lot (argMax by time) across
+      // every lot in these auctions — same "current/standing bid per lot"
+      // concept used everywhere else in this codebase (api/overview.js's
+      // lot_latest_bid CTE), not a naive sum of bid events.
+      client
+        .query({
+          query: `
+            SELECT
+              auction_number,
+              lot_number,
+              argMax(bid_amount, bid_created_at) AS latest_bid_amount
 
-        FROM cms.mart_cms_bid_history_report
+            FROM cms.mart_cms_bid_history_report
 
-        WHERE auction_number IN {auctionNumbers:Array(String)}
+            WHERE auction_number IN {auctionNumbers:Array(String)}
 
-        GROUP BY auction_number, lot_number
-      `,
-      query_params: { auctionNumbers },
-      format: "JSONEachRow",
-    });
+            GROUP BY auction_number, lot_number
+          `,
+          query_params: { auctionNumbers },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Full per-event bid history for every lot across every active
+      // auction shown, in ONE query (never per lot, never per auction) —
+      // the same Participating/Leading source Level 2 uses for a single
+      // auction, batched here across the whole list. Ordering matches
+      // Level 2's own query for the same tie-break reasoning documented
+      // there.
+      client
+        .query({
+          query: `
+            SELECT
+              auction_number,
+              lot_number,
+              bid_amount,
+              bid_created_at,
+              email,
+              customer_firstname,
+              customer_lastname,
+              bidder_number
 
-    const lotLatestRows = await lotLatestResult.json();
+            FROM cms.mart_cms_bid_history_report
+
+            WHERE auction_number IN {auctionNumbers:Array(String)}
+              AND lot_number IS NOT NULL
+              AND bid_created_at IS NOT NULL
+
+            ORDER BY auction_number, lot_number, bid_created_at, bid_amount
+          `,
+          query_params: { auctionNumbers },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Live current_bid, one batched call PER AUCTION (never per lot) —
+      // the same call api/live-bid-amounts.js already makes, run in
+      // parallel across every auction shown in this list. getLiveLotsSafe
+      // never throws — a failed auction just falls back to its warehouse
+      // figure.
+      Promise.all(auctionNumbers.map((auctionNumber) => getLiveLotsSafe(auctionNumber))),
+    ]);
     const lotLatestByAuction = new Map();
     for (const row of lotLatestRows) {
       if (!lotLatestByAuction.has(row.auction_number)) {
@@ -118,36 +163,6 @@ export default async function handler(req, res) {
         .get(row.auction_number)
         .set(String(row.lot_number), Number(row.latest_bid_amount ?? 0));
     }
-
-    // Full per-event bid history for every lot across every active auction
-    // shown, in ONE query (never per lot, never per auction) — the same
-    // Participating/Leading source Level 2 uses for a single auction,
-    // batched here across the whole list. Ordering matches Level 2's own
-    // query for the same tie-break reasoning documented there.
-    const bidHistoryResult = await client.query({
-      query: `
-        SELECT
-          auction_number,
-          lot_number,
-          bid_amount,
-          bid_created_at,
-          email,
-          customer_firstname,
-          customer_lastname,
-          bidder_number
-
-        FROM cms.mart_cms_bid_history_report
-
-        WHERE auction_number IN {auctionNumbers:Array(String)}
-          AND lot_number IS NOT NULL
-          AND bid_created_at IS NOT NULL
-
-        ORDER BY auction_number, lot_number, bid_created_at, bid_amount
-      `,
-      query_params: { auctionNumbers },
-      format: "JSONEachRow",
-    });
-    const bidRows = await bidHistoryResult.json();
 
     // Global first-ever-bid per email — EXACT same definition already
     // validated for Bidder Composition and Level 2: New/Returning is
@@ -188,15 +203,7 @@ export default async function handler(req, res) {
       rowsByAuction.get(row.auction_number).push(row);
     }
 
-    // Live current_bid, one batched call PER AUCTION (never per lot) — the
-    // same call api/live-bid-amounts.js already makes, run in parallel
-    // across every auction shown in this list, matching the "one
-    // auction-level request, not N+1" requirement. getLiveLotsSafe never
-    // throws — a failed auction just falls back to its warehouse figure.
-    const liveResults = await Promise.all(
-      auctionNumbers.map((auctionNumber) => getLiveLotsSafe(auctionNumber)),
-    );
-
+    // liveResults already fetched above (same parallel wave as lotLatestRows/bidRows).
     const auctions = auctionRows.map((row, i) => {
       const live = liveResults[i];
       const warehouseLots = lotLatestByAuction.get(row.auction_number) ?? new Map();

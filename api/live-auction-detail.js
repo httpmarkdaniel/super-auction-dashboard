@@ -22,28 +22,130 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "auction_number is required" });
     }
 
-    const auctionMetaResult = await client.query({
-      query: `
-        SELECT
-          auction_number,
-          any(name) AS auction_name,
-          any(store_name) AS auction_store_name,
-          any(category) AS auction_category,
-          min(starting_time) AS auction_starting_time,
-          max(ending_time) AS auction_ending_time,
-          max(lot_count) AS auction_lot_count
+    // auctionMeta / lots / bidHistory / lotLatest (4 ClickHouse queries) and
+    // the live current_bid call (an external HTTP call to cms.hmr.ph, NOT
+    // ClickHouse) are all fully independent of each other — none needs
+    // another's result, each just needs auction_number — so they're fired
+    // together instead of stacking 4 DB round-trips plus one external API
+    // call one after another. In the rare case auctionMeta turns out
+    // invalid (404 below), the other 4 are wasted work — an acceptable
+    // tradeoff since the overwhelmingly common case is a valid auction_number
+    // and this endpoint is polled every 20s while a lot card is expanded.
+    const [auctionMetaRows, lotRows, bidRows, lotLatestRows, live] = await Promise.all([
+      client
+        .query({
+          query: `
+            SELECT
+              auction_number,
+              any(name) AS auction_name,
+              any(store_name) AS auction_store_name,
+              any(category) AS auction_category,
+              min(starting_time) AS auction_starting_time,
+              max(ending_time) AS auction_ending_time,
+              max(lot_count) AS auction_lot_count
 
-        FROM xv3.mart_auction_productivity_report
+            FROM xv3.mart_auction_productivity_report
 
-        WHERE auction_number = {auctionNumber:String}
+            WHERE auction_number = {auctionNumber:String}
 
-        GROUP BY auction_number
-      `,
-      query_params: { auctionNumber: auction_number },
-      format: "JSONEachRow",
-    });
+            GROUP BY auction_number
+          `,
+          query_params: { auctionNumber: auction_number },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Every lot belonging to the auction, including ones with zero bids —
+      // NOT scoped by status, same population style as the "lots" drilldown
+      // elsewhere in this codebase, just for a single auction_number.
+      client
+        .query({
+          query: `
+            SELECT
+              lot_number,
+              any(name) AS name,
+              max(ifNull(reserved_price, 0)) AS reserved_price
 
-    const auctionMetaRows = await auctionMetaResult.json();
+            FROM xv3.mart_auction_vendor_analysis
+
+            WHERE auction_number = {auctionNumber:String}
+              AND lot_number IS NOT NULL
+
+            GROUP BY lot_number
+          `,
+          query_params: { auctionNumber: auction_number },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Full per-event bid history for the ENTIRE auction in one query — bid
+      // amount here is each event's STANDING bid value, not an increment
+      // (confirmed against real data elsewhere in this codebase: summing
+      // events overstates a lot's true value). bid_created_at is
+      // DateTime64(3) but real values only ever carry whole-second precision
+      // (verified: every sampled row ends in ".000") — several real ties
+      // exist at the exact same second within one auction. There is no id/
+      // sequence column on this table to break such ties deterministically,
+      // so this endpoint does NOT claim a true sub-second order between
+      // simultaneous events — see bid_events mapping below.
+      client
+        .query({
+          query: `
+            SELECT
+              lot_number,
+              bid_amount,
+              bid_created_at,
+              email,
+              customer_firstname,
+              customer_lastname,
+              bidder_number
+
+            FROM cms.mart_cms_bid_history_report
+
+            WHERE auction_number = {auctionNumber:String}
+              AND lot_number IS NOT NULL
+              AND bid_created_at IS NOT NULL
+
+            ORDER BY lot_number, bid_created_at, bid_amount
+          `,
+          query_params: { auctionNumber: auction_number },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Authoritative "warehouse latest bid" per lot — the SAME
+      // argMax(bid_amount, bid_created_at) convention used everywhere else in
+      // this codebase (api/overview.js's lot_latest_bid, api/live-auctions.js).
+      // Deliberately NOT re-derived by walking bidRows in JS: real same-
+      // timestamp ties exist (confirmed — e.g. two different bidders at the
+      // exact same second with different amounts), and picking "the higher
+      // amount among tied timestamps" in JS can disagree with ClickHouse's
+      // own argMax resolution for that tie. Using the identical SQL
+      // aggregate here guarantees this endpoint's notion of "warehouse
+      // latest" always matches the rest of the app, which is what the
+      // live-vs-warehouse staleness comparison below depends on being
+      // trustworthy.
+      client
+        .query({
+          query: `
+            SELECT
+              lot_number,
+              argMax(bid_amount, bid_created_at) AS latest_bid_amount
+
+            FROM cms.mart_cms_bid_history_report
+
+            WHERE auction_number = {auctionNumber:String}
+              AND lot_number IS NOT NULL
+
+            GROUP BY lot_number
+          `,
+          query_params: { auctionNumber: auction_number },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Live current_bid for every lot in this auction, ONE call — moved up
+      // here from where it used to be fetched (right before building `lots`
+      // below), since it's an external API call with zero dependency on any
+      // of the 4 ClickHouse queries above.
+      getLiveLotsSafe(auction_number),
+    ]);
     const meta = auctionMetaRows[0];
 
     // Scoped to the same population as the Level 1 list — a non-Online or
@@ -52,92 +154,6 @@ export default async function handler(req, res) {
     if (!meta || meta.auction_category !== "Online Bidding") {
       return res.status(404).json({ error: `No active Online Bidding auction found for ${auction_number}` });
     }
-
-    // Every lot belonging to the auction, including ones with zero bids —
-    // NOT scoped by status, same population style as the "lots" drilldown
-    // elsewhere in this codebase, just for a single auction_number.
-    const lotsResult = await client.query({
-      query: `
-        SELECT
-          lot_number,
-          any(name) AS name,
-          max(ifNull(reserved_price, 0)) AS reserved_price
-
-        FROM xv3.mart_auction_vendor_analysis
-
-        WHERE auction_number = {auctionNumber:String}
-          AND lot_number IS NOT NULL
-
-        GROUP BY lot_number
-      `,
-      query_params: { auctionNumber: auction_number },
-      format: "JSONEachRow",
-    });
-    const lotRows = await lotsResult.json();
-
-    // Full per-event bid history for the ENTIRE auction in one query — bid
-    // amount here is each event's STANDING bid value, not an increment
-    // (confirmed against real data elsewhere in this codebase: summing
-    // events overstates a lot's true value). bid_created_at is
-    // DateTime64(3) but real values only ever carry whole-second precision
-    // (verified: every sampled row ends in ".000") — several real ties
-    // exist at the exact same second within one auction. There is no id/
-    // sequence column on this table to break such ties deterministically,
-    // so this endpoint does NOT claim a true sub-second order between
-    // simultaneous events — see bid_events mapping below.
-    const bidHistoryResult = await client.query({
-      query: `
-        SELECT
-          lot_number,
-          bid_amount,
-          bid_created_at,
-          email,
-          customer_firstname,
-          customer_lastname,
-          bidder_number
-
-        FROM cms.mart_cms_bid_history_report
-
-        WHERE auction_number = {auctionNumber:String}
-          AND lot_number IS NOT NULL
-          AND bid_created_at IS NOT NULL
-
-        ORDER BY lot_number, bid_created_at, bid_amount
-      `,
-      query_params: { auctionNumber: auction_number },
-      format: "JSONEachRow",
-    });
-    const bidRows = await bidHistoryResult.json();
-
-    // Authoritative "warehouse latest bid" per lot — the SAME
-    // argMax(bid_amount, bid_created_at) convention used everywhere else in
-    // this codebase (api/overview.js's lot_latest_bid, api/live-auctions.js).
-    // Deliberately NOT re-derived by walking bidRows in JS: real same-
-    // timestamp ties exist (confirmed — e.g. two different bidders at the
-    // exact same second with different amounts), and picking "the higher
-    // amount among tied timestamps" in JS can disagree with ClickHouse's
-    // own argMax resolution for that tie. Using the identical SQL
-    // aggregate here guarantees this endpoint's notion of "warehouse
-    // latest" always matches the rest of the app, which is what the
-    // live-vs-warehouse staleness comparison below depends on being
-    // trustworthy.
-    const lotLatestResult = await client.query({
-      query: `
-        SELECT
-          lot_number,
-          argMax(bid_amount, bid_created_at) AS latest_bid_amount
-
-        FROM cms.mart_cms_bid_history_report
-
-        WHERE auction_number = {auctionNumber:String}
-          AND lot_number IS NOT NULL
-
-        GROUP BY lot_number
-      `,
-      query_params: { auctionNumber: auction_number },
-      format: "JSONEachRow",
-    });
-    const lotLatestRows = await lotLatestResult.json();
     const warehouseLatestByLot = new Map(
       lotLatestRows.map((r) => [String(r.lot_number), Number(r.latest_bid_amount ?? 0)]),
     );
@@ -224,8 +240,7 @@ export default async function handler(req, res) {
       return firstEver >= auctionStartingTime ? "new" : "returning";
     }
 
-    // Live current_bid for every lot in this auction, ONE call.
-    const live = await getLiveLotsSafe(auction_number);
+    // `live` already fetched above (same parallel wave as the 4 ClickHouse queries).
     const liveByLot = new Map();
     if (live && Array.isArray(live.lots)) {
       for (const lot of live.lots) {

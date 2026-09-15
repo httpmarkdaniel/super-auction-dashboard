@@ -97,11 +97,17 @@ export default async function handler(req, res) {
     const { from, to, store = "", category = "" } = req.query;
     const queryParams = { from, to, store, category };
 
-    // ---------------------------------------------------------
-    // BID ACTIVITY + PARTICIPATING, per hour
-    // ---------------------------------------------------------
-    const activityResult = await client.query({
-      query: `
+    // activityResult and winningResult are 2 fully independent heavy
+    // queries (different tables/CTEs, neither depends on the other's
+    // result) — fired together via Promise.all instead of running the
+    // whole first query to completion before even starting the second.
+    const [activityRows, winningRows] = await Promise.all([
+      // ---------------------------------------------------------
+      // BID ACTIVITY + PARTICIPATING, per hour
+      // ---------------------------------------------------------
+      client
+        .query({
+          query: `
         WITH auction_store AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
@@ -158,16 +164,17 @@ export default async function handler(req, res) {
         GROUP BY hour
         ORDER BY hour
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
-
-    // ---------------------------------------------------------
-    // WINNING, per hour (hour_bucket = -1 is the unattributed remainder —
-    // settled lots with no matching bid-event row to derive an hour from)
-    // ---------------------------------------------------------
-    const winningResult = await client.query({
-      query: `
+          query_params: queryParams,
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // ---------------------------------------------------------
+      // WINNING, per hour (hour_bucket = -1 is the unattributed remainder —
+      // settled lots with no matching bid-event row to derive an hour from)
+      // ---------------------------------------------------------
+      client
+        .query({
+          query: `
         WITH selected_auctions AS (
           SELECT DISTINCT auction_number, store_name
           FROM xv3.mart_auction_productivity_report
@@ -234,12 +241,11 @@ export default async function handler(req, res) {
         GROUP BY hour_bucket
         ORDER BY hour_bucket
       `,
-      query_params: queryParams,
-      format: "JSONEachRow",
-    });
-
-    const activityRows = await activityResult.json();
-    const winningRows = await winningResult.json();
+          query_params: queryParams,
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+    ]);
 
     const winningByHour = new Map();
     let unattributedLots = 0;
