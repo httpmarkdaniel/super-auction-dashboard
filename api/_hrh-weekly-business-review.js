@@ -200,6 +200,20 @@ function formatRangeLabel(from, to, withYear) {
   return `${formatDateLabel(from, withYear)}–${formatDateLabel(to, withYear)}`;
 }
 
+// Standard ISO-8601 week number (weeks start Monday; week 1 is the week
+// containing the year's first Thursday) — for the Weekly Sales Trend
+// panel's per-bucket label, per explicit request to show the REAL week
+// number (e.g. "Wk 38"), not just a relative "1st of these 6 buckets"
+// count. Computed from the bucket's Monday.
+function isoWeekNumber(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const dayNum = date.getUTCDay() || 7; // Mon=1..Sun=7
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum); // Thursday of this ISO week
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+}
+
 // 6 ISO weeks (Monday-Sunday) ending at `to` — the most recent bucket is
 // the week CONTAINING `to` (partial if `to` isn't a Sunday yet), the 5
 // before it are full weeks. Deliberately independent of the page's range
@@ -210,7 +224,7 @@ function sixWeeklyBucketsEndingAt(to) {
   const buckets = [];
   let weekStart = mondayOfWeek(to);
   for (let i = 0; i < 6; i++) {
-    buckets.unshift({ from: weekStart, to: i === 0 ? to : addDaysISO(weekStart, 6) });
+    buckets.unshift({ from: weekStart, to: i === 0 ? to : addDaysISO(weekStart, 6), isoWeek: isoWeekNumber(weekStart) });
     weekStart = addDaysISO(weekStart, -7);
   }
   return buckets;
@@ -318,9 +332,11 @@ export async function handleWeeklyBusinessReview(req, res) {
         platform: CHANNEL_DISPLAY[ch],
         sales: cur.gmv,
         wowPct: wow ? pctDelta(cur.gmv, wow.gmv) : null,
-        wowAmount: wow ? cur.gmv - wow.gmv : null,
+        // The prior period's own absolute GMV (not a delta) — "how much was
+        // it before", per explicit request, so no +/- sign belongs on this.
+        wowPrevious: wow ? wow.gmv : null,
         momPct: pctDelta(momCur.gmv, momPrev.gmv),
-        momAmount: momCur.gmv - momPrev.gmv,
+        momPrevious: momPrev.gmv,
         orders: cur.orders,
         aov: safeDivide(cur.gmv, cur.orders),
         conversionRate: null, // see dataQuality — no defensible platform-specific denominator
@@ -335,9 +351,9 @@ export async function handleWeeklyBusinessReview(req, res) {
       platform: "Total",
       sales: curTotalGmv,
       wowPct: wowMap ? pctDelta(curTotalGmv, wowTotalGmv) : null,
-      wowAmount: wowMap ? curTotalGmv - wowTotalGmv : null,
+      wowPrevious: wowMap ? wowTotalGmv : null,
       momPct: pctDelta(momCurTotalGmv, momPrevTotalGmv),
-      momAmount: momCurTotalGmv - momPrevTotalGmv,
+      momPrevious: momPrevTotalGmv,
       orders: curTotalOrders,
       aov: safeDivide(curTotalGmv, curTotalOrders),
       conversionRate: null,
@@ -345,10 +361,17 @@ export async function handleWeeklyBusinessReview(req, res) {
 
     // ================= SLIDE 3 — Platform Performance Comparison =================
     const prevMap = await channelMetrics(previous.from, previous.to);
+    // Share % — each platform's slice of the CURRENT period's total GMV
+    // (and, separately, of the PREVIOUS period's total) — the bar chart
+    // above only shows absolute GMV, not how the mix itself shifted.
+    const comparisonCurTotal = ALL_CHANNELS.reduce((s, ch) => s + curMap.get(ch).gmv, 0);
+    const comparisonPrevTotal = ALL_CHANNELS.reduce((s, ch) => s + prevMap.get(ch).gmv, 0);
     const platformComparison = ALL_CHANNELS.map((ch) => ({
       platform: CHANNEL_DISPLAY[ch],
       current: curMap.get(ch).gmv,
       previous: prevMap.get(ch).gmv,
+      currentSharePct: safeDivide(curMap.get(ch).gmv, comparisonCurTotal) * 100,
+      previousSharePct: safeDivide(prevMap.get(ch).gmv, comparisonPrevTotal) * 100,
     }));
     const labelYears = new Set([current.from, current.to, previous.from, previous.to].map((iso) => iso.slice(0, 4)));
     const showYear = labelYears.size > 1;
@@ -379,7 +402,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       })
     ).json();
     const weeklyTrend = weeks.map((w, i) => {
-      const row = { weekLabel: `Wk ${i + 1}`, from: w.from, to: w.to };
+      const row = { weekLabel: `Wk ${w.isoWeek}`, isoWeek: w.isoWeek, from: w.from, to: w.to };
       for (const ch of ALL_CHANNELS) {
         const r = trendRows.find((x) => x.ch === ch);
         row[CHANNEL_DISPLAY[ch]] = toNum(r?.[`w${i}`]);

@@ -20,60 +20,77 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-function formatSignedPeso(n) {
-  if (n === null || n === undefined) return "—";
-  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-  return `${sign}${formatPeso(Math.abs(n))}`;
-}
-
-// Percentage + peso-amount together (e.g. "+12.3% (+₱4,500)") — a bare %
-// doesn't say whether that's a ₱50 or ₱50,000 swing, per instruction.
-function PctWithAmount({ pct, amount }) {
+// Percentage + the prior period's own peso amount together (e.g. "+12.3%
+// (₱41,700)") — a bare % doesn't say what the actual prior-period figure
+// was. This is the previous period's raw GMV, not a delta, so no +/- sign
+// belongs on it (per explicit request).
+function PctWithAmount({ pct, previous }) {
   if (pct === null || pct === undefined) return "—";
   return (
     <span className="whitespace-nowrap">
-      {formatPct(pct)} <span style={{ color: hrh.muted }}>({formatSignedPeso(amount)})</span>
+      {formatPct(pct)} <span style={{ color: hrh.muted }}>({formatPeso(previous)})</span>
     </span>
   );
 }
 
-// Hover breakdown for the SKU Movement table's "SKUs" count — the count
-// alone doesn't say WHICH SKUs, so hovering it lists the top movers behind
-// that number (ranked by revenue impact, computed server-side).
+// Click-to-open breakdown for the SKU Movement table's "SKUs" count — the
+// count alone doesn't say WHICH SKUs, so clicking it lists the top movers
+// behind that number (ranked by revenue impact, computed server-side).
+// Each row shows "<product> <+/-₱delta> (<+/-% change>)" for Grew/Dipped —
+// the ₱ figure is how much that SKU's own GMV moved between the two
+// periods (e.g. "+₱107 (+50.0%)" = that SKU went up ₱107, a 50% increase
+// on its own prior-period total) — for Emerging it's the new GMV itself,
+// for Disappeared the GMV that dropped to zero (see topSkusFor in
+// api/_hrh-weekly-business-review.js for the exact per-category wording).
 //
 // Rendered through a portal with `position: fixed` (coordinates computed
-// from the anchor's own bounding rect on hover), NOT a plain absolutely-
-// positioned child — DataTable wraps every table in an `overflow-x-auto`
-// div for horizontal scrolling, which also clips vertical overflow (per the
-// CSS spec, a non-"visible" overflow-x forces overflow-y to compute as
-// "auto" too), so a dropdown positioned relative to its scrollable
-// ancestor would get cut off instead of floating above the page.
+// from the anchor's own bounding rect when clicked), NOT a plain
+// absolutely-positioned child — DataTable wraps every table in an
+// `overflow-x-auto` div for horizontal scrolling, which also clips
+// vertical overflow (per the CSS spec, a non-"visible" overflow-x forces
+// overflow-y to compute as "auto" too), so a dropdown positioned relative
+// to its scrollable ancestor would get cut off instead of floating above
+// the page. Closes on an outside click (not on mouse-leave — this is
+// click-to-open, not hover).
 function SkuCountWithHover({ count, topSkus }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const anchorRef = useRef(null);
+  const popupRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e) {
+      if (anchorRef.current?.contains(e.target) || popupRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [open]);
 
   if (!topSkus || topSkus.length === 0) return formatNum(count);
 
-  function show() {
-    const rect = anchorRef.current.getBoundingClientRect();
-    setPos({ top: rect.bottom + 6, left: rect.left });
-    setOpen(true);
+  function toggle() {
+    if (!open) {
+      const rect = anchorRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 6, left: rect.left });
+    }
+    setOpen((o) => !o);
   }
 
   return (
     <span
       ref={anchorRef}
-      className="cursor-help border-b border-dotted"
+      className="cursor-pointer border-b border-dotted"
       style={{ borderColor: hrh.muted }}
-      onMouseEnter={show}
-      onMouseLeave={() => setOpen(false)}
+      onClick={toggle}
     >
       {formatNum(count)}
       {open &&
         pos &&
         createPortal(
           <div
+            ref={popupRef}
             className="fixed z-50 w-72 rounded-md p-2.5 shadow-lg"
             style={{ top: pos.top, left: pos.left, background: hrh.surface, border: `1px solid ${hrh.border}` }}
           >
@@ -113,11 +130,22 @@ function InsightCard({ title, body }) {
 const PLATFORM_TABLE_COLUMNS = [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => formatPeso(r.sales) },
-  { key: "wowPct", label: "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} amount={r.wowAmount} /> },
-  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <PctWithAmount pct={r.momPct} amount={r.momAmount} /> },
+  { key: "wowPct", label: "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
+  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <PctWithAmount pct={r.momPct} previous={r.momPrevious} /> },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
   { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
+];
+
+// Each platform's share of the whole (current period, and separately the
+// previous period) — the bar chart above only shows absolute GMV per
+// platform, not how the mix between platforms shifted.
+const PLATFORM_SHARE_COLUMNS = [
+  { key: "platform", label: "Platform" },
+  { key: "current", label: "Current", render: (r) => formatPeso(r.current) },
+  { key: "currentSharePct", label: "Current Share", render: (r) => formatPct(r.currentSharePct) },
+  { key: "previous", label: "Previous", render: (r) => formatPeso(r.previous) },
+  { key: "previousSharePct", label: "Previous Share", render: (r) => formatPct(r.previousSharePct) },
 ];
 
 const SKU_MOVEMENT_COLUMNS = [
@@ -220,8 +248,11 @@ export default function WeeklyBusinessReview({ filters }) {
                   { key: "previous", name: data.platformComparison.previousLabel, color: hrh.muted },
                 ]}
               />
+              <div className="mt-3">
+                <DataTable columns={PLATFORM_SHARE_COLUMNS} rows={data.platformComparison.rows} />
+              </div>
             </Panel>
-            <Panel title="Weekly Sales Trend by Platform" subtitle="Last 6 weeks">
+            <Panel title="Weekly Sales Trend by Platform" subtitle="Last 6 ISO weeks">
               <TrendChart
                 data={data.weeklyTrend}
                 xKey="weekLabel"
