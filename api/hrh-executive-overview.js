@@ -128,8 +128,17 @@ function enumerateDatesISO(from, to) {
   }
   return dates;
 }
+// HRH Online is closed every Sunday (confirmed — no other regular closure
+// days), so Sunday is excluded from the day count entirely rather than
+// counted as a slow/zero-sales day: it was never open to sell on in the
+// first place, unlike a weekday with zero sales, which stays counted (a
+// real slow weekday should still drag the average down).
+function isSundayISO(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 0;
+}
 function daysInRange(from, to) {
-  return enumerateDatesISO(from, to).length;
+  return enumerateDatesISO(from, to).filter((d) => !isSundayISO(d)).length;
 }
 
 export default async function handler(req, res) {
@@ -182,9 +191,11 @@ export default async function handler(req, res) {
     const curAov = safeDivide(curGmv, curOrders);
     const prevAov = safeDivide(prevGmv, prevOrders);
     // Day counts for the current/comparison windows — used by Avg Sales/Day
-    // by Channel below (GMV spread evenly across the window's calendar
-    // days, not just days with sales, so a slow custom range reads as
-    // genuinely slower rather than averaging only its active days).
+    // by Channel below. GMV is spread evenly across the window's calendar
+    // days (not just days with sales), so a genuinely slow stretch reads as
+    // slower rather than being averaged away — Sundays are the one
+    // exception, excluded by daysInRange itself since HRH Online is closed
+    // then (a scheduled closure, not a slow day).
     const curDayCount = daysInRange(current.from, current.to);
     const prevDayCount = daysInRange(previous.from, previous.to);
 

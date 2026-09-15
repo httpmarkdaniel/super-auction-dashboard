@@ -199,7 +199,7 @@ export default function ExecutiveOverview({ filters }) {
 
           <Panel
             title="Avg Sales / Day by Channel"
-            subtitle="All 3 channels, always — not affected by the Channel filter above"
+            subtitle="All 3 channels, always — not affected by the Channel filter above. Sundays (store closed) excluded from the day count."
             className="mb-4"
           >
             <KpiRow>
