@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
+import Modal from "../components/Modal";
 import { TrendChart, BarComparisonChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
@@ -33,91 +33,32 @@ function PctWithAmount({ pct, previous }) {
   );
 }
 
-// Click-to-open breakdown for the SKU Movement table's "SKUs" count — the
-// count alone doesn't say WHICH SKUs, so clicking it lists the top movers
-// behind that number (ranked by revenue impact, computed server-side).
-// Each row shows "<product> <+/-₱delta> (<+/-% change>)" for Grew/Dipped —
-// the ₱ figure is how much that SKU's own GMV moved between the two
-// periods (e.g. "+₱107 (+50.0%)" = that SKU went up ₱107, a 50% increase
-// on its own prior-period total) — for Emerging it's the new GMV itself,
-// for Disappeared the GMV that dropped to zero (see topSkusFor in
-// api/_hrh-weekly-business-review.js for the exact per-category wording).
-//
-// Rendered through a portal with `position: fixed` (coordinates computed
-// from the anchor's own bounding rect when clicked), NOT a plain
-// absolutely-positioned child — DataTable wraps every table in an
-// `overflow-x-auto` div for horizontal scrolling, which also clips
-// vertical overflow (per the CSS spec, a non-"visible" overflow-x forces
-// overflow-y to compute as "auto" too), so a dropdown positioned relative
-// to its scrollable ancestor would get cut off instead of floating above
-// the page. Closes on an outside click (not on mouse-leave — this is
-// click-to-open, not hover).
-function SkuCountWithHover({ count, topSkus }) {
+const SKU_DETAIL_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 380 },
+  { key: "sku", label: "SKU", render: (r) => r.sku || "—", width: 100 },
+  { key: "detail", label: "Change / Units / Stock" },
+];
+
+// Click-to-open FULL modal for the SKU Movement table's "SKUs" count — the
+// count alone doesn't say WHICH SKUs. Shows every SKU in the category (not
+// just a top-N — see topSkusFor in api/_hrh-weekly-business-review.js,
+// which no longer truncates), paginated. Each row's detail is
+// "<+/-₱delta> (<units>)<stock>" for Grew/Dipped — the ₱ figure is how much
+// that SKU's own GMV moved between the two periods (e.g. "+₱107 (5 units)
+// · 12 unit(s) still in stock") — for Emerging it's the new GMV itself,
+// for Disappeared the GMV that dropped to zero.
+function SkuCountWithModal({ count, topSkus, category }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const anchorRef = useRef(null);
-  const popupRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleOutside(e) {
-      if (anchorRef.current?.contains(e.target) || popupRef.current?.contains(e.target)) return;
-      setOpen(false);
-    }
-    document.addEventListener("mousedown", handleOutside);
-    return () => document.removeEventListener("mousedown", handleOutside);
-  }, [open]);
-
   if (!topSkus || topSkus.length === 0) return formatNum(count);
-
-  function toggle() {
-    if (!open) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 6, left: rect.left });
-    }
-    setOpen((o) => !o);
-  }
-
   return (
-    <span
-      ref={anchorRef}
-      className="cursor-pointer border-b border-dotted"
-      style={{ borderColor: hrh.muted }}
-      onClick={toggle}
-    >
-      {formatNum(count)}
-      {open &&
-        pos &&
-        createPortal(
-          <div
-            ref={popupRef}
-            className="fixed z-50 w-80 rounded-md p-2.5 shadow-lg"
-            style={{ top: pos.top, left: pos.left, background: hrh.surface, border: `1px solid ${hrh.border}` }}
-          >
-            <div className="text-[10.5px] font-semibold uppercase tracking-[0.04em] mb-1.5" style={{ color: hrh.ink2 }}>
-              Top {topSkus.length} SKUs
-            </div>
-            {/* Product name and detail (₱ change, units, stock on hand) each
-                get their own line — the detail string got long enough once
-                stock was added that cramming both into one flex row would
-                either truncate the product name too aggressively or
-                overflow the popup's width. */}
-            <ul className="space-y-1.5">
-              {topSkus.map((s, i) => (
-                <li key={i} className="text-[11.5px] leading-snug">
-                  <div className="truncate" style={{ color: hrh.ink }}>
-                    {s.product}
-                  </div>
-                  <div className="tabular-nums" style={{ color: hrh.muted }}>
-                    {s.detail}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>,
-          document.body,
-        )}
-    </span>
+    <>
+      <span className="cursor-pointer border-b border-dotted" style={{ borderColor: hrh.muted }} onClick={() => setOpen(true)}>
+        {formatNum(count)}
+      </span>
+      <Modal open={open} onClose={() => setOpen(false)} title={`${category} — All SKUs`} subtitle={`${topSkus.length} SKU(s) this period`} wide>
+        <DataTable columns={SKU_DETAIL_COLUMNS} rows={topSkus} paginate pageSize={15} emptyLabel="No SKUs in this category." />
+      </Modal>
+    </>
   );
 }
 
@@ -157,7 +98,7 @@ const PLATFORM_SHARE_COLUMNS = [
 
 const SKU_MOVEMENT_COLUMNS = [
   { key: "category", label: "Category" },
-  { key: "skus", label: "SKUs", render: (r) => <SkuCountWithHover count={r.skus} topSkus={r.topSkus} /> },
+  { key: "skus", label: "SKUs", render: (r) => <SkuCountWithModal count={r.skus} topSkus={r.topSkus} category={r.category} /> },
   { key: "movement", label: "Movement" },
   { key: "notes", label: "Notes / Why", maxWidth: 480 },
 ];
