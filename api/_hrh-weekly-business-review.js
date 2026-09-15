@@ -379,17 +379,15 @@ export async function handleWeeklyBusinessReview(req, res) {
 
     // ================= SLIDE 3 — Platform Performance Comparison =================
     const prevMap = await channelMetrics(previous.from, previous.to);
-    // Share % — each platform's slice of the CURRENT period's total GMV
-    // (and, separately, of the PREVIOUS period's total) — the bar chart
-    // above only shows absolute GMV, not how the mix itself shifted.
-    const comparisonCurTotal = ALL_CHANNELS.reduce((s, ch) => s + curMap.get(ch).gmv, 0);
-    const comparisonPrevTotal = ALL_CHANNELS.reduce((s, ch) => s + prevMap.get(ch).gmv, 0);
+    // % change per platform vs. the comparison period (current vs. previous,
+    // the same two periods the bar chart itself plots) — replaces an
+    // earlier "share of total" table, removed per explicit request in favor
+    // of a plain increase/decrease percentage instead.
     const platformComparison = ALL_CHANNELS.map((ch) => ({
       platform: CHANNEL_DISPLAY[ch],
       current: curMap.get(ch).gmv,
       previous: prevMap.get(ch).gmv,
-      currentSharePct: safeDivide(curMap.get(ch).gmv, comparisonCurTotal) * 100,
-      previousSharePct: safeDivide(prevMap.get(ch).gmv, comparisonPrevTotal) * 100,
+      pctChange: pctDelta(curMap.get(ch).gmv, prevMap.get(ch).gmv),
     }));
     const labelYears = new Set([current.from, current.to, previous.from, previous.to].map((iso) => iso.slice(0, 4)));
     const showYear = labelYears.size > 1;

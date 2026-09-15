@@ -86,15 +86,12 @@ const PLATFORM_TABLE_COLUMNS = [
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
 ];
 
-// Each platform's share of the whole (current period, and separately the
-// previous period) — the bar chart above only shows absolute GMV per
-// platform, not how the mix between platforms shifted.
-const PLATFORM_SHARE_COLUMNS = [
+// Plain increase/decrease % per platform vs. the comparison period (same
+// current/previous the bar chart plots) — replaces an earlier "share of
+// total" table, removed per explicit request.
+const PLATFORM_CHANGE_COLUMNS = [
   { key: "platform", label: "Platform" },
-  { key: "current", label: "Current", render: (r) => formatPeso(r.current) },
-  { key: "currentSharePct", label: "Current Share", render: (r) => formatPct(r.currentSharePct) },
-  { key: "previous", label: "Previous", render: (r) => formatPeso(r.previous) },
-  { key: "previousSharePct", label: "Previous Share", render: (r) => formatPct(r.previousSharePct) },
+  { key: "pctChange", label: "% Change", render: (r) => (r.pctChange === null || r.pctChange === undefined ? "New" : formatPct(r.pctChange)) },
 ];
 
 const SKU_MOVEMENT_COLUMNS = [
@@ -198,7 +195,7 @@ export default function WeeklyBusinessReview({ filters }) {
                 ]}
               />
               <div className="mt-3">
-                <DataTable columns={PLATFORM_SHARE_COLUMNS} rows={data.platformComparison.rows} />
+                <DataTable columns={PLATFORM_CHANGE_COLUMNS} rows={data.platformComparison.rows} />
               </div>
             </Panel>
             <Panel title="Weekly Sales Trend by Platform" subtitle="Last 6 ISO weeks">
