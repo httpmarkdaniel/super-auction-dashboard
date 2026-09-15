@@ -726,8 +726,14 @@ export async function handleOrdersFulfillment(req, res) {
     for (const o of allRawOrders) {
       rawByDate.set(o.created_at, (rawByDate.get(o.created_at) || 0) + 1);
     }
+    // Cancelled here is stayingCancelled ("True Cancellation") only, same
+    // narrower figure as Cancelled Orders/Fulfillment Status Breakdown/
+    // Cancellation Rate elsewhere on this page — NOT allRealCancelledOrders
+    // (which also includes the 4 re-ordered/customer-initiated ones). This
+    // daily/weekly/monthly trend must reconcile to the same total the rest
+    // of the page shows, not a broader one.
     const cancelledByDate = new Map();
-    for (const o of allRealCancelledOrders) {
+    for (const o of m.stayingCancelled) {
       const bucket = cancelledByDate.get(o.created_at) || { count: 0, value: 0 };
       bucket.count += 1;
       bucket.value += o.net_total;
