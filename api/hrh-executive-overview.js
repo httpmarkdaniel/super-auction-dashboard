@@ -292,6 +292,17 @@ export default async function handler(req, res) {
                 FROM xv3.mart_invoice_items
                 WHERE customer_name IS NOT NULL AND trim(customer_name) != ''
                   AND customer_name NOT IN ('n/a', 'WALK IN') AND match(customer_name, '[a-zA-Z]')
+                  -- Perf: only compute full-history classification for
+                  -- customers who actually bought in THIS window (the only
+                  -- ones the final join keeps anyway) — was previously
+                  -- scanning/window-functioning every customer_name in this
+                  -- table's ENTIRE history regardless of the selected date
+                  -- range, ~1.7s alone on a typical week (measured
+                  -- 2026-09-15). Correctness is identical: each kept
+                  -- customer's history is still scanned in full (not
+                  -- date-restricted), only which customers get scanned
+                  -- changes. Verified live: segment counts unchanged.
+                  AND customer_name IN (SELECT customer_name FROM canonical_customer)
               )
             ),
             customer_month_segment AS (
@@ -312,6 +323,7 @@ export default async function handler(req, res) {
                   ON m.customer_name = ch.customer_name AND toDate(m.transaction_date) = ch.transaction_date
                 WHERE m.customer_name IS NOT NULL AND trim(m.customer_name) != ''
                   AND m.customer_name NOT IN ('n/a', 'WALK IN') AND match(m.customer_name, '[a-zA-Z]')
+                  AND m.customer_name IN (SELECT customer_name FROM canonical_customer)
               )
               GROUP BY customer_name, toStartOfMonth(transaction_date)
             )

@@ -328,17 +328,80 @@ export async function handleWeeklyBusinessReview(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
-    // ================= SLIDE 2 — Sales Performance by Platform =================
-    const curMap = await channelMetrics(current.from, current.to);
+    // ================= SLIDE 2/3/4/5 — all independent, one parallel wave =================
+    // curMap/wowMap/momCurMap/momPrevMap/prevMap (Slide 2/3's channel
+    // metrics) and trendRows/productRows (Slide 3's 6-week trend, Slide
+    // 4/5's SKU-level comparison) are 7 fully independent queries — none
+    // depends on another's result, each just needs its own date window —
+    // fired together instead of stacking one round-trip at a time (was
+    // ~2.4s sequential end-to-end on a typical week; measured 2026-09-15).
     const wowWindow = resolveWowWindow(current);
-    const wowMap = wowWindow ? await channelMetrics(wowWindow.from, wowWindow.to) : null;
     // MoM is fixed to real Month-to-Date, independent of `current` — see
-    // resolveFixedMomWindows above. Needs its own current-side fetch (momCurMap)
-    // since it's comparing a different window than the page's selected range.
+    // resolveFixedMomWindows above.
     const momWindows = resolveFixedMomWindows();
-    const [momCurMap, momPrevMap] = await Promise.all([
+    const weeks = sixWeeklyBucketsEndingAt(current.to);
+    const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows] = await Promise.all([
+      channelMetrics(current.from, current.to),
+      wowWindow ? channelMetrics(wowWindow.from, wowWindow.to) : Promise.resolve(null),
       channelMetrics(momWindows.current.from, momWindows.current.to),
       channelMetrics(momWindows.previous.from, momWindows.previous.to),
+      channelMetrics(previous.from, previous.to),
+      client
+        .query({
+          query: `
+            SELECT
+              sales_channel AS ch,
+              ${weeks.map((w, i) => `sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {w${i}From:String} AND {w${i}To:String}) AS w${i}`).join(",\n              ")}
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {spanFrom:String} AND {spanTo:String}
+            GROUP BY sales_channel
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels: ALL_CHANNELS,
+            spanFrom: weeks[0].from,
+            spanTo: weeks[weeks.length - 1].to,
+            ...Object.fromEntries(weeks.flatMap((w, i) => [[`w${i}From`, w.from], [`w${i}To`, w.to]])),
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Same query shape as api/hrh-product-analytics.js's comparisonRows
+      // (current vs previous comparable period, grouped by the canonical
+      // `ct.item_id` key) — product-level only (task calls for "actual
+      // product-level sales data"), reusing the identical GMV/Units formulas.
+      client
+        .query({
+          query: `
+            SELECT
+              \`ct.item_id\` AS item_id,
+              any(barcode) AS barcode,
+              argMax(product_name, transaction_date) AS product_name,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+              AND \`ct.item_id\` IS NOT NULL
+            GROUP BY item_id
+            HAVING cur_gmv > 0 OR prev_gmv > 0
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels: ALL_CHANNELS,
+            curFrom: current.from,
+            curTo: current.to,
+            prevFrom: previous.from,
+            prevTo: previous.to,
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
     ]);
 
     const platformRows = ALL_CHANNELS.map((ch) => {
@@ -378,7 +441,6 @@ export async function handleWeeklyBusinessReview(req, res) {
     };
 
     // ================= SLIDE 3 — Platform Performance Comparison =================
-    const prevMap = await channelMetrics(previous.from, previous.to);
     // % change per platform vs. the comparison period (current vs. previous,
     // the same two periods the bar chart itself plots) — replaces an
     // earlier "share of total" table, removed per explicit request in favor
@@ -394,29 +456,6 @@ export async function handleWeeklyBusinessReview(req, res) {
     const currentLabel = formatRangeLabel(current.from, current.to, showYear);
     const previousLabel = formatRangeLabel(previous.from, previous.to, showYear);
 
-    const weeks = sixWeeklyBucketsEndingAt(current.to);
-    const trendRows = await (
-      await client.query({
-        query: `
-          SELECT
-            sales_channel AS ch,
-            ${weeks.map((w, i) => `sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {w${i}From:String} AND {w${i}To:String}) AS w${i}`).join(",\n            ")}
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {spanFrom:String} AND {spanTo:String}
-          GROUP BY sales_channel
-        `,
-        query_params: {
-          store: HRH_STORE,
-          channels: ALL_CHANNELS,
-          spanFrom: weeks[0].from,
-          spanTo: weeks[weeks.length - 1].to,
-          ...Object.fromEntries(weeks.flatMap((w, i) => [[`w${i}From`, w.from], [`w${i}To`, w.to]])),
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
     const weeklyTrend = weeks.map((w, i) => {
       // "Wk38 (9/14–15)" — the ISO week number alone doesn't say which
       // actual dates that bucket covers, per explicit request to show the
@@ -455,42 +494,8 @@ export async function handleWeeklyBusinessReview(req, res) {
           : "Not enough platforms moved in opposite directions this period to assess a cross-platform offset.",
     };
 
-    // ================= SLIDE 4 & 5 — SKU-level (shared query) =================
-    // Same query shape as api/hrh-product-analytics.js's comparisonRows
-    // (current vs previous comparable period, grouped by the canonical
-    // `ct.item_id` key) — product-level only (task calls for "actual
-    // product-level sales data"), reusing the identical GMV/Units formulas.
-    const productRows = await (
-      await client.query({
-        query: `
-          SELECT
-            \`ct.item_id\` AS item_id,
-            any(barcode) AS barcode,
-            argMax(product_name, transaction_date) AS product_name,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            AND \`ct.item_id\` IS NOT NULL
-          GROUP BY item_id
-          HAVING cur_gmv > 0 OR prev_gmv > 0
-        `,
-        query_params: {
-          store: HRH_STORE,
-          channels: ALL_CHANNELS,
-          curFrom: current.from,
-          curTo: current.to,
-          prevFrom: previous.from,
-          prevTo: previous.to,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
-
+    // ================= SLIDE 4 & 5 — SKU-level =================
+    // productRows already fetched above (same parallel wave as curMap etc).
     const itemIds = productRows.map((r) => Number(r.item_id));
     const stockMap = await fetchStockQty(itemIds);
 
