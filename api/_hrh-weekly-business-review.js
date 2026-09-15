@@ -542,12 +542,17 @@ export async function handleWeeklyBusinessReview(req, res) {
         return Math.abs(b.curGmv - b.prevGmv) - Math.abs(a.curGmv - a.prevGmv);
       });
       return ranked.slice(0, 10).map((p) => {
+        // Units sold beside the ₱ amount, per explicit request (replacing
+        // % change) — Disappeared has no current-period units to show, so
+        // it reports the prior-period units instead (what WAS selling
+        // before it dropped to zero); every other category reports units
+        // actually sold in the current period.
         let detail;
-        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost`;
-        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new`;
+        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost (${formatNumLocal(p.prevUnits)} units)`;
+        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new (${formatNumLocal(p.curUnits)} units)`;
         else {
           const delta = p.curGmv - p.prevGmv;
-          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(1)}%)`;
+          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${formatNumLocal(p.curUnits)} units)`;
         }
         return { product: p.product, sku: p.sku, detail };
       });
