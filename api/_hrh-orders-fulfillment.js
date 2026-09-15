@@ -699,11 +699,18 @@ export async function handleOrdersFulfillment(req, res) {
       { label: "Still Awaiting Fulfillment / No Invoice", value: m.stillAwaiting },
     ];
 
-    // Cancellation Reasons — 7 categories, over ALL real cancellations
-    // (both the ones that stay inside Real Orders Received and the
-    // "confirmed customer-initiated" ones excluded from it) — matches the
-    // methodology's own Cancellation tab population.
-    const allRealCancelledOrders = [...m.stayingCancelled, ...m.customerInitiatedCancelled];
+    // Cancellation Reasons / Cancelled Orders by Fulfillment Method — 2026-09-15,
+    // reverted to stayingCancelled ("True Cancellation") ONLY, per explicit
+    // user request — same 17-total population as everywhere else on this
+    // page, not the broader 21 (which also includes the 4 re-ordered/
+    // customer-initiated ones). Consequence, disclosed rather than hidden:
+    // customerInitiatedCancelled is BY DEFINITION every category other than
+    // "System-Initiated (Expired)"/"No Reason Logged" (see
+    // isCustomerInitiatedCancellation above), so the other 5 of the 7
+    // reason categories (Payment Issues, Technical/Website, Changed Mind,
+    // Order Modification, Other/Misc) will always show 0 here now — those
+    // reasons only ever occur among the excluded 4.
+    const allRealCancelledOrders = m.stayingCancelled;
 
     // Cancelled Orders by Period — daily Raw Orders Placed / Real Cancelled
     // (count + value), for the frontend to bucket by day/week/month based
@@ -813,7 +820,12 @@ export async function handleOrdersFulfillment(req, res) {
     // Received's own breakdown). devTestOrders can include non-cancelled
     // TEST ACCOUNT orders too, so this filters to just the cancelled ones.
     const devTestCancelledCount = m.devTestOrders.filter((o) => o.order_status === "Cancelled").length;
-    const rawCancelledCount = allRealCancelledOrders.length + devTestCancelledCount;
+    // Deliberately NOT allRealCancelledOrders.length (now 17, True
+    // Cancellation only) — this feeds the Cancelled Orders modal's own
+    // "Raw Cancelled (all, incl. dev/test)" → "Real Cancelled — All Types"
+    // (21) → "Re-ordered" → "True Cancellation" (17) chain, which needs the
+    // broader 21 as its own intermediate step, not the already-narrowed 17.
+    const rawCancelledCount = m.allRealCancelled + devTestCancelledCount;
     // Reverted 2026-09-15 (see realOrdersReceived's note above) — rate is
     // stayingCancelled ("True Cancellation" equivalent) over realOrdersReceived,
     // matching the Fulfillment Status Breakdown and Executive Overview.
@@ -930,7 +942,7 @@ export async function handleOrdersFulfillment(req, res) {
       returns,
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
-        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from this figure and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped.`,
+        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 7 categories (everything except System-Initiated (Expired) and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",

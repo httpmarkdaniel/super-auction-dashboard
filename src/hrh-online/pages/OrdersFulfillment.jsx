@@ -582,7 +582,7 @@ export default function OrdersFulfillment({ filters }) {
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of all real cancellations">
+            <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of True Cancellations (excludes re-ordered/customer-initiated)">
               <DonutChart segments={cancelledByMethodSegments} centerValue={formatNum(data.cancellations.total)} centerLabel="Cancelled Orders" />
               <div className="mt-3">
                 <ReportTable
@@ -592,7 +592,7 @@ export default function OrdersFulfillment({ filters }) {
                 />
               </div>
             </Panel>
-            <Panel title="Cancellation Reasons" subtitle="Click a row for the underlying orders — 7-category grouping, categories with 0 orders hidden">
+            <Panel title="Cancellation Reasons" subtitle="True Cancellations only — click a row for the underlying orders, categories with 0 orders hidden">
               <DataTable
                 columns={CANCEL_REASON_COLUMNS}
                 rows={(data.cancellations?.reasons || []).filter((r) => r.count > 0)}
