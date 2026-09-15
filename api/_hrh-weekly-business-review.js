@@ -306,6 +306,16 @@ async function fetchStockQty(itemIds) {
 // any spec. Below this band a product is just flat, not categorized at all.
 const MOVEMENT_THRESHOLD_PCT = 20;
 
+// 2026-09-15, added per explicit user request: a %-only threshold flags a
+// ₱214→₱321 accessory (a 50% jump) the same as a ₱25,000→₱37,500 real mover
+// — a small base can swing wildly in percentage terms while carrying zero
+// business significance (phone cases, tape, pet powder topping "Grew"
+// while real movers sat below the 20% bar entirely). This ₱500 floor is a
+// deliberate, disclosed choice (not derived from any spec) applied on top
+// of the %/zero-sales rules below — a SKU needs BOTH to qualify for any of
+// the 4 buckets, not just one.
+const MATERIALITY_FLOOR_PESO = 500;
+
 function formatPesoLocal(n) {
   return `₱${Math.round(n).toLocaleString("en-PH")}`;
 }
@@ -511,10 +521,12 @@ export async function handleWeeklyBusinessReview(req, res) {
 
     const categorized = { grew: [], dipped: [], emerging: [], disappeared: [] };
     for (const p of products) {
-      if (p.prevGmv > 0 && p.curGmv <= 0) categorized.disappeared.push(p);
-      else if (p.prevGmv <= 0 && p.curGmv > 0) categorized.emerging.push(p);
-      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct >= MOVEMENT_THRESHOLD_PCT) categorized.grew.push(p);
-      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct <= -MOVEMENT_THRESHOLD_PCT) categorized.dipped.push(p);
+      if (p.prevGmv > 0 && p.curGmv <= 0 && p.prevGmv >= MATERIALITY_FLOOR_PESO) categorized.disappeared.push(p);
+      else if (p.prevGmv <= 0 && p.curGmv > 0 && p.curGmv >= MATERIALITY_FLOOR_PESO) categorized.emerging.push(p);
+      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct >= MOVEMENT_THRESHOLD_PCT && Math.abs(p.curGmv - p.prevGmv) >= MATERIALITY_FLOOR_PESO)
+        categorized.grew.push(p);
+      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct <= -MOVEMENT_THRESHOLD_PCT && Math.abs(p.curGmv - p.prevGmv) >= MATERIALITY_FLOOR_PESO)
+        categorized.dipped.push(p);
     }
     for (const p of categorized.disappeared) p.stockStatus = stockStatus(p.stockQty);
 
@@ -530,17 +542,17 @@ export async function handleWeeklyBusinessReview(req, res) {
     const disappearedUnknown = categorized.disappeared.filter((p) => p.stockStatus === "UNKNOWN STOCK").length;
 
     // Top 10 SKUs per movement category — for the SKUs column's hover
-    // breakdown (the count alone doesn't say WHICH SKUs). Ranked by revenue
-    // impact (the GMV delta, or the raw GMV for categories with nothing to
-    // diff against), matching this panel's own "which SKUs moved the needle"
-    // framing rather than ranking by % change (which can be a huge % on a
-    // tiny, immaterial base).
+    // breakdown (the count alone doesn't say WHICH SKUs). Ranked by
+    // absolute revenue SIZE — current-period GMV for Grew/Emerging (the
+    // biggest sellers right now among those that qualified), prior-period
+    // GMV for Disappeared (nothing current to rank by) — per explicit
+    // request ("items with the most value at top"), not by the size of the
+    // swing. The ±20% test above still decides WHICH SKUs land in each
+    // bucket; this only decides their order once they're in it — a
+    // ₱30,000 item that grew exactly 20% still outranks a ₱200 item that
+    // grew 300%.
     function topSkusFor(items, kind) {
-      const ranked = [...items].sort((a, b) => {
-        if (kind === "disappeared") return b.prevGmv - a.prevGmv;
-        if (kind === "emerging") return b.curGmv - a.curGmv;
-        return Math.abs(b.curGmv - b.prevGmv) - Math.abs(a.curGmv - a.prevGmv);
-      });
+      const ranked = [...items].sort((a, b) => (kind === "disappeared" ? b.prevGmv - a.prevGmv : b.curGmv - a.curGmv));
       return ranked.slice(0, 10).map((p) => {
         // Units sold beside the ₱ amount, per explicit request (replacing
         // % change) — Disappeared has no current-period units to show, so
@@ -666,7 +678,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       dataQuality: [
         "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
         "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % (2026-09-15) is fixed to real Month-to-Date vs. the same elapsed days last month, independent of the Date Range filter, and is always shown.",
-        "Grew/Dipped (Slide 4) use a +/-20% combined-GMV movement threshold — also a deliberate, disclosed choice; products moving less than that are left uncategorized (flat) rather than forced into a bucket.",
+        `Grew/Dipped (Slide 4) require BOTH a +/-20% GMV movement AND at least ${formatPesoLocal(MATERIALITY_FLOOR_PESO)} of absolute change; Emerging/Disappeared require at least ${formatPesoLocal(MATERIALITY_FLOOR_PESO)} of GMV on the side that has sales. Both are deliberate, disclosed thresholds (added 2026-09-15 — the %-only rule was flagging low-value accessories with a huge % swing off a tiny base, e.g. a phone case, ahead of real movers). Products that don't clear both bars are left uncategorized (flat) rather than forced into a bucket.`,
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",
         "SKU-level comparisons (Slides 4-5) use the same current-vs-previous-comparable-period engine as Product Analytics' Top Products/Dropped Products, not week-over-week/month-over-month specifically — the task's own Slide 4/5 definitions ask for a generic \"comparable prior period\", unlike Slide 2's explicit WoW/MoM columns.",
       ],
