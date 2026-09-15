@@ -402,7 +402,15 @@ export async function handleWeeklyBusinessReview(req, res) {
       })
     ).json();
     const weeklyTrend = weeks.map((w, i) => {
-      const row = { weekLabel: `Wk ${w.isoWeek}`, isoWeek: w.isoWeek, from: w.from, to: w.to };
+      // "Wk 38 (Sep 14–20)" — the ISO week number alone doesn't say which
+      // actual dates that bucket covers, per explicit request to show the
+      // real date range in the label itself, not just in a tooltip.
+      const row = {
+        weekLabel: `Wk ${w.isoWeek} (${formatRangeLabel(w.from, w.to, false)})`,
+        isoWeek: w.isoWeek,
+        from: w.from,
+        to: w.to,
+      };
       for (const ch of ALL_CHANNELS) {
         const r = trendRows.find((x) => x.ch === ch);
         row[CHANNEL_DISPLAY[ch]] = toNum(r?.[`w${i}`]);
