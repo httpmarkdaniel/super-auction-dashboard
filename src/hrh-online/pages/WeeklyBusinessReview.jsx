@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { TrendChart, BarComparisonChart } from "../components/Charts";
@@ -19,6 +20,83 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
+function formatSignedPeso(n) {
+  if (n === null || n === undefined) return "—";
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `${sign}${formatPeso(Math.abs(n))}`;
+}
+
+// Percentage + peso-amount together (e.g. "+12.3% (+₱4,500)") — a bare %
+// doesn't say whether that's a ₱50 or ₱50,000 swing, per instruction.
+function PctWithAmount({ pct, amount }) {
+  if (pct === null || pct === undefined) return "—";
+  return (
+    <span className="whitespace-nowrap">
+      {formatPct(pct)} <span style={{ color: hrh.muted }}>({formatSignedPeso(amount)})</span>
+    </span>
+  );
+}
+
+// Hover breakdown for the SKU Movement table's "SKUs" count — the count
+// alone doesn't say WHICH SKUs, so hovering it lists the top movers behind
+// that number (ranked by revenue impact, computed server-side).
+//
+// Rendered through a portal with `position: fixed` (coordinates computed
+// from the anchor's own bounding rect on hover), NOT a plain absolutely-
+// positioned child — DataTable wraps every table in an `overflow-x-auto`
+// div for horizontal scrolling, which also clips vertical overflow (per the
+// CSS spec, a non-"visible" overflow-x forces overflow-y to compute as
+// "auto" too), so a dropdown positioned relative to its scrollable
+// ancestor would get cut off instead of floating above the page.
+function SkuCountWithHover({ count, topSkus }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const anchorRef = useRef(null);
+
+  if (!topSkus || topSkus.length === 0) return formatNum(count);
+
+  function show() {
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({ top: rect.bottom + 6, left: rect.left });
+    setOpen(true);
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className="cursor-help border-b border-dotted"
+      style={{ borderColor: hrh.muted }}
+      onMouseEnter={show}
+      onMouseLeave={() => setOpen(false)}
+    >
+      {formatNum(count)}
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            className="fixed z-50 w-72 rounded-md p-2.5 shadow-lg"
+            style={{ top: pos.top, left: pos.left, background: hrh.surface, border: `1px solid ${hrh.border}` }}
+          >
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.04em] mb-1.5" style={{ color: hrh.ink2 }}>
+              Top {topSkus.length} SKUs
+            </div>
+            <ul className="space-y-1">
+              {topSkus.map((s, i) => (
+                <li key={i} className="flex items-center justify-between gap-3 text-[11.5px]" style={{ color: hrh.ink }}>
+                  <span className="truncate">{s.product}</span>
+                  <span className="shrink-0 tabular-nums" style={{ color: hrh.muted }}>
+                    {s.detail}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
+    </span>
+  );
+}
+
 function InsightCard({ title, body }) {
   return (
     <div className="rounded-md p-3.5" style={{ background: hrh.bg, border: `1px solid ${hrh.border}` }}>
@@ -35,8 +113,8 @@ function InsightCard({ title, body }) {
 const PLATFORM_TABLE_COLUMNS = [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => formatPeso(r.sales) },
-  { key: "wowPct", label: "WoW %", render: (r) => (r.wowPct === null || r.wowPct === undefined ? "—" : formatPct(r.wowPct)) },
-  { key: "momPct", label: "MoM %", render: (r) => (r.momPct === null || r.momPct === undefined ? "—" : formatPct(r.momPct)) },
+  { key: "wowPct", label: "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} amount={r.wowAmount} /> },
+  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <PctWithAmount pct={r.momPct} amount={r.momAmount} /> },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
   { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
@@ -44,7 +122,7 @@ const PLATFORM_TABLE_COLUMNS = [
 
 const SKU_MOVEMENT_COLUMNS = [
   { key: "category", label: "Category" },
-  { key: "skus", label: "SKUs", render: (r) => formatNum(r.skus) },
+  { key: "skus", label: "SKUs", render: (r) => <SkuCountWithHover count={r.skus} topSkus={r.topSkus} /> },
   { key: "movement", label: "Movement" },
   { key: "notes", label: "Notes / Why", maxWidth: 480 },
 ];

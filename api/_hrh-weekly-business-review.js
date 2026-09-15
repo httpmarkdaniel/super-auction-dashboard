@@ -153,24 +153,33 @@ function resolveRange(range, fromParam, toParam) {
   return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } }; // wtd (default)
 }
 
-// WoW/MoM validity — Slide 2 explicitly wants "--" rather than a fabricated
+// WoW validity — Slide 2 explicitly wants "--" rather than a fabricated
 // number when the selected range doesn't logically support the comparison.
 // Gated on the CURRENT window's actual length (not the range preset's
 // label): a "WoW %" only means something when the window being compared is
 // week-scale (<=7 days) — an MTD span of, say, 21 days shifted back 7 days
 // would just be two overlapping-but-offset multi-week chunks, not "this
-// week vs last week". Same idea for MoM at <=31 days. These thresholds are
-// a deliberate, disclosed choice (see dataQuality below), not derived from
-// any spec — there's no universal definition of "logically valid" here.
+// week vs last week". This threshold is a deliberate, disclosed choice (see
+// dataQuality below), not derived from any spec.
 function resolveWowWindow(current) {
   const spanDays = daysBetweenISO(current.from, current.to) + 1;
   if (spanDays > 7) return null;
   return { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
 }
-function resolveMomWindow(current) {
-  const spanDays = daysBetweenISO(current.from, current.to) + 1;
-  if (spanDays > 31) return null;
-  return { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) };
+// MoM — 2026-09-15 update, per explicit user request ("make MoM default as
+// month to date"): fixed to the real Manila calendar Month-to-Date vs. the
+// same elapsed days last month, ALWAYS — independent of whatever the page's
+// Date Range filter is set to (same precedent as Executive Overview's
+// Projected Month-End Sales/six-week trend above: some metrics only mean
+// something anchored to the real calendar, not to an arbitrary selected
+// window). Unlike WoW, this never returns null — a month-to-date comparison
+// is always well-defined, so MoM % is always shown.
+function resolveFixedMomWindows() {
+  const today = manilaTodayISODate();
+  const current = { from: firstOfMonthISO(today), to: today };
+  const prevAnchor = shiftMonthsClampedISO(today, -1);
+  const previous = { from: firstOfMonthISO(prevAnchor), to: prevAnchor };
+  return { current, previous };
 }
 
 // "Sep 7-13" (same month) / "Aug 31-Sep 6" (spans a month boundary) — real
@@ -291,18 +300,27 @@ export async function handleWeeklyBusinessReview(req, res) {
     const curMap = await channelMetrics(current.from, current.to);
     const wowWindow = resolveWowWindow(current);
     const wowMap = wowWindow ? await channelMetrics(wowWindow.from, wowWindow.to) : null;
-    const momWindow = resolveMomWindow(current);
-    const momMap = momWindow ? await channelMetrics(momWindow.from, momWindow.to) : null;
+    // MoM is fixed to real Month-to-Date, independent of `current` — see
+    // resolveFixedMomWindows above. Needs its own current-side fetch (momCurMap)
+    // since it's comparing a different window than the page's selected range.
+    const momWindows = resolveFixedMomWindows();
+    const [momCurMap, momPrevMap] = await Promise.all([
+      channelMetrics(momWindows.current.from, momWindows.current.to),
+      channelMetrics(momWindows.previous.from, momWindows.previous.to),
+    ]);
 
     const platformRows = ALL_CHANNELS.map((ch) => {
       const cur = curMap.get(ch);
       const wow = wowMap?.get(ch);
-      const mom = momMap?.get(ch);
+      const momCur = momCurMap.get(ch);
+      const momPrev = momPrevMap.get(ch);
       return {
         platform: CHANNEL_DISPLAY[ch],
         sales: cur.gmv,
         wowPct: wow ? pctDelta(cur.gmv, wow.gmv) : null,
-        momPct: mom ? pctDelta(cur.gmv, mom.gmv) : null,
+        wowAmount: wow ? cur.gmv - wow.gmv : null,
+        momPct: pctDelta(momCur.gmv, momPrev.gmv),
+        momAmount: momCur.gmv - momPrev.gmv,
         orders: cur.orders,
         aov: safeDivide(cur.gmv, cur.orders),
         conversionRate: null, // see dataQuality — no defensible platform-specific denominator
@@ -311,12 +329,15 @@ export async function handleWeeklyBusinessReview(req, res) {
     const curTotalGmv = platformRows.reduce((s, r) => s + r.sales, 0);
     const curTotalOrders = platformRows.reduce((s, r) => s + r.orders, 0);
     const wowTotalGmv = wowMap ? ALL_CHANNELS.reduce((s, ch) => s + wowMap.get(ch).gmv, 0) : null;
-    const momTotalGmv = momMap ? ALL_CHANNELS.reduce((s, ch) => s + momMap.get(ch).gmv, 0) : null;
+    const momCurTotalGmv = ALL_CHANNELS.reduce((s, ch) => s + momCurMap.get(ch).gmv, 0);
+    const momPrevTotalGmv = ALL_CHANNELS.reduce((s, ch) => s + momPrevMap.get(ch).gmv, 0);
     const platformTotal = {
       platform: "Total",
       sales: curTotalGmv,
       wowPct: wowMap ? pctDelta(curTotalGmv, wowTotalGmv) : null,
-      momPct: momMap ? pctDelta(curTotalGmv, momTotalGmv) : null,
+      wowAmount: wowMap ? curTotalGmv - wowTotalGmv : null,
+      momPct: pctDelta(momCurTotalGmv, momPrevTotalGmv),
+      momAmount: momCurTotalGmv - momPrevTotalGmv,
       orders: curTotalOrders,
       aov: safeDivide(curTotalGmv, curTotalOrders),
       conversionRate: null,
@@ -463,6 +484,30 @@ export async function handleWeeklyBusinessReview(req, res) {
     const disappearedHasStock = categorized.disappeared.filter((p) => p.stockStatus === "HAS STOCK").length;
     const disappearedUnknown = categorized.disappeared.filter((p) => p.stockStatus === "UNKNOWN STOCK").length;
 
+    // Top 10 SKUs per movement category — for the SKUs column's hover
+    // breakdown (the count alone doesn't say WHICH SKUs). Ranked by revenue
+    // impact (the GMV delta, or the raw GMV for categories with nothing to
+    // diff against), matching this panel's own "which SKUs moved the needle"
+    // framing rather than ranking by % change (which can be a huge % on a
+    // tiny, immaterial base).
+    function topSkusFor(items, kind) {
+      const ranked = [...items].sort((a, b) => {
+        if (kind === "disappeared") return b.prevGmv - a.prevGmv;
+        if (kind === "emerging") return b.curGmv - a.curGmv;
+        return Math.abs(b.curGmv - b.prevGmv) - Math.abs(a.curGmv - a.prevGmv);
+      });
+      return ranked.slice(0, 10).map((p) => {
+        let detail;
+        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost`;
+        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new`;
+        else {
+          const delta = p.curGmv - p.prevGmv;
+          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(1)}%)`;
+        }
+        return { product: p.product, sku: p.sku, detail };
+      });
+    }
+
     const skuMovement = [
       {
         category: "Grew",
@@ -471,6 +516,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         notes: categorized.grew.length
           ? `Sales increased by ${pctDelta(grewTotals.curGmv, grewTotals.prevGmv)?.toFixed(1)}% combined (${formatPesoLocal(grewTotals.prevGmv)} → ${formatPesoLocal(grewTotals.curGmv)}) across ${categorized.grew.length} SKU(s), vs. ${previousLabel}.`
           : "No SKUs met the +20% growth threshold this period.",
+        topSkus: topSkusFor(categorized.grew, "grew"),
       },
       {
         category: "Dipped",
@@ -479,6 +525,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         notes: categorized.dipped.length
           ? `Sales decreased by ${Math.abs(pctDelta(dippedTotals.curGmv, dippedTotals.prevGmv) ?? 0).toFixed(1)}% combined (${formatPesoLocal(dippedTotals.prevGmv)} → ${formatPesoLocal(dippedTotals.curGmv)}) across ${categorized.dipped.length} SKU(s), vs. ${previousLabel}.`
           : "No SKUs dropped past the -20% decline threshold this period.",
+        topSkus: topSkusFor(categorized.dipped, "dipped"),
       },
       {
         category: "Emerging / Breakout",
@@ -487,6 +534,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         notes: categorized.emerging.length
           ? `Newly selling — ${categorized.emerging.length} SKU(s) with ${formatPesoLocal(emergingTotals.curGmv)} combined sales this period and no comparable prior-period sales.`
           : "No new/breakout SKUs this period.",
+        topSkus: topSkusFor(categorized.emerging, "emerging"),
       },
       {
         category: "Disappeared",
@@ -495,6 +543,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         notes: categorized.disappeared.length
           ? `Had ${formatPesoLocal(disappearedTotals.prevGmv)} in sales last period, zero this period. ${disappearedOOS} Out of Stock, ${disappearedHasStock} Has Stock but no current sales${disappearedUnknown ? `, ${disappearedUnknown} Cause not determined from available data` : ""}.`
           : "No SKUs with prior-period sales dropped to zero this period.",
+        topSkus: topSkusFor(categorized.disappeared, "disappeared"),
       },
     ];
 
@@ -566,7 +615,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       skuInsights,
       dataQuality: [
         "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
-        "WoW % / MoM % show — when the selected date range's actual length doesn't support that comparison (WoW needs a <=7-day window, MoM a <=31-day window) — a deliberate, disclosed threshold, not derived from any spec.",
+        "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % (2026-09-15) is fixed to real Month-to-Date vs. the same elapsed days last month, independent of the Date Range filter, and is always shown.",
         "Grew/Dipped (Slide 4) use a +/-20% combined-GMV movement threshold — also a deliberate, disclosed choice; products moving less than that are left uncategorized (flat) rather than forced into a bucket.",
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",
         "SKU-level comparisons (Slides 4-5) use the same current-vs-previous-comparable-period engine as Product Analytics' Top Products/Dropped Products, not week-over-week/month-over-month specifically — the task's own Slide 4/5 definitions ask for a generic \"comparable prior period\", unlike Slide 2's explicit WoW/MoM columns.",
