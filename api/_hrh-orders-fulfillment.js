@@ -192,30 +192,96 @@ function resolveRange(range, fromParam, toParam) {
 // drift onto different definitions for the same date range.
 // ---------------------------------------------------------------------
 export async function computeHmrphOnlineLifecycle(from, to) {
-  const orderRows = await (
-    await client.query({
-      query: `
-        SELECT
-          order_number,
-          any(order_status) AS order_status,
-          any(payment_status) AS payment_status,
-          any(payment_type) AS payment_type,
-          any(customer_name) AS customer_name,
-          any(customer_id) AS customer_id,
-          any(net_total) AS net_total,
-          any(created_at) AS order_created_at,
-          any(cancellation_reason) AS cancellation_reason,
-          any(checkout_method) AS checkout_method,
-          any(order_id) AS order_id
-        FROM xv3.mart_xv3_order_report
-        WHERE store_name = {store:String}
-          AND toDate(created_at) BETWEEN {from:String} AND {to:String}
-        GROUP BY order_number
-      `,
-      query_params: { store: HRH_STORE, from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
+  // Probable-match candidate pool window — only depends on the function's
+  // own from/to (not on any query result), so it's computed up front
+  // rather than after directFulfilled/needsProbable like before.
+  const extendedFrom = addDaysISO(from, -1);
+  const extendedTo = addDaysISO(to, 11);
+
+  // orderRows / directMatchRows / blankOrderInvoiceRows are 3 fully
+  // independent queries — directMatchRows only needs the fixed store/
+  // channel, blankOrderInvoiceRows only needs from/to (via extendedFrom/
+  // extendedTo above), neither depends on orderRows or on each other's
+  // results — fired together instead of one round-trip at a time. (The
+  // duplicate-check itemRows query further below is NOT included here: it
+  // genuinely needs order_ids derived from orderRows' own classification,
+  // so it has to wait for that first.)
+  const [orderRows, directMatchRows, blankOrderInvoiceRows] = await Promise.all([
+    client
+      .query({
+        query: `
+          SELECT
+            order_number,
+            any(order_status) AS order_status,
+            any(payment_status) AS payment_status,
+            any(payment_type) AS payment_type,
+            any(customer_name) AS customer_name,
+            any(customer_id) AS customer_id,
+            any(net_total) AS net_total,
+            any(created_at) AS order_created_at,
+            any(cancellation_reason) AS cancellation_reason,
+            any(checkout_method) AS checkout_method,
+            any(order_id) AS order_id
+          FROM xv3.mart_xv3_order_report
+          WHERE store_name = {store:String}
+            AND toDate(created_at) BETWEEN {from:String} AND {to:String}
+          GROUP BY order_number
+        `,
+        query_params: { store: HRH_STORE, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    // Fulfilled — order_no matched directly in xv3.mart_net_sales, OR a
+    // probable match (customer name + date window + fee-adjusted amount
+    // gap) for invoices with no order_no populated. order_status is never
+    // used for this determination.
+    client
+      .query({
+        query: `
+          SELECT DISTINCT order_no
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
+            AND order_no IS NOT NULL AND order_no != ''
+        `,
+        query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    // Probable-match candidate pool: invoices with no order_no, in an
+    // extended window (order date -1 to +11 days) so a valid invoice just
+    // outside the selected range can still resolve an order inside it.
+    client
+      .query({
+        query: `
+          SELECT
+            invoice_no,
+            any(transaction_date) AS invoice_transaction_date,
+            any(customer_firstname) AS fn,
+            any(customer_lastname) AS ln,
+            sum(net_sales_amount) AS amount
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
+            AND (order_no IS NULL OR order_no = '')
+            AND transaction_date BETWEEN {from:String} AND {to:String}
+          GROUP BY invoice_no
+        `,
+        query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL, from: extendedFrom, to: extendedTo },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+  ]);
+  const directMatchedSet = new Set(directMatchRows.map((r) => r.order_no));
+  const candidatesByName = new Map();
+  for (const inv of blankOrderInvoiceRows) {
+    const name = normalizeName(`${inv.fn || ""} ${inv.ln || ""}`);
+    if (!candidatesByName.has(name)) candidatesByName.set(name, []);
+    candidatesByName.get(name).push({
+      invoiceNo: inv.invoice_no,
+      date: inv.invoice_transaction_date ? String(inv.invoice_transaction_date).slice(0, 10) : null,
+      amount: toNum(inv.amount),
+      used: false,
+    });
+  }
 
   const rawDedupedCount = orderRows.length;
 
@@ -293,65 +359,13 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   // then reordered" — excluded from Real Orders Received again.
   const realOrdersReceived = realNonCancelled.length + stayingCancelled.length;
 
-  // Fulfilled — order_no matched directly in xv3.mart_net_sales, OR a
-  // probable match (customer name + date window + fee-adjusted amount
-  // gap) for invoices with no order_no populated. order_status is never
-  // used for this determination.
-  const directMatchRows = await (
-    await client.query({
-      query: `
-        SELECT DISTINCT order_no
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
-          AND order_no IS NOT NULL AND order_no != ''
-      `,
-      query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL },
-      format: "JSONEachRow",
-    })
-  ).json();
-  const directMatchedSet = new Set(directMatchRows.map((r) => r.order_no));
-
+  // directMatchedSet/candidatesByName already computed above from the
+  // parallel-fetched directMatchRows/blankOrderInvoiceRows.
   const directFulfilled = [];
   const needsProbable = [];
   for (const o of realNonCancelled) {
     if (directMatchedSet.has(o.order_number)) directFulfilled.push(o);
     else needsProbable.push(o);
-  }
-
-  // Probable-match candidate pool: invoices with no order_no, in an
-  // extended window (order date -1 to +11 days) so a valid invoice just
-  // outside the selected range can still resolve an order inside it.
-  const extendedFrom = addDaysISO(from, -1);
-  const extendedTo = addDaysISO(to, 11);
-  const blankOrderInvoiceRows = await (
-    await client.query({
-      query: `
-        SELECT
-          invoice_no,
-          any(transaction_date) AS invoice_transaction_date,
-          any(customer_firstname) AS fn,
-          any(customer_lastname) AS ln,
-          sum(net_sales_amount) AS amount
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND sales_channel = {channel:String} AND transaction_type = 'sale'
-          AND (order_no IS NULL OR order_no = '')
-          AND transaction_date BETWEEN {from:String} AND {to:String}
-        GROUP BY invoice_no
-      `,
-      query_params: { store: HRH_STORE, channel: HMRPH_CHANNEL, from: extendedFrom, to: extendedTo },
-      format: "JSONEachRow",
-    })
-  ).json();
-  const candidatesByName = new Map();
-  for (const inv of blankOrderInvoiceRows) {
-    const name = normalizeName(`${inv.fn || ""} ${inv.ln || ""}`);
-    if (!candidatesByName.has(name)) candidatesByName.set(name, []);
-    candidatesByName.get(name).push({
-      invoiceNo: inv.invoice_no,
-      date: inv.invoice_transaction_date ? String(inv.invoice_transaction_date).slice(0, 10) : null,
-      amount: toNum(inv.amount),
-      used: false,
-    });
   }
 
   const probableFulfilled = [];
