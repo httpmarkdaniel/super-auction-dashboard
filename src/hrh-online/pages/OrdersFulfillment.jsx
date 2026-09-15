@@ -229,6 +229,7 @@ const CANCEL_DRILLDOWN_COLUMNS = [
   { key: "customer", label: "Customer" },
   { key: "orderDate", label: "Order Date" },
   { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
+  { key: "items", label: "Item(s)", maxWidth: 260, render: (r) => (r.items?.length ? r.items.join(", ") : "—") },
   { key: "checkoutMethod", label: "Checkout" },
   { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
   { key: "cancellationReason", label: "Reason", render: (r) => r.cancellationReason || "—" },

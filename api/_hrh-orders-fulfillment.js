@@ -789,6 +789,24 @@ export async function handleOrdersFulfillment(req, res) {
       sharePct: safeDivide(v.count, allRealCancelledOrders.length) * 100,
     })).sort((a, b) => b.count - a.count);
 
+    // Which item(s) were on each cancelled order — computeHmrphOnlineLifecycle's
+    // own orderRows query is order-level only (GROUP BY order_number), so
+    // item names aren't available there; joined here via xv3.sales_order_item
+    // (order_id -> item name(s)), same table/pattern already used above for
+    // the duplicate-retry check.
+    const cancelledOrderIds = allRealCancelledOrders.map((o) => toNum(o.order_id)).filter((id) => id > 0);
+    let cancelledItemsByOrderId = new Map();
+    if (cancelledOrderIds.length) {
+      const cancelledItemRows = await (
+        await client.query({
+          query: `SELECT order_id, groupUniqArray(name) AS items FROM xv3.sales_order_item WHERE order_id IN ({ids:Array(Int64)}) GROUP BY order_id`,
+          query_params: { ids: cancelledOrderIds },
+          format: "JSONEachRow",
+        })
+      ).json();
+      cancelledItemsByOrderId = new Map(cancelledItemRows.map((r) => [toNum(r.order_id), r.items || []]));
+    }
+
     // Order-level detail for the Cancellation Reasons drilldown (click a
     // category row, see its orders) — same fields already computed above,
     // no new calculation.
@@ -799,6 +817,7 @@ export async function handleOrdersFulfillment(req, res) {
       amount: o.net_total,
       checkoutMethod: o.checkout_method || "Unknown",
       paymentType: o.payment_type || "Unknown",
+      items: cancelledItemsByOrderId.get(toNum(o.order_id)) || [],
       category: o.category,
       cancellationReason: o.cancellation_reason,
     }));
