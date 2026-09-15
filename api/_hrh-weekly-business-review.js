@@ -169,11 +169,11 @@ function resolveWowWindow(current) {
 // MoM — 2026-09-15 update, per explicit user request ("make MoM default as
 // month to date"): fixed to the real Manila calendar Month-to-Date vs. the
 // same elapsed days last month, ALWAYS — independent of whatever the page's
-// Date Range filter is set to (same precedent as Executive Overview's
-// Projected Month-End Sales/six-week trend above: some metrics only mean
-// something anchored to the real calendar, not to an arbitrary selected
-// window). Unlike WoW, this never returns null — a month-to-date comparison
-// is always well-defined, so MoM % is always shown.
+// Date Range filter is set to (same idea as this file's own six-week
+// trend above: some metrics only mean something anchored to the real
+// calendar, not to an arbitrary selected window). Unlike WoW, this never
+// returns null — a month-to-date comparison is always well-defined, so
+// MoM % is always shown.
 function resolveFixedMomWindows() {
   const today = manilaTodayISODate();
   const current = { from: firstOfMonthISO(today), to: today };
