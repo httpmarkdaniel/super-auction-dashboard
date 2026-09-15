@@ -448,76 +448,97 @@ function categorizeReturnReason(remarks) {
 // of Cancelled).
 // ---------------------------------------------------------------------
 export async function computeReturnsAnalysis(from, to, channels) {
-  const salesRows = await (
-    await client.query({
-      query: `
-        SELECT uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
-          AND transaction_date BETWEEN {from:String} AND {to:String}
-      `,
-      query_params: { store: HRH_STORE, channels, from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
+  // salesRows / returnRows / dailySalesRows are 3 fully independent
+  // queries (different transaction_type/grouping over the same date
+  // range, nothing depends on another's result) — fired together instead
+  // of one round-trip at a time. checkoutRows/replacementCandidates
+  // (below) genuinely DO depend on returnRows (order_no/product_name), so
+  // they stay in their own later wave.
+  const [salesRows, returnRows, dailySalesRows] = await Promise.all([
+    client
+      .query({
+        query: `
+          SELECT uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+            AND transaction_date BETWEEN {from:String} AND {to:String}
+        `,
+        query_params: { store: HRH_STORE, channels, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    client
+      .query({
+        query: `
+          SELECT
+            invoice_no, invoice_id, order_no, transaction_date, net_sales_amount,
+            invoice_remarks, product_name, customer_firstname, customer_lastname
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'return'
+            AND transaction_date BETWEEN {from:String} AND {to:String}
+          ORDER BY transaction_date
+        `,
+        query_params: { store: HRH_STORE, channels, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    // Daily Sales — for the Returns by Period trend below (moved up here
+    // from where it used to be fetched, at the very end of this function,
+    // since it doesn't depend on anything computed from returnRows either).
+    client
+      .query({
+        query: `
+          SELECT transaction_date AS d, uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+            AND transaction_date BETWEEN {from:String} AND {to:String}
+          GROUP BY transaction_date
+        `,
+        query_params: { store: HRH_STORE, channels, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+  ]);
   const salesCount = toNum(salesRows[0]?.cnt);
   const salesValue = toNum(salesRows[0]?.amt);
-
-  const returnRows = await (
-    await client.query({
-      query: `
-        SELECT
-          invoice_no, invoice_id, order_no, transaction_date, net_sales_amount,
-          invoice_remarks, product_name, customer_firstname, customer_lastname
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'return'
-          AND transaction_date BETWEEN {from:String} AND {to:String}
-        ORDER BY transaction_date
-      `,
-      query_params: { store: HRH_STORE, channels, from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
 
   // Returns by Fulfillment Method / Payment Type — order_no -> checkout_method
   // / payment_type, same linking gap as unresolved orders elsewhere
   // (blank/unmatched order_no shows as "Unknown", not guessed).
   const orderNos = [...new Set(returnRows.map((r) => r.order_no).filter(Boolean))];
-  let checkoutByOrderNo = new Map();
-  let paymentTypeByOrderNo = new Map();
-  if (orderNos.length) {
-    const checkoutRows = await (
-      await client.query({
-        query: `SELECT order_number, any(checkout_method) AS checkout_method, any(payment_type) AS payment_type FROM xv3.mart_xv3_order_report WHERE order_number IN ({ids:Array(String)}) GROUP BY order_number`,
-        query_params: { ids: orderNos },
-        format: "JSONEachRow",
-      })
-    ).json();
-    checkoutByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.checkout_method]));
-    paymentTypeByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.payment_type]));
-  }
-
   // "Did Returned Items Get Replaced?" — matched to a LATER sale by the
   // same normalized customer name for the exact same product_name, within
   // 30 days of the return (product_name is already on mart_net_sales, no
   // need for a separate item-name join).
   const productNames = [...new Set(returnRows.map((r) => r.product_name).filter(Boolean))];
-  let replacementCandidates = [];
-  if (productNames.length) {
-    replacementCandidates = await (
-      await client.query({
-        query: `
-          SELECT transaction_date, product_name, customer_firstname, customer_lastname
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
-            AND product_name IN ({names:Array(String)})
-            AND transaction_date BETWEEN {from:String} AND {toExt:String}
-        `,
-        query_params: { store: HRH_STORE, channels, names: productNames, from, toExt: addDaysISO(to, 30) },
-        format: "JSONEachRow",
-      })
-    ).json();
-  }
+  const [checkoutRows, replacementCandidates] = await Promise.all([
+    orderNos.length
+      ? client
+          .query({
+            query: `SELECT order_number, any(checkout_method) AS checkout_method, any(payment_type) AS payment_type FROM xv3.mart_xv3_order_report WHERE order_number IN ({ids:Array(String)}) GROUP BY order_number`,
+            query_params: { ids: orderNos },
+            format: "JSONEachRow",
+          })
+          .then((r) => r.json())
+      : Promise.resolve([]),
+    productNames.length
+      ? client
+          .query({
+            query: `
+              SELECT transaction_date, product_name, customer_firstname, customer_lastname
+              FROM xv3.mart_net_sales
+              WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
+                AND product_name IN ({names:Array(String)})
+                AND transaction_date BETWEEN {from:String} AND {toExt:String}
+            `,
+            query_params: { store: HRH_STORE, channels, names: productNames, from, toExt: addDaysISO(to, 30) },
+            format: "JSONEachRow",
+          })
+          .then((r) => r.json())
+      : Promise.resolve([]),
+  ]);
+  const checkoutByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.checkout_method]));
+  const paymentTypeByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.payment_type]));
   const candidatesByNameProduct = new Map();
   for (const c of replacementCandidates) {
     const key = `${normalizeName(`${c.customer_firstname || ""} ${c.customer_lastname || ""}`)}|${c.product_name}`;
@@ -581,19 +602,7 @@ export async function computeReturnsAnalysis(from, to, channels) {
   const returnsCount = returnRows.length;
   const returnsValue = returnOrders.reduce((s, o) => s + o.amount, 0);
 
-  const dailySalesRows = await (
-    await client.query({
-      query: `
-        SELECT transaction_date AS d, uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type = 'sale'
-          AND transaction_date BETWEEN {from:String} AND {to:String}
-        GROUP BY transaction_date
-      `,
-      query_params: { store: HRH_STORE, channels, from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
+  // dailySalesRows already fetched above (same parallel wave as salesRows/returnRows).
   const dailySales = new Map(dailySalesRows.map((r) => [String(r.d).slice(0, 10), { count: toNum(r.cnt), value: toNum(r.amt) }]));
 
   const dailyMap = new Map();
