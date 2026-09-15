@@ -200,6 +200,19 @@ function formatRangeLabel(from, to, withYear) {
   return `${formatDateLabel(from, withYear)}–${formatDateLabel(to, withYear)}`;
 }
 
+// Numeric "9/14–15" / "8/31–9/6" — for the Weekly Sales Trend chart's x-axis
+// tick labels specifically, which need to fit 6 of them side by side
+// without truncating or getting auto-skipped; formatRangeLabel's spelled-
+// out month names (e.g. "Sep 14–15") ran too wide for that. Panel
+// subtitles/period labels elsewhere keep the spelled-out form — this is
+// only for cramped chart ticks.
+function formatCompactAxisRangeLabel(from, to) {
+  const sameMonth = from.slice(0, 7) === to.slice(0, 7);
+  const md = (iso) => `${Number(iso.slice(5, 7))}/${Number(iso.slice(8, 10))}`;
+  if (sameMonth) return `${md(from)}–${Number(to.slice(8, 10))}`;
+  return `${md(from)}–${md(to)}`;
+}
+
 // Standard ISO-8601 week number (weeks start Monday; week 1 is the week
 // containing the year's first Thursday) — for the Weekly Sales Trend
 // panel's per-bucket label, per explicit request to show the REAL week
@@ -402,11 +415,12 @@ export async function handleWeeklyBusinessReview(req, res) {
       })
     ).json();
     const weeklyTrend = weeks.map((w, i) => {
-      // "Wk 38 (Sep 14–20)" — the ISO week number alone doesn't say which
+      // "Wk38 (9/14–15)" — the ISO week number alone doesn't say which
       // actual dates that bucket covers, per explicit request to show the
-      // real date range in the label itself, not just in a tooltip.
+      // real date range in the label itself. Kept compact (numeric M/D, no
+      // space after "Wk") so all 6 labels fit without truncating.
       const row = {
-        weekLabel: `Wk ${w.isoWeek} (${formatRangeLabel(w.from, w.to, false)})`,
+        weekLabel: `Wk${w.isoWeek} (${formatCompactAxisRangeLabel(w.from, w.to)})`,
         isoWeek: w.isoWeek,
         from: w.from,
         to: w.to,

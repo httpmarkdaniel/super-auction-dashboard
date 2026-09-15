@@ -257,6 +257,10 @@ export default function WeeklyBusinessReview({ filters }) {
                 data={data.weeklyTrend}
                 xKey="weekLabel"
                 valueFormatter={formatCompactPeso}
+                height={300}
+                xAxisAngle={-30}
+                xAxisInterval={0}
+                xAxisHeight={54}
                 series={[
                   { key: "HMRPH Online", name: "HMRPH Online", color: hrh.series[0] },
                   { key: "TikTok", name: "TikTok", color: hrh.accent },

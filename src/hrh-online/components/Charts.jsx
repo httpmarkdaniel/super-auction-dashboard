@@ -65,12 +65,37 @@ function ChartTooltip({ active, payload, label, valueFormatter }) {
 }
 
 // GMV/NMV-style multi-series time trend. series: [{ key, name, color? }]
-export function TrendChart({ data, series, xKey = "label", height = 260, valueFormatter = formatCompactPeso }) {
+// `xAxisAngle`/`xAxisInterval` are opt-in (undefined by default, matching
+// every existing caller's behavior exactly) — for a panel with few, longer
+// tick labels that would otherwise overlap or get silently skipped by
+// Recharts' auto-thinning, pass e.g. xAxisAngle={-30} xAxisInterval={0} to
+// force every label to render, angled so it doesn't collide with its
+// neighbors. `xAxisHeight` grows the axis band to fit the angled text.
+export function TrendChart({
+  data,
+  series,
+  xKey = "label",
+  height = 260,
+  valueFormatter = formatCompactPeso,
+  xAxisAngle,
+  xAxisInterval,
+  xAxisHeight,
+}) {
+  const angled = typeof xAxisAngle === "number" && xAxisAngle !== 0;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+      <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: angled ? 12 : 0 }}>
         <CartesianGrid stroke={hrh.border} vertical={false} />
-        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <XAxis
+          dataKey={xKey}
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={{ stroke: hrh.border }}
+          tickLine={false}
+          angle={xAxisAngle}
+          textAnchor={angled ? "end" : "middle"}
+          interval={xAxisInterval}
+          height={xAxisHeight}
+        />
         <YAxis tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={valueFormatter} width={64} />
         <Tooltip content={<ChartTooltip valueFormatter={valueFormatter} />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
