@@ -267,11 +267,24 @@ export default async function handler(req, res) {
       })
     ).json();
 
-    // Cancellation Rate — "True Cancellation" count from cms.mart_cms_order_report_detailed,
-    // reclassifying a naive order_status = 'Cancelled' count: a cancelled
-    // item that the SAME customer (matched by email, or by phone number when
-    // email is blank) re-ordered afterward is a "Re-ordered" swap, not a
-    // real lost sale — only the remainder counts as a "True Cancellation".
+    // Cancellation Rate — from cms.mart_cms_order_report_detailed, a
+    // completely different table from Orders & Fulfillment/Executive
+    // Overview's xv3.mart_xv3_order_report-based lifecycle. It classifies
+    // each cancelled item as "Re-ordered" (the SAME customer — matched by
+    // email, or by phone number when email is blank — ordered that same
+    // item again afterward) or "True Cancellation" (no such re-order).
+    //
+    // 2026-09-15: counts BOTH types now, not just "True Cancellation" —
+    // cross-checked live against Orders & Fulfillment for the same period
+    // (Previous Week: this table's 17 True Cancellation + 4 Re-ordered = 21,
+    // matching xv3's allRealCancelled of 21 exactly; likely the same
+    // underlying orders viewed through 2 systems, not a coincidence). Per
+    // the same explicit user decision behind that unification (see
+    // api/_hrh-orders-fulfillment.js's 2026-09-15 note): a cancellation
+    // counts regardless of what happened afterward, so this figure now
+    // reconciles with the rest of the dashboard instead of silently
+    // reporting a narrower, "Re-ordered swaps don't count" figure.
+    //
     // This table has NO sales_channel column and — verified this session —
     // NEVER carries a single TikTok/Shopee row for ANY store (it is HMRPH's
     // own storefront checkout system's export, not a marketplace ledger), so
@@ -342,6 +355,8 @@ export default async function handler(req, res) {
       })
     ).json();
     const trueCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "True Cancellation")?.orders);
+    const reorderedCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "Re-ordered")?.orders);
+    const allCancellations = trueCancellations + reorderedCancellations;
 
     // Denominator for Cancellation Rate is intentionally this SAME table's
     // total distinct order_number (not the mart_net_sales Orders count used
@@ -389,8 +404,8 @@ export default async function handler(req, res) {
         // always report null ("N/A"), never a fabricated 0%. Denominator is
         // cmsTotalOrders (same table/population as the numerator), not the
         // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
-        cancellations: ch === "HMRPH ONLINE" ? trueCancellations : null,
-        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
+        cancellations: ch === "HMRPH ONLINE" ? allCancellations : null,
+        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (allCancellations / cmsTotalOrders) * 100 : null,
         returns: returnInvoices,
         returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
       };
@@ -492,6 +507,56 @@ export default async function handler(req, res) {
     ]);
     const categoryContribution = buildTopSeriesTrend(categoryRows, current.from, current.to, 6);
     const subcategoryContribution = buildTopSeriesTrend(subcategoryRows, current.from, current.to, 6);
+
+    // Top 3 items/SKUs per top category/subcategory — the contribution
+    // chart's bars only say "Clothing did ₱X today", not which specific
+    // products drove it. Queried only for the top N labels each panel
+    // actually shows (never "Other", which isn't one real category), for
+    // the whole current window (a single period ranking, not per-day —
+    // the chart is already per-day, this is the supporting "what's inside
+    // this bar's whole-period total" breakdown).
+    async function topItemsByLabel(labelColumn, topLabels) {
+      if (topLabels.length === 0) return {};
+      const rows = await (
+        await client.query({
+          query: `
+            SELECT
+              ${labelColumn} AS label,
+              \`ct.item_id\` AS item_id,
+              argMax(product_name, transaction_date) AS product_name,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+              AND net_sales_amount > 0
+              AND ${labelColumn} IN {labels:Array(String)}
+              AND \`ct.item_id\` IS NOT NULL
+            GROUP BY label, item_id
+          `,
+          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to, labels: topLabels },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const byLabel = new Map();
+      for (const r of rows) {
+        if (!byLabel.has(r.label)) byLabel.set(r.label, []);
+        byLabel.get(r.label).push({ product: r.product_name, gmv: toNum(r.gmv) });
+      }
+      const out = {};
+      for (const [label, items] of byLabel) {
+        out[label] = items.sort((a, b) => b.gmv - a.gmv).slice(0, 3);
+      }
+      return out;
+    }
+    const categoryTopLabels = categoryContribution.series.filter((s) => s.key !== "Other").map((s) => s.key);
+    const subcategoryTopLabels = subcategoryContribution.series.filter((s) => s.key !== "Other").map((s) => s.key);
+    const [categoryTopItems, subcategoryTopItems] = await Promise.all([
+      topItemsByLabel("category_name", categoryTopLabels),
+      topItemsByLabel("sub_category_name", subcategoryTopLabels),
+    ]);
+    categoryContribution.topItems = categoryTopItems;
+    subcategoryContribution.topItems = subcategoryTopItems;
 
     // Payment Type / Checkout-Fulfillment Method — same canonical-population
     // + LEFT JOIN pattern as Cancellation Rate above (xv3.mart_xv3_order_report,

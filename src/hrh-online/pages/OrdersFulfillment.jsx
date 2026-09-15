@@ -567,11 +567,11 @@ export default function OrdersFulfillment({ filters }) {
                 />
               </div>
             </Panel>
-            <Panel title="Cancellation Reasons" subtitle="Click a row for the underlying orders — 7-category grouping">
+            <Panel title="Cancellation Reasons" subtitle="Click a row for the underlying orders — 7-category grouping, categories with 0 orders hidden">
               <DataTable
                 columns={CANCEL_REASON_COLUMNS}
-                rows={data.cancellations?.reasons || []}
-                onRowClick={(r) => r.count > 0 && setDrilldown({ kind: "cancellation", category: r.category })}
+                rows={(data.cancellations?.reasons || []).filter((r) => r.count > 0)}
+                onRowClick={(r) => setDrilldown({ kind: "cancellation", category: r.category })}
                 emptyLabel="No cancellations in this period."
               />
             </Panel>
@@ -626,11 +626,11 @@ export default function OrdersFulfillment({ filters }) {
                 />
               </div>
             </Panel>
-            <Panel title="Return Reasons" subtitle="Click a row for the underlying transactions — 10-category grouping">
+            <Panel title="Return Reasons" subtitle="Click a row for the underlying transactions — 10-category grouping, categories with 0 orders hidden">
               <DataTable
                 columns={RETURN_REASON_COLUMNS}
-                rows={data.returns.reasons}
-                onRowClick={(r) => r.count > 0 && setDrilldown({ kind: "return", category: r.category })}
+                rows={(data.returns.reasons || []).filter((r) => r.count > 0)}
+                onRowClick={(r) => setDrilldown({ kind: "return", category: r.category })}
                 emptyLabel="No returns in this period."
               />
             </Panel>

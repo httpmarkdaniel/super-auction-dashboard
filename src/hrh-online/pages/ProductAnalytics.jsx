@@ -114,6 +114,49 @@ function GroupByControl({ value, onChange }) {
   );
 }
 
+// Top Products / Dropped Products sort — client-side only (rows are already
+// fully fetched; this just reorders what's already on screen, no refetch).
+// "Value" sorts by the row's own GMV (current-period for Top Products,
+// previous-period for Dropped Products — whichever GMV column that table
+// actually shows), "Stock" by currentStockQty — both greatest-to-least, per
+// explicit request. A row with no stock match (null) sorts to the bottom
+// rather than floating above real zero-stock rows.
+const PRODUCT_SORT_OPTIONS = [
+  { key: "value", label: "Value (High to Low)" },
+  { key: "stock", label: "Stock (High to Low)" },
+];
+function ProductSortControl({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+        Sort by
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="text-[11.5px] font-semibold px-2 py-1 rounded-md"
+        style={{ background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }}
+      >
+        {PRODUCT_SORT_OPTIONS.map((o) => (
+          <option key={o.key} value={o.key}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+function sortProductRows(rows, sortKey, valueField, stockField) {
+  const field = sortKey === "stock" ? stockField : valueField;
+  return [...(rows || [])].sort((a, b) => {
+    const av = a[field];
+    const bv = b[field];
+    const an = av === null || av === undefined ? -Infinity : av;
+    const bn = bv === null || bv === undefined ? -Infinity : bv;
+    return bn - an;
+  });
+}
+
 function trendCell(trend) {
   return (
     <span className="font-semibold whitespace-nowrap" style={{ color: TREND_COLOR[trend] || hrh.muted }}>
@@ -247,6 +290,8 @@ export default function ProductAnalytics({ filters }) {
   // (see api/hrh-product-analytics.js), so one toggle controls both rather
   // than each having its own independent grouping.
   const [comparisonGroupBy, setComparisonGroupBy] = useState("product");
+  const [topProductsSort, setTopProductsSort] = useState("value");
+  const [droppedProductsSort, setDroppedProductsSort] = useState("value");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -344,18 +389,38 @@ export default function ProductAnalytics({ filters }) {
           <Panel
             title="Top Products — Current vs Previous Period"
             subtitle={`Highest current-period GMV · ${effectivePeriodLabel(data.meta.current)} vs ${effectivePeriodLabel(data.meta.previous)}`}
-            action={<GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />}
+            action={
+              <div className="flex items-center gap-3 flex-wrap">
+                <GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />
+                <ProductSortControl value={topProductsSort} onChange={setTopProductsSort} />
+              </div>
+            }
             className="mb-4"
           >
-            <DataTable columns={topProductColumns(comparisonGroupBy)} rows={data.topProducts} paginate pageSize={10} />
+            <DataTable
+              columns={topProductColumns(comparisonGroupBy)}
+              rows={sortProductRows(data.topProducts, topProductsSort, "currentGmv", "currentStockQty")}
+              paginate
+              pageSize={10}
+            />
           </Panel>
 
           <Panel
             title="Dropped Products — Stock Check"
             subtitle={`Sold ${effectivePeriodLabel(data.meta.previous)}, zero sales ${effectivePeriodLabel(data.meta.current)}`}
-            action={<GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />}
+            action={
+              <div className="flex items-center gap-3 flex-wrap">
+                <GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />
+                <ProductSortControl value={droppedProductsSort} onChange={setDroppedProductsSort} />
+              </div>
+            }
           >
-            <DataTable columns={droppedProductColumns(comparisonGroupBy)} rows={data.droppedProducts} paginate pageSize={10} />
+            <DataTable
+              columns={droppedProductColumns(comparisonGroupBy)}
+              rows={sortProductRows(data.droppedProducts, droppedProductsSort, "previousGmv", "currentStockQty")}
+              paginate
+              pageSize={10}
+            />
           </Panel>
             </>
           )}

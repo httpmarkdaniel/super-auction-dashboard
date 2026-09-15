@@ -187,7 +187,51 @@ function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucke
           {otherMoreCount > 0 && `, +${otherMoreCount} more`}
         </p>
       )}
+      <ContributionTopItems series={series} topItems={contribution?.topItems} />
     </Panel>
+  );
+}
+
+// Top 3 items/SKUs behind each top category/subcategory, for the whole
+// current window (not per-day like the chart above it) — the chart's bars
+// only say a category's total GMV, not which specific products drove it.
+// "Other" is skipped — it's a collapsed bucket of several real categories,
+// not one category with its own top items.
+function ContributionTopItems({ series, topItems }) {
+  const named = series.filter((s) => s.key !== "Other");
+  if (named.length === 0) return null;
+  return (
+    <div className="mt-3.5 pt-3.5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3" style={{ borderTop: `1px solid ${hrh.border}` }}>
+      {named.map((s) => {
+        const items = topItems?.[s.key] || [];
+        return (
+          <div key={s.key} className="rounded-md p-2.5" style={{ border: `1px solid ${hrh.border}` }}>
+            <div className="flex items-center gap-1.5 text-[11.5px] font-semibold mb-1.5" style={{ color: hrh.ink }}>
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="truncate">{s.name}</span>
+            </div>
+            {items.length === 0 ? (
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                No item-level data
+              </div>
+            ) : (
+              <ul className="space-y-0.5">
+                {items.map((item, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-[11px]" style={{ color: hrh.ink2 }}>
+                    <span className="truncate">
+                      {i + 1}. {item.product}
+                    </span>
+                    <span className="shrink-0 tabular-nums" style={{ color: hrh.muted }}>
+                      {formatCompactPeso(item.gmv)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
