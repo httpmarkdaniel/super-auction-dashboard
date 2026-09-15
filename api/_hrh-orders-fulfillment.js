@@ -91,11 +91,18 @@ function categorizeCancellationReason(reason) {
 }
 
 // "Customer-initiated" (methodology's own footnote definition): cancelled
-// with a stated reason OTHER than an "Expired Order" auto-cancel. These
-// are excluded from Real Orders Received entirely (not treated as real
-// demand) — distinct from System-Initiated (Expired) and No Reason
-// Logged, both of which stay INSIDE Real Orders Received as genuine
-// demand that entered the funnel.
+// with a stated reason OTHER than an "Expired Order" auto-cancel — as
+// opposed to System-Initiated (Expired) and No Reason Logged.
+// 2026-09-15 update: the methodology report originally excluded these from
+// Real Orders Received (treating them as not-real-demand). That produced
+// two different "cancelled" numbers across Executive Overview (27.4%,
+// narrower) and Orders & Fulfillment's Cancellation Rate KPI (33.9%,
+// broader) for the same period, which read as a bug rather than a
+// deliberate methodology split. Per explicit user decision, this
+// distinction is now cosmetic only (still used to categorize/label a
+// cancellation) — ALL real cancellations, of either kind, count as real
+// orders received and count toward Cancelled everywhere. See
+// allRealCancelled/realOrdersReceived below.
 function isCustomerInitiatedCancellation(category) {
   return category !== "System-Initiated (Expired)" && category !== "No Reason Logged";
 }
@@ -200,8 +207,8 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   const rawDedupedCount = orderRows.length;
 
   const devTestOrders = [];
-  const stayingCancelled = []; // System-Initiated (Expired) + No Reason Logged — real demand, stays inside Real Orders Received
-  const customerInitiatedCancelled = []; // stated non-expiry reason — excluded from Real Orders Received per methodology
+  const stayingCancelled = []; // System-Initiated (Expired) + No Reason Logged
+  const customerInitiatedCancelled = []; // stated non-expiry reason — see 2026-09-15 note above: also counts as real, also inside Real Orders Received
   const nonCancelled = [];
 
   for (const o of orderRows) {
@@ -261,7 +268,11 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   const dupSetFinal = new Set(duplicateRetryOrders.map((o) => o.order_number));
   const realNonCancelled = nonCancelled.filter((o) => !dupSetFinal.has(o.order_number));
 
-  const realOrdersReceived = realNonCancelled.length + stayingCancelled.length;
+  // Includes BOTH cancellation kinds now (see 2026-09-15 note above) — a
+  // customer-initiated cancellation was still a real order that came in,
+  // it just didn't complete. Only dev/test orders and genuine duplicate
+  // retries are excluded from this total.
+  const realOrdersReceived = realNonCancelled.length + stayingCancelled.length + customerInitiatedCancelled.length;
 
   // Fulfilled — order_no matched directly in xv3.mart_net_sales, OR a
   // probable match (customer name + date window + fee-adjusted amount
@@ -642,12 +653,13 @@ export async function handleOrdersFulfillment(req, res) {
     const completionRate = safeDivide(m.fulfilled, m.realOrdersReceived) * 100;
 
     // Fulfillment Status Breakdown — reconciles exactly to Real Orders
-    // Received (Fulfilled + Cancelled-that-stays-in + Still Awaiting).
-    // NOTE: this is a DIFFERENT, narrower "Cancelled" population than the
-    // "Cancelled Orders" KPI card below — see dataQuality note.
+    // Received (Fulfilled + Cancelled + Still Awaiting). "Cancelled" here
+    // is ALL real cancellations (allRealCancelled) — same population as
+    // the "Cancelled Orders" KPI card and Executive Overview's Order
+    // Lifecycle donut, so all three always agree (2026-09-15 unification).
     const lifecycle = [
       { label: "Fulfilled", value: m.fulfilled },
-      { label: "Cancelled", value: m.stayingCancelled.length },
+      { label: "Cancelled", value: m.allRealCancelled },
       { label: "Still Awaiting Fulfillment / No Invoice", value: m.stillAwaiting },
     ];
 
@@ -833,7 +845,6 @@ export async function handleOrdersFulfillment(req, res) {
           sub: `${m.rawDedupedCount} raw deduped`,
           raw: m.rawDedupedCount,
           devTestExcluded: m.devTestOrders.length,
-          customerInitiatedExcluded: m.customerInitiatedCancelled.length,
           duplicateRetriesExcluded: m.duplicateRetryOrders.length,
         },
         fulfilledOrders: { value: m.fulfilled },
@@ -857,8 +868,8 @@ export async function handleOrdersFulfillment(req, res) {
       unresolvedOrders,
       returns,
       dataQuality: [
-        `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
-        `"Cancelled Orders" KPI (${m.allRealCancelled}) is ALL real cancellations this period (including the ${m.customerInitiatedCancelled.length} customer-initiated ones already excluded from Real Orders Received above) — it is a broader population than the "Cancelled" slice in the Fulfillment Status Breakdown (${m.stayingCancelled.length}), which only counts cancellations that stay inside Real Orders Received (System-Initiated Expired + No Reason Logged). These are intentionally different populations, not a reconciliation error.`,
+        `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
+        `"Cancelled" (${m.allRealCancelled}) is ALL real cancellations this period — System-Initiated (Expired) + No Reason Logged (${m.stayingCancelled.length}) plus confirmed customer-initiated (${m.customerInitiatedCancelled.length}, e.g. changed mind, payment issue). This single figure is used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number (updated 2026-09-15 — previously the Fulfillment Status Breakdown and Executive Overview counted only the narrower System-Initiated + No Reason Logged population, which read as a mismatch against the broader Cancellation Rate KPI).`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",

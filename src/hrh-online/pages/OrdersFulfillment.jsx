@@ -748,14 +748,13 @@ export default function OrdersFulfillment({ filters }) {
           >
             <ModalRow label="Total Orders (raw, deduped)" value={formatNum(data.kpis.realOrdersReceived.raw)} />
             <ModalRow label="Dev/test orders (tagged)" value={formatNum(data.kpis.realOrdersReceived.devTestExcluded)} subtract />
-            <ModalRow label="Confirmed customer-initiated cancellations" value={formatNum(data.kpis.realOrdersReceived.customerInitiatedExcluded)} subtract />
             <ModalRow label="Duplicate retry attempts" value={formatNum(data.kpis.realOrdersReceived.duplicateRetriesExcluded)} subtract />
             <ModalRow label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} total />
             <p className="text-[11.5px] mt-3 pt-3" style={{ borderTop: `1px dashed ${hrh.border}`, color: hrh.muted }}>
               Dev/test = orders cancelled with reason "Dev test"/"Devtest"/"devtest", or placed under customer name
-              "TEST ACCOUNT". Confirmed customer-initiated = cancelled with a stated reason other than an "Expired
-              Order" auto-cancel. System-Initiated (Expired) and No-Reason-Logged cancellations stay inside Real
-              Orders Received, same as real demand that entered the funnel — see Order Lifecycle above.
+              "TEST ACCOUNT". All real cancellations — whether the system auto-expired the order, no reason was
+              logged, or the customer stated a reason — stay inside Real Orders Received and count toward
+              Cancelled, so this figure always matches Order Lifecycle above and the Cancellation Rate below.
             </p>
           </Modal>
 
@@ -767,15 +766,15 @@ export default function OrdersFulfillment({ filters }) {
           >
             <ModalRow label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} />
             <ModalRow label="Fulfilled (direct invoice or probable match)" value={formatNum(data.kpis.fulfilledOrders.value)} />
-            <ModalRow label="Cancelled (stays inside Real Orders Received)" value={formatNum(lifecycleCancelledInDenominator)} />
+            <ModalRow label="Cancelled" value={formatNum(lifecycleCancelledInDenominator)} />
             <ModalRow label="Still Awaiting Fulfillment / No Invoice" value={formatNum(data.kpis.stillAwaitingFulfillment.value)} />
             <ModalRow label="Completion Rate" value={formatPct(data.kpis.completionRate.value)} total />
             <p className="text-[11.5px] mt-3 pt-3" style={{ borderTop: `1px dashed ${hrh.border}`, color: hrh.muted }}>
               Fulfilled = order_no matched directly in xv3.mart_net_sales, plus probable matches by customer name +
-              date + fee-adjusted amount. "Cancelled" here is only the subset that stays inside Real Orders Received
-              — the broader "Cancelled Orders" KPI card also includes confirmed customer-initiated cancellations
-              already excluded from the denominator above. Pick rate intentionally excluded — HMR MART fulfills via
-              its own WMS.
+              date + fee-adjusted amount. "Cancelled" here is the same ALL-real-cancellations figure as the
+              "Cancelled Orders" KPI card and the Cancellation Rate below — Fulfilled + Cancelled + Still Awaiting
+              always add up to Real Orders Received. Pick rate intentionally excluded — HMR MART fulfills via its
+              own WMS.
             </p>
           </Modal>
 

@@ -332,6 +332,12 @@ export default async function handler(req, res) {
     // range as this page's Date Range filter, so the two pages always
     // reconcile for HMRPH Online.
     //
+    // Cancelled = allRealCancelled (ALL real cancellations, any reason —
+    // 2026-09-15 unification, see computeHmrphOnlineLifecycle's 2026-09-15
+    // note). Previously this used only the narrower stayingCancelled
+    // population, which didn't match Orders & Fulfillment's broader
+    // Cancellation Rate KPI for the same period.
+    //
     // Fixed to HMRPH Online regardless of the page's Channel filter — same
     // reasoning as Customer Segments below: xv3.mart_xv3_order_report (the
     // order/cancellation source) only ever contains HMRPH Online's own
@@ -342,7 +348,7 @@ export default async function handler(req, res) {
     const lifecycleData = await computeHmrphOnlineLifecycle(current.from, current.to);
     const orderLifecycle = [
       { status: "Fulfilled", count: lifecycleData.fulfilled },
-      { status: "Cancelled", count: lifecycleData.stayingCancelled.length },
+      { status: "Cancelled", count: lifecycleData.allRealCancelled },
       { status: "Still Awaiting Fulfillment", count: lifecycleData.stillAwaiting },
     ];
     const orderLifecycleTotal = lifecycleData.realOrdersReceived;
