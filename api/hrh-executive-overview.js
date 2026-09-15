@@ -156,29 +156,199 @@ export default async function handler(req, res) {
     }
     const previous = resolveComparisonWindow(current, compareTo);
 
-    // KPIs — identical formula/shape to hrh-product-analytics.js.
-    const kpiRows = await (
-      await client.query({
-        query: `
-          SELECT
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_nmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-            sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_nmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
-            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
-            max(transaction_date) AS sales_as_of
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-        `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
-        format: "JSONEachRow",
-      })
-    ).json();
+    // KPIs / Sales Trend / Sales by Channel (cur+prev) / Customer Segments /
+    // Order Lifecycle are 6 fully independent queries (KPIs identical
+    // formula/shape to hrh-product-analytics.js) — different tables/date
+    // windows, nothing depends on another's result — fired together via
+    // Promise.all instead of one round-trip at a time.
+    const [kpiRows, trendRows, channelRows, prevChannelRows, customerSegmentRows, lifecycleData] = await Promise.all([
+      client
+        .query({
+          query: `
+            SELECT
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+              sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_nmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+              sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_nmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
+              max(transaction_date) AS sales_as_of
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+          `,
+          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
+      // the CURRENT window only. Zero-filled below so a day with no sales
+      // doesn't create a gap in the x-axis.
+      client
+        .query({
+          query: `
+            SELECT
+              transaction_date AS d,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+              uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+              sumIf(net_quantity, net_sales_amount > 0) AS units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            GROUP BY transaction_date
+          `,
+          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Sales by Channel — real per-channel GMV for the current window,
+      // always broken out across the 3 real channels regardless of the
+      // selected channel filter (queried without the channel filter
+      // applied), then collapsed to a single 100% slice below if one
+      // channel is selected — keeps the donut consistent with the KPI scope.
+      client
+        .query({
+          query: `
+            SELECT sales_channel AS ch, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {allChannels:Array(String)}
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            GROUP BY sales_channel
+          `,
+          query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Avg Sales/Day by Channel — same "always all 3 real channels" pattern
+      // as Sales by Channel above, so the 3 channels are visible side by
+      // side without switching the page's Channel filter. Queries the
+      // comparison window's per-channel GMV the same way.
+      client
+        .query({
+          query: `
+            SELECT sales_channel AS ch, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {allChannels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}
+            GROUP BY sales_channel
+          `,
+          query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], prevFrom: previous.from, prevTo: previous.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Customer Segments — deliberately HARD-CODED to sales_channel =
+      // 'HMRPH ONLINE', ignoring the page's channel filter entirely.
+      // Verified (2026-09-09, MTD window): every single TikTok/Shopee order
+      // carries customer_name = 'WALK IN' (HMR's own systems never capture
+      // a real buyer identity for marketplace orders — that relationship
+      // lives on TikTok's/Shopee's own platform), so classifying those
+      // channels would just produce ~100% "Unregistered" noise, not a
+      // meaningful segment split. HMRPH Online is the only channel where
+      // this is real signal.
+      //
+      // Anchored to the SAME canonical invoice_id population style as Order
+      // Status (store/date-scoped positive-sale invoices from
+      // mart_net_sales, channel fixed here), so SUM(customerSegments.orders)
+      // is always a clean subset with a known, stated scope — never a
+      // mismatched population. New/Retained/Reactivated/Unregistered come
+      // from a full cross-store purchase-history cohort analysis on
+      // customer_name (the only identifier consistently populated across
+      // xv3.mart_invoice_items' history) — a customer already active at a
+      // physical branch for years is correctly NOT "New" just because this
+      // is their first HRH Online order. Classification is evaluated as of
+      // the window's last month (toStartOfMonth(current.to)) — exact for
+      // WTD/MTD (single month), an end-of-range snapshot rather than a
+      // month-by-month sum for multi-month windows (YTD/wide Custom ranges).
+      client
+        .query({
+          query: `
+            WITH canonical AS (
+              SELECT DISTINCT invoice_id
+              FROM xv3.mart_net_sales
+              WHERE store_name = {store:String} AND sales_channel = 'HMRPH ONLINE'
+                AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+                AND net_sales_amount > 0 AND invoice_id IS NOT NULL
+            ),
+            canonical_customer AS (
+              SELECT c.invoice_id AS invoice_id, any(m.customer_name) AS customer_name
+              FROM canonical c
+              LEFT JOIN xv3.mart_invoice_items m ON c.invoice_id = m.invoice_id
+              GROUP BY c.invoice_id
+            ),
+            customer_purchase_history AS (
+              SELECT
+                customer_name,
+                transaction_date,
+                MIN(transaction_date) OVER (PARTITION BY customer_name) AS first_ever_date,
+                lag(transaction_date) OVER (PARTITION BY customer_name ORDER BY transaction_date ASC) AS previous_date
+              FROM (
+                SELECT DISTINCT customer_name, toDate(transaction_date) AS transaction_date
+                FROM xv3.mart_invoice_items
+                WHERE customer_name IS NOT NULL AND trim(customer_name) != ''
+                  AND customer_name NOT IN ('n/a', 'WALK IN') AND match(customer_name, '[a-zA-Z]')
+              )
+            ),
+            customer_month_segment AS (
+              SELECT
+                customer_name,
+                toStartOfMonth(transaction_date) AS purchase_month,
+                MIN(transaction_date) AS first_transaction_in_month,
+                argMin(first_ever_date, transaction_date) AS first_order_date,
+                argMin(previous_date, transaction_date) AS first_previous_date
+              FROM (
+                SELECT
+                  m.customer_name AS customer_name,
+                  toDate(m.transaction_date) AS transaction_date,
+                  ch.first_ever_date AS first_ever_date,
+                  ch.previous_date AS previous_date
+                FROM xv3.mart_invoice_items m
+                LEFT JOIN customer_purchase_history ch
+                  ON m.customer_name = ch.customer_name AND toDate(m.transaction_date) = ch.transaction_date
+                WHERE m.customer_name IS NOT NULL AND trim(m.customer_name) != ''
+                  AND m.customer_name NOT IN ('n/a', 'WALK IN') AND match(m.customer_name, '[a-zA-Z]')
+              )
+              GROUP BY customer_name, toStartOfMonth(transaction_date)
+            )
+            SELECT
+              multiIf(
+                cc.customer_name IS NULL OR trim(cc.customer_name) = '' OR cc.customer_name IN ('n/a', 'WALK IN') OR NOT match(cc.customer_name, '[a-zA-Z]'), 'Unregistered',
+                toStartOfMonth(cms.first_order_date) = cms.purchase_month, 'New',
+                cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) <= 2, 'Retained',
+                cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) > 2, 'Reactivated',
+                'Unknown'
+              ) AS segment,
+              count() AS orders
+            FROM canonical_customer cc
+            LEFT JOIN customer_month_segment cms
+              ON cc.customer_name = cms.customer_name
+              AND cms.purchase_month = toStartOfMonth(toDate({curTo:String}))
+            GROUP BY segment
+            ORDER BY orders DESC
+          `,
+          query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Order Lifecycle — replaces the old order_status-heavy donut (Paid/
+      // Processing/Unknown-Unmapped described raw system state, not real
+      // fulfillment — order_status can sit at "Paid" or "Processing" long
+      // after an order is actually invoiced and sold). Uses the SAME
+      // canonical Fulfilled/Cancelled/Still Awaiting definitions as Orders &
+      // Fulfillment (see api/_hrh-orders-fulfillment.js's
+      // computeHmrphOnlineLifecycle — fulfillment determined from invoices
+      // in xv3.mart_net_sales, direct order_no match or a probable name+
+      // date+amount match, never from order_status), for the SAME date
+      // range as this page's Date Range filter, so the two pages always
+      // reconcile for HMRPH Online. Fixed to HMRPH Online regardless of the
+      // page's Channel filter — same reasoning as Customer Segments above.
+      computeHmrphOnlineLifecycle(current.from, current.to),
+    ]);
     const k = kpiRows[0] || {};
     const curGmv = toNum(k.cur_gmv);
     const prevGmv = toNum(k.prev_gmv);
@@ -198,28 +368,6 @@ export default async function handler(req, res) {
     // then (a scheduled closure, not a slow day).
     const curDayCount = daysInRange(current.from, current.to);
     const prevDayCount = daysInRange(previous.from, previous.to);
-
-    // Sales Trend — daily GMV (gross, sale-side only) + Orders + Units for
-    // the CURRENT window only. Zero-filled below so a day with no sales
-    // doesn't create a gap in the x-axis.
-    const trendRows = await (
-      await client.query({
-        query: `
-          SELECT
-            transaction_date AS d,
-            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
-            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
-            sumIf(net_quantity, net_sales_amount > 0) AS units
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-          GROUP BY transaction_date
-        `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const trendByDate = new Map(
       trendRows.map((r) => [r.d, { gmv: toNum(r.gmv), orders: toNum(r.orders), units: toNum(r.units) }])
     );
@@ -229,46 +377,7 @@ export default async function handler(req, res) {
       orders: trendByDate.get(d)?.orders ?? 0,
       units: trendByDate.get(d)?.units ?? 0,
     }));
-
-    // Sales by Channel — real per-channel GMV for the current window,
-    // always broken out across the 3 real channels regardless of the
-    // selected channel filter (queried without the channel filter applied),
-    // then collapsed to a single 100% slice below if one channel is
-    // selected — keeps the donut consistent with the KPI scope.
-    const channelRows = await (
-      await client.query({
-        query: `
-          SELECT sales_channel AS ch, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {allChannels:Array(String)}
-            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-          GROUP BY sales_channel
-        `,
-        query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const channelGmv = new Map(channelRows.map((r) => [r.ch, toNum(r.gmv)]));
-
-    // Avg Sales/Day by Channel — same "always all 3 real channels" pattern
-    // as Sales by Channel above, so the 3 channels are visible side by side
-    // without switching the page's Channel filter. Reuses channelGmv (cur)
-    // and queries the comparison window's per-channel GMV the same way.
-    const prevChannelRows = await (
-      await client.query({
-        query: `
-          SELECT sales_channel AS ch, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {allChannels:Array(String)}
-            AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}
-          GROUP BY sales_channel
-        `,
-        query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], prevFrom: previous.from, prevTo: previous.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const prevChannelGmv = new Map(prevChannelRows.map((r) => [r.ch, toNum(r.gmv)]));
     const avgSalesPerDayByChannel = CHANNEL_MAP["All Channels"].map((ch) => {
       const curChGmv = channelGmv.get(ch) || 0;
@@ -285,133 +394,18 @@ export default async function handler(req, res) {
             sharePct: curGmv > 0 ? ((channelGmv.get(ch) || 0) / curGmv) * 100 : 0,
           }))
         : [{ channel: channels[0], gmv: curGmv, sharePct: curGmv > 0 ? 100 : 0 }];
-
-    // Order Lifecycle — replaces the old order_status-heavy donut (Paid/
-    // Processing/Unknown-Unmapped described raw system state, not real
-    // fulfillment — order_status can sit at "Paid" or "Processing" long
-    // after an order is actually invoiced and sold). Uses the SAME
-    // canonical Fulfilled/Cancelled/Still Awaiting definitions as Orders &
-    // Fulfillment (see api/_hrh-orders-fulfillment.js's
-    // computeHmrphOnlineLifecycle — fulfillment determined from invoices
-    // in xv3.mart_net_sales, direct order_no match or a probable name+
-    // date+amount match, never from order_status), for the SAME date
-    // range as this page's Date Range filter, so the two pages always
-    // reconcile for HMRPH Online.
-    //
     // Cancelled = stayingCancelled only (System-Initiated Expired + No
     // Reason Logged) — reverted 2026-09-15 (briefly used allRealCancelled,
     // ALL real cancellations any reason, for a same-day unification; see
     // computeHmrphOnlineLifecycle's 2026-09-15 note for why it was reverted
     // back). Matches Orders & Fulfillment's Fulfillment Status Breakdown
     // and Cancellation Rate KPI exactly.
-    //
-    // Fixed to HMRPH Online regardless of the page's Channel filter — same
-    // reasoning as Customer Segments below: xv3.mart_xv3_order_report (the
-    // order/cancellation source) only ever contains HMRPH Online's own
-    // website orders, TikTok/Shopee orders never flow through it, so there
-    // is no equivalent lifecycle to compute for those channels without
-    // separate validation (see api/_hrh-orders-fulfillment.js's channel-
-    // scope comment).
-    const lifecycleData = await computeHmrphOnlineLifecycle(current.from, current.to);
     const orderLifecycle = [
       { status: "Fulfilled", count: lifecycleData.fulfilled },
       { status: "Cancelled", count: lifecycleData.stayingCancelled.length },
       { status: "Still Awaiting Fulfillment", count: lifecycleData.stillAwaiting },
     ];
     const orderLifecycleTotal = lifecycleData.realOrdersReceived;
-
-    // Customer Segments — deliberately HARD-CODED to sales_channel =
-    // 'HMRPH ONLINE', ignoring the page's channel filter entirely. Verified
-    // (2026-09-09, MTD window): every single TikTok/Shopee order carries
-    // customer_name = 'WALK IN' (HMR's own systems never capture a real
-    // buyer identity for marketplace orders — that relationship lives on
-    // TikTok's/Shopee's own platform), so classifying those channels would
-    // just produce ~100% "Unregistered" noise, not a meaningful segment
-    // split. HMRPH Online is the only channel where this is real signal.
-    //
-    // Anchored to the SAME canonical invoice_id population style as Order
-    // Status (store/date-scoped positive-sale invoices from mart_net_sales,
-    // channel fixed here), so SUM(customerSegments.orders) is always a
-    // clean subset with a known, stated scope — never a mismatched
-    // population. New/Retained/Reactivated/Unregistered come from a full
-    // cross-store purchase-history cohort analysis on customer_name (the
-    // only identifier consistently populated across xv3.mart_invoice_items'
-    // history) — a customer already active at a physical branch for years
-    // is correctly NOT "New" just because this is their first HRH Online
-    // order. Classification is evaluated as of the window's last month
-    // (toStartOfMonth(current.to)) — exact for WTD/MTD (single month),
-    // an end-of-range snapshot rather than a month-by-month sum for
-    // multi-month windows (YTD/wide Custom ranges).
-    const customerSegmentRows = await (
-      await client.query({
-        query: `
-          WITH canonical AS (
-            SELECT DISTINCT invoice_id
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String} AND sales_channel = 'HMRPH ONLINE'
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-              AND net_sales_amount > 0 AND invoice_id IS NOT NULL
-          ),
-          canonical_customer AS (
-            SELECT c.invoice_id AS invoice_id, any(m.customer_name) AS customer_name
-            FROM canonical c
-            LEFT JOIN xv3.mart_invoice_items m ON c.invoice_id = m.invoice_id
-            GROUP BY c.invoice_id
-          ),
-          customer_purchase_history AS (
-            SELECT
-              customer_name,
-              transaction_date,
-              MIN(transaction_date) OVER (PARTITION BY customer_name) AS first_ever_date,
-              lag(transaction_date) OVER (PARTITION BY customer_name ORDER BY transaction_date ASC) AS previous_date
-            FROM (
-              SELECT DISTINCT customer_name, toDate(transaction_date) AS transaction_date
-              FROM xv3.mart_invoice_items
-              WHERE customer_name IS NOT NULL AND trim(customer_name) != ''
-                AND customer_name NOT IN ('n/a', 'WALK IN') AND match(customer_name, '[a-zA-Z]')
-            )
-          ),
-          customer_month_segment AS (
-            SELECT
-              customer_name,
-              toStartOfMonth(transaction_date) AS purchase_month,
-              MIN(transaction_date) AS first_transaction_in_month,
-              argMin(first_ever_date, transaction_date) AS first_order_date,
-              argMin(previous_date, transaction_date) AS first_previous_date
-            FROM (
-              SELECT
-                m.customer_name AS customer_name,
-                toDate(m.transaction_date) AS transaction_date,
-                ch.first_ever_date AS first_ever_date,
-                ch.previous_date AS previous_date
-              FROM xv3.mart_invoice_items m
-              LEFT JOIN customer_purchase_history ch
-                ON m.customer_name = ch.customer_name AND toDate(m.transaction_date) = ch.transaction_date
-              WHERE m.customer_name IS NOT NULL AND trim(m.customer_name) != ''
-                AND m.customer_name NOT IN ('n/a', 'WALK IN') AND match(m.customer_name, '[a-zA-Z]')
-            )
-            GROUP BY customer_name, toStartOfMonth(transaction_date)
-          )
-          SELECT
-            multiIf(
-              cc.customer_name IS NULL OR trim(cc.customer_name) = '' OR cc.customer_name IN ('n/a', 'WALK IN') OR NOT match(cc.customer_name, '[a-zA-Z]'), 'Unregistered',
-              toStartOfMonth(cms.first_order_date) = cms.purchase_month, 'New',
-              cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) <= 2, 'Retained',
-              cms.first_previous_date IS NOT NULL AND dateDiff('month', cms.first_previous_date, cms.first_transaction_in_month) > 2, 'Reactivated',
-              'Unknown'
-            ) AS segment,
-            count() AS orders
-          FROM canonical_customer cc
-          LEFT JOIN customer_month_segment cms
-            ON cc.customer_name = cms.customer_name
-            AND cms.purchase_month = toStartOfMonth(toDate({curTo:String}))
-          GROUP BY segment
-          ORDER BY orders DESC
-        `,
-        query_params: { store: HRH_STORE, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const customerSegments = customerSegmentRows.map((r) => ({ segment: r.segment, orders: toNum(r.orders) }));
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");

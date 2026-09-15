@@ -181,46 +181,50 @@ const DIST_BUCKETS = [
 async function computeLifecycleFunnel(from, to) {
   const HRH_STORE = "HRH ONLINE";
 
-  const cohortRows = await (
-    await client.query({
-      query: `
-        SELECT barcode, toString(product_id) AS product_id, date_received, created_time
-        FROM xv3.mart_level_of_inventory
-        WHERE store_name = {store:String}
-          AND date_received IS NOT NULL
-          AND toDate(date_received) BETWEEN {from:String} AND {to:String}
-      `,
-      query_params: { store: HRH_STORE, from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
-
-  const postedRows = await (
-    await client.query({
-      query: `
-        SELECT sku, min(published_date) AS first_published
-        FROM cms.mart_cms_posted_inventory_report
-        WHERE store_name = {store:String} AND published_date IS NOT NULL
-        GROUP BY sku
-      `,
-      query_params: { store: HRH_STORE },
-      format: "JSONEachRow",
-    })
-  ).json();
+  // These 3 queries are fully independent of each other (cohort is scoped
+  // by date_received, posted/sold are scoped by store only, with no
+  // dependency on cohort's own results) — run concurrently instead of one
+  // round-trip at a time.
+  const [cohortRows, postedRows, soldRows] = await Promise.all([
+    client
+      .query({
+        query: `
+          SELECT barcode, toString(product_id) AS product_id, date_received, created_time
+          FROM xv3.mart_level_of_inventory
+          WHERE store_name = {store:String}
+            AND date_received IS NOT NULL
+            AND toDate(date_received) BETWEEN {from:String} AND {to:String}
+        `,
+        query_params: { store: HRH_STORE, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    client
+      .query({
+        query: `
+          SELECT sku, min(published_date) AS first_published
+          FROM cms.mart_cms_posted_inventory_report
+          WHERE store_name = {store:String} AND published_date IS NOT NULL
+          GROUP BY sku
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    client
+      .query({
+        query: `
+          SELECT \`ct.item_id\` AS product_id, min(transaction_date) AS first_sale
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String} AND net_sales_amount > 0 AND \`ct.item_id\` IS NOT NULL
+          GROUP BY product_id
+        `,
+        query_params: { store: HRH_STORE },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+  ]);
   const postedMap = new Map(postedRows.map((r) => [r.sku, r.first_published]));
-
-  const soldRows = await (
-    await client.query({
-      query: `
-        SELECT \`ct.item_id\` AS product_id, min(transaction_date) AS first_sale
-        FROM xv3.mart_net_sales
-        WHERE store_name = {store:String} AND net_sales_amount > 0 AND \`ct.item_id\` IS NOT NULL
-        GROUP BY product_id
-      `,
-      query_params: { store: HRH_STORE },
-      format: "JSONEachRow",
-    })
-  ).json();
   const soldMap = new Map(soldRows.map((r) => [String(r.product_id), r.first_sale]));
 
   const asnQty = cohortRows.length;
@@ -319,125 +323,128 @@ export async function handleBarcodeAnalytics(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
-    // KPIs — orders processed in the window (by order_placed_at) plus avg
-    // duration for each real stage: pick→QC, QC→waybill, and total
-    // pick→dispatch (picking_started_at to dispatch_finalized_at,
-    // computed directly rather than summed from the intermediate stage
-    // columns, so it can't drift from nulls in any one intermediate stage).
-    const kpiRows = await (
-      await client.query({
-        query: `
-          SELECT
-            count() AS orders,
-            avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
-            avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds,
-            avgIf(
-              dateDiff('second', picking_started_at, dispatch_finalized_at),
-              picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
-            ) AS avg_pick_to_dispatch_seconds
-          FROM xv3.mart_order_fulfilment_journey
-          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-        `,
-        query_params: { from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
+    // All 5 queries below (plus the lifecycle funnel's own 3) are
+    // independent of each other — same date range, different tables/
+    // aggregations, nothing depends on another's result — so they're fired
+    // together via Promise.all instead of one round-trip at a time.
+    const [kpiRows, pickerRows, qcRows, distRows, dailyRows, lifecycleFunnel] = await Promise.all([
+      // KPIs — orders processed in the window (by order_placed_at) plus avg
+      // duration for each real stage: pick→QC, QC→waybill, and total
+      // pick→dispatch (picking_started_at to dispatch_finalized_at,
+      // computed directly rather than summed from the intermediate stage
+      // columns, so it can't drift from nulls in any one intermediate stage).
+      client
+        .query({
+          query: `
+            SELECT
+              count() AS orders,
+              avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
+              avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds,
+              avgIf(
+                dateDiff('second', picking_started_at, dispatch_finalized_at),
+                picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
+              ) AS avg_pick_to_dispatch_seconds
+            FROM xv3.mart_order_fulfilment_journey
+            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+          `,
+          query_params: { from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Picker Performance — real named pickers, ranked by volume. Excludes
+      // null picker_name (a single row store-wide, verified) rather than
+      // showing an "Unassigned" bucket with nothing meaningful in it.
+      client
+        .query({
+          query: `
+            SELECT
+              picker_name,
+              count() AS orders,
+              sum(coalesce(picked_item_count, 0)) AS items,
+              avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds
+            FROM xv3.mart_order_fulfilment_journey
+            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+              AND picker_name IS NOT NULL
+            GROUP BY picker_name
+            ORDER BY orders DESC
+            LIMIT 20
+          `,
+          query_params: { from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // QC Station Throughput — same idea, per QC station.
+      client
+        .query({
+          query: `
+            SELECT
+              qc_station,
+              count() AS orders,
+              avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds
+            FROM xv3.mart_order_fulfilment_journey
+            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+              AND qc_station IS NOT NULL
+            GROUP BY qc_station
+            ORDER BY orders DESC
+          `,
+          query_params: { from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Pick-to-Dispatch Time Distribution — same bucketing shape the old
+      // Orders & Fulfillment page used for this same table, before that
+      // page was rebuilt on the invoice-matching methodology.
+      client
+        .query({
+          query: `
+            SELECT ${DIST_BUCKETS.map((b, i) => `countIf(${b.where}) AS b${i}`).join(", ")}
+            FROM (
+              SELECT dateDiff('second', picking_started_at, dispatch_finalized_at) / 3600.0 AS hrs
+              FROM xv3.mart_order_fulfilment_journey
+              WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+                AND picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
+            )
+          `,
+          query_params: { from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Daily volume — orders placed / picked / packed / shipped per day,
+      // for the frontend's Day/Week/Month bucketing (same client-side
+      // pattern as Executive Overview's Sales Trend).
+      client
+        .query({
+          query: `
+            SELECT
+              toDate(order_placed_at) AS d,
+              count() AS orders,
+              countIf(picking_started_at IS NOT NULL) AS picked,
+              countIf(is_packed = 1) AS packed,
+              countIf(is_shipped = 1) AS shipped
+            FROM xv3.mart_order_fulfilment_journey
+            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+            GROUP BY d
+          `,
+          query_params: { from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      computeLifecycleFunnel(range_.from, range_.to),
+    ]);
     const k = kpiRows[0] || {};
-
-    // Picker Performance — real named pickers, ranked by volume. Excludes
-    // null picker_name (a single row store-wide, verified) rather than
-    // showing an "Unassigned" bucket with nothing meaningful in it.
-    const pickerRows = await (
-      await client.query({
-        query: `
-          SELECT
-            picker_name,
-            count() AS orders,
-            sum(coalesce(picked_item_count, 0)) AS items,
-            avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds
-          FROM xv3.mart_order_fulfilment_journey
-          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-            AND picker_name IS NOT NULL
-          GROUP BY picker_name
-          ORDER BY orders DESC
-          LIMIT 20
-        `,
-        query_params: { from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const pickerPerformance = pickerRows.map((r) => ({
       picker: r.picker_name,
       orders: toNum(r.orders),
       items: toNum(r.items),
       avgPickSeconds: toNum(r.avg_pick_seconds),
     }));
-
-    // QC Station Throughput — same idea, per QC station.
-    const qcRows = await (
-      await client.query({
-        query: `
-          SELECT
-            qc_station,
-            count() AS orders,
-            avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds
-          FROM xv3.mart_order_fulfilment_journey
-          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-            AND qc_station IS NOT NULL
-          GROUP BY qc_station
-          ORDER BY orders DESC
-        `,
-        query_params: { from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const qcThroughput = qcRows.map((r) => ({
       station: r.qc_station,
       orders: toNum(r.orders),
       avgQcSeconds: toNum(r.avg_qc_seconds),
     }));
-
-    // Pick-to-Dispatch Time Distribution — same bucketing shape the old
-    // Orders & Fulfillment page used for this same table, before that
-    // page was rebuilt on the invoice-matching methodology.
-    const distRows = await (
-      await client.query({
-        query: `
-          SELECT ${DIST_BUCKETS.map((b, i) => `countIf(${b.where}) AS b${i}`).join(", ")}
-          FROM (
-            SELECT dateDiff('second', picking_started_at, dispatch_finalized_at) / 3600.0 AS hrs
-            FROM xv3.mart_order_fulfilment_journey
-            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-              AND picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
-          )
-        `,
-        query_params: { from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const distRow = distRows[0] || {};
     const pickToDispatchDistribution = DIST_BUCKETS.map((b, i) => ({ label: b.label, value: toNum(distRow[`b${i}`]) }));
-
-    // Daily volume — orders placed / picked / packed / shipped per day,
-    // for the frontend's Day/Week/Month bucketing (same client-side
-    // pattern as Executive Overview's Sales Trend).
-    const dailyRows = await (
-      await client.query({
-        query: `
-          SELECT
-            toDate(order_placed_at) AS d,
-            count() AS orders,
-            countIf(picking_started_at IS NOT NULL) AS picked,
-            countIf(is_packed = 1) AS packed,
-            countIf(is_shipped = 1) AS shipped
-          FROM xv3.mart_order_fulfilment_journey
-          WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-          GROUP BY d
-        `,
-        query_params: { from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
     const dailyMap = new Map(dailyRows.map((r) => [String(r.d), r]));
     const dailyVolume = [];
     for (let d = range_.from; d <= range_.to; d = addDaysISO(d, 1)) {
@@ -450,8 +457,6 @@ export async function handleBarcodeAnalytics(req, res) {
         shipped: toNum(r?.shipped),
       });
     }
-
-    const lifecycleFunnel = await computeLifecycleFunnel(range_.from, range_.to);
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({

@@ -359,52 +359,11 @@ export default async function handler(req, res) {
     // as GMV. Orders = distinct invoice_id on the same gross-sale rows.
     // Every formula here reconciled exactly against a known historical
     // week (see commit message / PR description for the reconciliation).
-    const kpiRows = await (
-      await client.query({
-        query: `
-          SELECT
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_nmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-            sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_nmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
-            uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
-            max(transaction_date) AS sales_as_of
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-        `,
-        query_params: {
-          store: HRH_STORE,
-          channels,
-          curFrom: current.from,
-          curTo: current.to,
-          prevFrom: previous.from,
-          prevTo: previous.to,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const k = kpiRows[0] || {};
-    const curGmv = toNum(k.cur_gmv);
-    const prevGmv = toNum(k.prev_gmv);
-    const curOrders = toNum(k.cur_orders);
-    const prevOrders = toNum(k.prev_orders);
-    const curNmv = toNum(k.cur_nmv);
-    const prevNmv = toNum(k.prev_nmv);
-    const curUnits = toNum(k.cur_units);
-    const prevUnits = toNum(k.prev_units);
-    const curAov = safeDivide(curGmv, curOrders);
-    const prevAov = safeDivide(prevGmv, prevOrders);
-
-    // Repeat Sellers — grouped by item (canonical key `ct.item_id`, the
-    // literal dot requires backticks), category, or subcategory per the
-    // groupBy toggle, with positive GMV in >= 2 of the last 4 buckets,
-    // either 4 real 7-day weeks or 4 calendar months ending "today" per the
-    // bucketGranularity toggle (see weeklyBucketsEndingAt/
+    // Repeat Sellers query prep — grouped by item (canonical key
+    // `ct.item_id`, the literal dot requires backticks), category, or
+    // subcategory per the groupBy toggle, with positive GMV in >= 2 of the
+    // last 4 buckets, either 4 real 7-day weeks or 4 calendar months ending
+    // "today" per the bucketGranularity toggle (see weeklyBucketsEndingAt/
     // monthlyBucketsEndingAt) — independent of the page's selected range
     // preset either way. The qualification itself is re-evaluated AT
     // WHICHEVER GROUPING LEVEL is selected (GROUP BY category_name, not a
@@ -431,50 +390,12 @@ export default async function handler(req, res) {
         ? `${GROUP_FIELD} AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,`
         : `${GROUP_FIELD} AS group_key, groupUniqArray(\`ct.item_id\`) AS item_ids,`;
     const identityFilter = groupBy === "product" ? `AND ${GROUP_FIELD} IS NOT NULL` : `AND ${GROUP_FIELD} IS NOT NULL AND trim(${GROUP_FIELD}) != ''`;
-    const repeatRows = await (
-      await client.query({
-        query: `
-          SELECT
-            ${identitySelect}
-            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_gmv,
-            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
-            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
-            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
-            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_units,
-            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_units,
-            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_units,
-            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {wk1From:String} AND {wk4To:String}
-            ${identityFilter}
-          GROUP BY group_key
-          HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 2
-          ORDER BY wk4_gmv DESC
-          LIMIT 500
-        `,
-        query_params: {
-          store: HRH_STORE,
-          channels,
-          wk1From: wk1.from,
-          wk1To: wk1.to,
-          wk2From: wk2.from,
-          wk2To: wk2.to,
-          wk3From: wk3.from,
-          wk3To: wk3.to,
-          wk4From: wk4.from,
-          wk4To: wk4.to,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
 
-    // Product comparison (current vs previous window) — feeds BOTH Top
-    // Products and Dropped Products, unpaged, so a dropped item (current
-    // GMV = 0) isn't cut off by a "top N" limit before we can classify it.
-    // previousUnits is computed and carried straight through to both
-    // consumers below — never hardcoded to 0.
+    // Product comparison query prep (current vs previous window) — feeds
+    // BOTH Top Products and Dropped Products, unpaged, so a dropped item
+    // (current GMV = 0) isn't cut off by a "top N" limit before we can
+    // classify it. previousUnits is computed and carried straight through
+    // to both consumers below — never hardcoded to 0.
     const comparisonIdentitySelect =
       comparisonGroupBy === "product"
         ? `${COMPARISON_GROUP_FIELD} AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,`
@@ -483,44 +404,130 @@ export default async function handler(req, res) {
       comparisonGroupBy === "product"
         ? `AND ${COMPARISON_GROUP_FIELD} IS NOT NULL`
         : `AND ${COMPARISON_GROUP_FIELD} IS NOT NULL AND trim(${COMPARISON_GROUP_FIELD}) != ''`;
-    const comparisonRows = await (
-      await client.query({
-        query: `
-          SELECT
-            ${comparisonIdentitySelect}
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {channels:Array(String)}
-            AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            ${comparisonIdentityFilter}
-          GROUP BY group_key
-          HAVING cur_gmv > 0 OR prev_gmv > 0
-        `,
-        query_params: {
-          store: HRH_STORE,
-          channels,
-          curFrom: current.from,
-          curTo: current.to,
-          prevFrom: previous.from,
-          prevTo: previous.to,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
 
-    // Inventory snapshot freshness — reported so the UI never claims
-    // real-time when the mart is batch-refreshed.
-    const invMetaRows = await (
-      await client.query({
-        query: `SELECT max(created_time) AS inventory_as_of FROM xv3.mart_level_of_inventory WHERE store_name = {store:String}`,
-        query_params: { store: HRH_STORE },
-        format: "JSONEachRow",
-      })
-    ).json();
+    // KPIs / Repeat Sellers / Product Comparison / Inventory Freshness are
+    // 4 fully independent queries (different tables/date windows, nothing
+    // depends on another's result) — fired together instead of one
+    // round-trip at a time. fetchInventory/fetchOtherStoreStock (below)
+    // genuinely DO depend on these results (they need the item_ids these
+    // 4 produce), so they stay in their own later wave, not folded in here.
+    const [kpiRows, repeatRows, comparisonRows, invMetaRows] = await Promise.all([
+      client
+        .query({
+          query: `
+            SELECT
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+              sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_nmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_orders,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+              sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_nmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_orders,
+              max(transaction_date) AS sales_as_of
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels,
+            curFrom: current.from,
+            curTo: current.to,
+            prevFrom: previous.from,
+            prevTo: previous.to,
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `
+            SELECT
+              ${identitySelect}
+              coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_gmv,
+              coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
+              coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
+              coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
+              coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_units,
+              coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_units,
+              coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_units,
+              coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {wk1From:String} AND {wk4To:String}
+              ${identityFilter}
+            GROUP BY group_key
+            HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 2
+            ORDER BY wk4_gmv DESC
+            LIMIT 500
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels,
+            wk1From: wk1.from,
+            wk1To: wk1.to,
+            wk2From: wk2.from,
+            wk2To: wk2.to,
+            wk3From: wk3.from,
+            wk3To: wk3.to,
+            wk4From: wk4.from,
+            wk4To: wk4.to,
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `
+            SELECT
+              ${comparisonIdentitySelect}
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+              ${comparisonIdentityFilter}
+            GROUP BY group_key
+            HAVING cur_gmv > 0 OR prev_gmv > 0
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels,
+            curFrom: current.from,
+            curTo: current.to,
+            prevFrom: previous.from,
+            prevTo: previous.to,
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Inventory snapshot freshness — reported so the UI never claims
+      // real-time when the mart is batch-refreshed.
+      client
+        .query({
+          query: `SELECT max(created_time) AS inventory_as_of FROM xv3.mart_level_of_inventory WHERE store_name = {store:String}`,
+          query_params: { store: HRH_STORE },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+    ]);
+    const k = kpiRows[0] || {};
+    const curGmv = toNum(k.cur_gmv);
+    const prevGmv = toNum(k.prev_gmv);
+    const curOrders = toNum(k.cur_orders);
+    const prevOrders = toNum(k.prev_orders);
+    const curNmv = toNum(k.cur_nmv);
+    const prevNmv = toNum(k.prev_nmv);
+    const curUnits = toNum(k.cur_units);
+    const prevUnits = toNum(k.prev_units);
+    const curAov = safeDivide(curGmv, curOrders);
+    const prevAov = safeDivide(prevGmv, prevOrders);
 
     // ClickHouse's JSONEachRow format returns Int64 columns as strings (to
     // avoid JS number-precision loss on large values) — coerce back to a
@@ -537,8 +544,8 @@ export default async function handler(req, res) {
           .map((v) => Number(v)),
       ),
     );
-    const inventoryMap = await fetchInventory(allItemIds);
-    const otherStoreMap = await fetchOtherStoreStock(allItemIds);
+    // Both scoped to the same allItemIds, independent of each other.
+    const [inventoryMap, otherStoreMap] = await Promise.all([fetchInventory(allItemIds), fetchOtherStoreStock(allItemIds)]);
 
     // Trend rule (Repeat Sellers) — deliberately simple and deterministic:
     // Wk4 (current) vs. the AVERAGE of Wk1-3, +/-5% band = "flat". Averaging
