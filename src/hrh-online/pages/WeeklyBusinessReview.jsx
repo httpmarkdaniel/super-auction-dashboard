@@ -36,17 +36,18 @@ function PctWithAmount({ pct, previous }) {
 const SKU_DETAIL_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 380 },
   { key: "sku", label: "SKU", render: (r) => r.sku || "—", width: 100 },
-  { key: "detail", label: "Change / Units / Stock" },
+  { key: "detail", label: "Total Sales / Units / Stock" },
 ];
 
 // Click-to-open FULL modal for the SKU Movement table's "SKUs" count — the
 // count alone doesn't say WHICH SKUs. Shows every SKU in the category (not
 // just a top-N — see topSkusFor in api/_hrh-weekly-business-review.js,
-// which no longer truncates), paginated. Each row's detail is
-// "<+/-₱delta> (<units>)<stock>" for Grew/Dipped — the ₱ figure is how much
-// that SKU's own GMV moved between the two periods (e.g. "+₱107 (5 units)
-// · 12 unit(s) still in stock") — for Emerging it's the new GMV itself,
-// for Disappeared the GMV that dropped to zero.
+// which no longer truncates), paginated. Each row's detail is the TOTAL
+// GMV that SKU generated (current period for Grew/Dipped/Emerging, prior
+// period for Disappeared — the period with real sales) plus units sold and
+// current stock, e.g. "₱321 (5 units) · 12 unit(s) still in stock" — a
+// signed +/- delta was tried first and dropped as confusing, per explicit
+// request.
 function SkuCountWithModal({ count, topSkus, category }) {
   const [open, setOpen] = useState(false);
   if (!topSkus || topSkus.length === 0) return formatNum(count);

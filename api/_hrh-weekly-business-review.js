@@ -545,21 +545,19 @@ export async function handleWeeklyBusinessReview(req, res) {
     function topSkusFor(items, kind) {
       const ranked = [...items].sort((a, b) => (kind === "disappeared" ? b.prevGmv - a.prevGmv : b.curGmv - a.curGmv));
       return ranked.map((p) => {
-        // Units sold beside the ₱ amount, per explicit request (replacing
-        // % change) — Disappeared has no current-period units to show, so
-        // it reports the prior-period units instead (what WAS selling
-        // before it dropped to zero); every other category reports units
-        // actually sold in the current period. Current stock on hand
-        // (stockPhrase — same helper/wording as the Hero/Problem/Emerging
-        // insight cards below) is appended to all 4 categories now, per
-        // explicit request — not just Disappeared, which already had it.
-        let detail;
-        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost (${formatNumLocal(p.prevUnits)} units)${stockPhrase(p)}`;
-        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
-        else {
-          const delta = p.curGmv - p.prevGmv;
-          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
-        }
+        // Total GMV actually generated, not a +/- change figure — a signed
+        // delta ("+₱107") read as confusing/ambiguous; this is just the
+        // plain total the SKU brought in, same idea for all 4 categories.
+        // Disappeared has no current-period GMV (that's the whole point of
+        // the bucket), so it reports what the SKU generated in the PRIOR
+        // period instead — every other category reports the CURRENT
+        // period's total. Units sold and current stock on hand (stockPhrase
+        // — same helper/wording as the Hero/Problem/Emerging insight cards
+        // below) ride along beside it.
+        const detail =
+          kind === "disappeared"
+            ? `${formatPesoLocal(p.prevGmv)} (${formatNumLocal(p.prevUnits)} units)${stockPhrase(p)}`
+            : `${formatPesoLocal(p.curGmv)} (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
         return { product: p.product, sku: p.sku, detail };
       });
     }
