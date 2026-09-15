@@ -178,16 +178,39 @@ const METHOD_TABLE_COLUMNS = [
   { key: "sharePct", label: "Share", align: "right", render: (r) => formatPct(r.sharePct) },
 ];
 
+// Compact "GCash 5, COD 3, Card 1" breakdown for a reason category's
+// payment types — same "figure + detail inline" density as the rest of
+// this page's cells, rather than a whole separate column per payment type.
+const PAYMENT_TYPES_SHOWN = 3;
+function paymentTypesCell(paymentTypes) {
+  if (!paymentTypes || paymentTypes.length === 0) return "—";
+  const shown = paymentTypes.slice(0, PAYMENT_TYPES_SHOWN);
+  const moreCount = paymentTypes.length - shown.length;
+  return (
+    <span className="whitespace-nowrap">
+      {shown.map((p, i) => (
+        <span key={p.type}>
+          {i > 0 && ", "}
+          {p.type} ({formatNum(p.count)})
+        </span>
+      ))}
+      {moreCount > 0 && <span style={{ color: hrh.muted }}>, +{moreCount} more</span>}
+    </span>
+  );
+}
+
 const CANCEL_REASON_COLUMNS = [
   { key: "category", label: "Category" },
   { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
   { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
+  { key: "paymentTypes", label: "Payment Type", render: (r) => paymentTypesCell(r.paymentTypes) },
 ];
 
 const RETURN_REASON_COLUMNS = [
   { key: "category", label: "Category" },
   { key: "count", label: "Returns", render: (r) => formatNum(r.count) },
   { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
+  { key: "paymentTypes", label: "Payment Type", render: (r) => paymentTypesCell(r.paymentTypes) },
 ];
 
 const UNRESOLVED_COLUMNS = [
@@ -207,6 +230,7 @@ const CANCEL_DRILLDOWN_COLUMNS = [
   { key: "orderDate", label: "Order Date" },
   { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
   { key: "checkoutMethod", label: "Checkout" },
+  { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
   { key: "cancellationReason", label: "Reason", render: (r) => r.cancellationReason || "—" },
 ];
 
@@ -217,6 +241,7 @@ const RETURN_DRILLDOWN_COLUMNS = [
   { key: "returnDate", label: "Return Date" },
   { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
   { key: "checkoutMethod", label: "Checkout" },
+  { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
   { key: "replaced", label: "Replaced?", render: (r) => <Pill text={r.replaced ? "Yes" : "No"} map={YES_NO_PILL} /> },
 ];
 
@@ -748,13 +773,15 @@ export default function OrdersFulfillment({ filters }) {
           >
             <ModalRow label="Total Orders (raw, deduped)" value={formatNum(data.kpis.realOrdersReceived.raw)} />
             <ModalRow label="Dev/test orders (tagged)" value={formatNum(data.kpis.realOrdersReceived.devTestExcluded)} subtract />
+            <ModalRow label="Confirmed customer-initiated cancellations" value={formatNum(data.kpis.realOrdersReceived.customerInitiatedExcluded)} subtract />
             <ModalRow label="Duplicate retry attempts" value={formatNum(data.kpis.realOrdersReceived.duplicateRetriesExcluded)} subtract />
             <ModalRow label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} total />
             <p className="text-[11.5px] mt-3 pt-3" style={{ borderTop: `1px dashed ${hrh.border}`, color: hrh.muted }}>
               Dev/test = orders cancelled with reason "Dev test"/"Devtest"/"devtest", or placed under customer name
-              "TEST ACCOUNT". All real cancellations — whether the system auto-expired the order, no reason was
-              logged, or the customer stated a reason — stay inside Real Orders Received and count toward
-              Cancelled, so this figure always matches Order Lifecycle above and the Cancellation Rate below.
+              "TEST ACCOUNT". Confirmed customer-initiated = cancelled with a stated reason other than an "Expired
+              Order" auto-cancel — these are the same orders shown as "Re-ordered" in the Cancelled Orders
+              breakdown below. System-Initiated (Expired) and No-Reason-Logged cancellations stay inside Real
+              Orders Received, same as real demand that entered the funnel — see Order Lifecycle above.
             </p>
           </Modal>
 
@@ -766,23 +793,31 @@ export default function OrdersFulfillment({ filters }) {
           >
             <ModalRow label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} />
             <ModalRow label="Fulfilled (direct invoice or probable match)" value={formatNum(data.kpis.fulfilledOrders.value)} />
-            <ModalRow label="Cancelled" value={formatNum(lifecycleCancelledInDenominator)} />
+            <ModalRow label="Cancelled (stays inside Real Orders Received)" value={formatNum(lifecycleCancelledInDenominator)} />
             <ModalRow label="Still Awaiting Fulfillment / No Invoice" value={formatNum(data.kpis.stillAwaitingFulfillment.value)} />
             <ModalRow label="Completion Rate" value={formatPct(data.kpis.completionRate.value)} total />
             <p className="text-[11.5px] mt-3 pt-3" style={{ borderTop: `1px dashed ${hrh.border}`, color: hrh.muted }}>
               Fulfilled = order_no matched directly in xv3.mart_net_sales, plus probable matches by customer name +
-              date + fee-adjusted amount. "Cancelled" here is the same ALL-real-cancellations figure as the
-              "Cancelled Orders" KPI card and the Cancellation Rate below — Fulfilled + Cancelled + Still Awaiting
-              always add up to Real Orders Received. Pick rate intentionally excluded — HMR MART fulfills via its
-              own WMS.
+              date + fee-adjusted amount. "Cancelled" here is only the subset that stays inside Real Orders Received
+              — the broader "Cancelled Orders" KPI card also includes confirmed customer-initiated/"Re-ordered"
+              cancellations already excluded from the denominator above. Pick rate intentionally excluded — HMR
+              MART fulfills via its own WMS.
             </p>
           </Modal>
 
           <Modal open={activeModal === "cancelled"} onClose={() => setActiveModal(null)} title="Cancelled Orders — Breakdown" subtitle={`HMRPH Online, ${periodLabel}`}>
             <ModalRow label="Raw Cancelled (all, incl. dev/test)" value={formatNum(data.kpis.cancelledOrders.raw)} />
             <ModalRow label="Dev/test cancelled" value={formatNum(data.kpis.cancelledOrders.devTestExcluded)} subtract />
-            <ModalRow label="Real Cancelled" value={formatNum(data.kpis.cancelledOrders.value)} total />
-            <ModalRow label="Cancellation Rate (Real Cancelled ÷ Real Orders Received)" value={formatPct(data.kpis.cancelledOrders.cancellationRate)} />
+            <ModalRow label="Real Cancelled — All Types" value={formatNum(data.kpis.cancelledOrders.allRealCancelled)} />
+            <ModalRow label="Re-ordered (customer cancelled, then reordered the same item)" value={formatNum(data.kpis.cancelledOrders.reordered)} subtract />
+            <ModalRow label="True Cancellation (Cancelled)" value={formatNum(data.kpis.cancelledOrders.value)} total />
+            <ModalRow label="Cancellation Rate (True Cancellation ÷ Real Orders Received)" value={formatPct(data.kpis.cancelledOrders.cancellationRate)} />
+            <p className="text-[11.5px] mt-3 pt-3" style={{ borderTop: `1px dashed ${hrh.border}`, color: hrh.muted }}>
+              Cross-checked against Sales Analytics' independently-sourced cancellation classification (cms.mart_cms_order_report_detailed's
+              "True Cancellation" vs "Re-ordered"), which landed on the same 2 numbers for the same period —
+              "Re-ordered" here reuses the confirmed customer-initiated cancellation reason as the closest
+              available equivalent in this table.
+            </p>
           </Modal>
 
           <Modal

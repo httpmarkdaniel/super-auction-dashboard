@@ -274,16 +274,16 @@ export default async function handler(req, res) {
     // email, or by phone number when email is blank — ordered that same
     // item again afterward) or "True Cancellation" (no such re-order).
     //
-    // 2026-09-15: counts BOTH types now, not just "True Cancellation" —
-    // cross-checked live against Orders & Fulfillment for the same period
-    // (Previous Week: this table's 17 True Cancellation + 4 Re-ordered = 21,
-    // matching xv3's allRealCancelled of 21 exactly; likely the same
-    // underlying orders viewed through 2 systems, not a coincidence). Per
-    // the same explicit user decision behind that unification (see
-    // api/_hrh-orders-fulfillment.js's 2026-09-15 note): a cancellation
-    // counts regardless of what happened afterward, so this figure now
-    // reconciles with the rest of the dashboard instead of silently
-    // reporting a narrower, "Re-ordered swaps don't count" figure.
+    // 2026-09-15: briefly counted both types combined (True Cancellation +
+    // Re-ordered), then reverted back to "True Cancellation" only per
+    // explicit user decision — this table's 17 True Cancellation + 4
+    // Re-ordered = 21 for the same period cross-checked exactly against
+    // xv3.mart_xv3_order_report's stayingCancelled (17) + customerInitiatedCancelled
+    // (4) in Orders & Fulfillment, which the user took as confirmation that
+    // "True Cancellation"/stayingCancelled (excluding orders the customer
+    // went on to reorder) is the right dashboard-wide "Cancelled" figure —
+    // see api/_hrh-orders-fulfillment.js's realOrdersReceived note for the
+    // matching reversal there.
     //
     // This table has NO sales_channel column and — verified this session —
     // NEVER carries a single TikTok/Shopee row for ANY store (it is HMRPH's
@@ -356,7 +356,6 @@ export default async function handler(req, res) {
     ).json();
     const trueCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "True Cancellation")?.orders);
     const reorderedCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "Re-ordered")?.orders);
-    const allCancellations = trueCancellations + reorderedCancellations;
 
     // Denominator for Cancellation Rate is intentionally this SAME table's
     // total distinct order_number (not the mart_net_sales Orders count used
@@ -404,8 +403,11 @@ export default async function handler(req, res) {
         // always report null ("N/A"), never a fabricated 0%. Denominator is
         // cmsTotalOrders (same table/population as the numerator), not the
         // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
-        cancellations: ch === "HMRPH ONLINE" ? allCancellations : null,
-        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (allCancellations / cmsTotalOrders) * 100 : null,
+        cancellations: ch === "HMRPH ONLINE" ? trueCancellations : null,
+        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
+        // Informational only (not in the rate) — see comment above: these
+        // are the same 4 excluded from the "Cancelled" count dashboard-wide.
+        reordered: ch === "HMRPH ONLINE" ? reorderedCancellations : null,
         returns: returnInvoices,
         returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
       };

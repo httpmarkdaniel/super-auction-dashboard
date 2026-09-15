@@ -119,6 +119,18 @@ function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+
+// Payment-type breakdown for a group of orders (Cancellation/Return
+// Reasons tables) — count per real payment_type value, sorted most-common
+// first, blank/null grouped into "Unknown" rather than silently dropped.
+function paymentTypeBreakdown(orders, field = "payment_type") {
+  const byType = new Map();
+  for (const o of orders) {
+    const type = o[field] && String(o[field]).trim() ? String(o[field]).trim() : "Unknown";
+    byType.set(type, (byType.get(type) || 0) + 1);
+  }
+  return Array.from(byType, ([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
+}
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
@@ -187,6 +199,7 @@ export async function computeHmrphOnlineLifecycle(from, to) {
           order_number,
           any(order_status) AS order_status,
           any(payment_status) AS payment_status,
+          any(payment_type) AS payment_type,
           any(customer_name) AS customer_name,
           any(customer_id) AS customer_id,
           any(net_total) AS net_total,
@@ -268,11 +281,17 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   const dupSetFinal = new Set(duplicateRetryOrders.map((o) => o.order_number));
   const realNonCancelled = nonCancelled.filter((o) => !dupSetFinal.has(o.order_number));
 
-  // Includes BOTH cancellation kinds now (see 2026-09-15 note above) — a
-  // customer-initiated cancellation was still a real order that came in,
-  // it just didn't complete. Only dev/test orders and genuine duplicate
-  // retries are excluded from this total.
-  const realOrdersReceived = realNonCancelled.length + stayingCancelled.length + customerInitiatedCancelled.length;
+  // 2026-09-15, reverted same day: briefly included customerInitiatedCancelled
+  // here too, then reverted per explicit user decision after cross-checking
+  // against Sales Analytics' cms.mart_cms_order_report_detailed-based
+  // "Cancellation Rate" (see api/hrh-sales-analytics.js's own 2026-09-15
+  // note) — that table's "True Cancellation" count (customer never
+  // reordered the same item) landed on the SAME number as this table's
+  // stayingCancelled for the same period, which the user took as
+  // confirmation that stayingCancelled is the right "real" cancellation
+  // figure and customerInitiatedCancelled is closer to "cancelled, but
+  // then reordered" — excluded from Real Orders Received again.
+  const realOrdersReceived = realNonCancelled.length + stayingCancelled.length;
 
   // Fulfilled — order_no matched directly in xv3.mart_net_sales, OR a
   // probable match (customer name + date window + fee-adjusted amount
@@ -446,20 +465,22 @@ export async function computeReturnsAnalysis(from, to, channels) {
     })
   ).json();
 
-  // Returns by Fulfillment Method — order_no -> checkout_method, same
-  // linking gap as unresolved orders elsewhere (blank/unmatched order_no
-  // shows as "Unknown", not guessed).
+  // Returns by Fulfillment Method / Payment Type — order_no -> checkout_method
+  // / payment_type, same linking gap as unresolved orders elsewhere
+  // (blank/unmatched order_no shows as "Unknown", not guessed).
   const orderNos = [...new Set(returnRows.map((r) => r.order_no).filter(Boolean))];
   let checkoutByOrderNo = new Map();
+  let paymentTypeByOrderNo = new Map();
   if (orderNos.length) {
     const checkoutRows = await (
       await client.query({
-        query: `SELECT order_number, any(checkout_method) AS checkout_method FROM xv3.mart_xv3_order_report WHERE order_number IN ({ids:Array(String)}) GROUP BY order_number`,
+        query: `SELECT order_number, any(checkout_method) AS checkout_method, any(payment_type) AS payment_type FROM xv3.mart_xv3_order_report WHERE order_number IN ({ids:Array(String)}) GROUP BY order_number`,
         query_params: { ids: orderNos },
         format: "JSONEachRow",
       })
     ).json();
     checkoutByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.checkout_method]));
+    paymentTypeByOrderNo = new Map(checkoutRows.map((r) => [r.order_number, r.payment_type]));
   }
 
   // "Did Returned Items Get Replaced?" — matched to a LATER sale by the
@@ -502,7 +523,7 @@ export async function computeReturnsAnalysis(from, to, channels) {
     "No Reason Logged",
     "Other / Miscellaneous",
   ];
-  const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0 }]));
+  const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0, orders: [] }]));
   const byMethod = new Map();
   let replacedCount = 0;
 
@@ -510,6 +531,7 @@ export async function computeReturnsAnalysis(from, to, channels) {
     const amount = Math.abs(toNum(r.net_sales_amount));
     const category = categorizeReturnReason(r.invoice_remarks);
     const method = checkoutByOrderNo.get(r.order_no) || "Unknown";
+    const paymentType = paymentTypeByOrderNo.get(r.order_no) || "Unknown";
     const returnDate = String(r.transaction_date).slice(0, 10);
     const key = `${normalizeName(`${r.customer_firstname || ""} ${r.customer_lastname || ""}`)}|${r.product_name}`;
     const laterSaleDates = candidatesByNameProduct.get(key) || [];
@@ -522,6 +544,7 @@ export async function computeReturnsAnalysis(from, to, channels) {
     const catBucket = byCategory.get(category) || byCategory.get("Other / Miscellaneous");
     catBucket.count += 1;
     catBucket.value += amount;
+    catBucket.orders.push({ payment_type: paymentType });
     const methodBucket = byMethod.get(method) || { count: 0, value: 0 };
     methodBucket.count += 1;
     methodBucket.value += amount;
@@ -529,6 +552,7 @@ export async function computeReturnsAnalysis(from, to, channels) {
 
     return {
       invoiceNo: r.invoice_no,
+      paymentType,
       customer: `${r.customer_firstname || ""} ${r.customer_lastname || ""}`.trim(),
       productName: r.product_name,
       returnDate,
@@ -586,7 +610,12 @@ export async function computeReturnsAnalysis(from, to, channels) {
     byFulfillmentMethod: Array.from(byMethod, ([method, v]) => ({ method, count: v.count, value: v.value, sharePct: safeDivide(v.count, returnsCount) * 100 })).sort(
       (a, b) => b.count - a.count
     ),
-    reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
+    reasons: CATEGORY_ORDER.map((c) => ({
+      category: c,
+      count: byCategory.get(c).count,
+      value: byCategory.get(c).value,
+      paymentTypes: paymentTypeBreakdown(byCategory.get(c).orders),
+    })),
     orders: returnOrders,
     replacement: {
       totalReturns: returnsCount,
@@ -654,12 +683,19 @@ export async function handleOrdersFulfillment(req, res) {
 
     // Fulfillment Status Breakdown — reconciles exactly to Real Orders
     // Received (Fulfilled + Cancelled + Still Awaiting). "Cancelled" here
-    // is ALL real cancellations (allRealCancelled) — same population as
-    // the "Cancelled Orders" KPI card and Executive Overview's Order
-    // Lifecycle donut, so all three always agree (2026-09-15 unification).
+    // is stayingCancelled only (System-Initiated Expired + No Reason
+    // Logged) — reverted 2026-09-15 (see realOrdersReceived's own note in
+    // computeHmrphOnlineLifecycle above) after cross-checking against Sales
+    // Analytics' independently-sourced "True Cancellation" count, which
+    // landed on this same narrower number for the same period. Matches
+    // Executive Overview's Order Lifecycle donut and the Cancellation Rate
+    // KPI below — all three always agree. The 4 customer-initiated/
+    // "Re-ordered" cancellations excluded from this figure are still shown
+    // in the Cancelled Orders KPI's own breakdown (see cancelledOrders
+    // below), not silently dropped.
     const lifecycle = [
       { label: "Fulfilled", value: m.fulfilled },
-      { label: "Cancelled", value: m.allRealCancelled },
+      { label: "Cancelled", value: m.stayingCancelled.length },
       { label: "Still Awaiting Fulfillment / No Invoice", value: m.stillAwaiting },
     ];
 
@@ -714,11 +750,12 @@ export async function handleOrdersFulfillment(req, res) {
       "No Reason Logged",
       "Other / Miscellaneous",
     ];
-    const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0 }]));
+    const byCategory = new Map(CATEGORY_ORDER.map((c) => [c, { count: 0, value: 0, orders: [] }]));
     for (const o of allRealCancelledOrders) {
       const bucket = byCategory.get(o.category) || byCategory.get("Other / Miscellaneous");
       bucket.count += 1;
       bucket.value += o.net_total;
+      bucket.orders.push(o);
     }
     // Cancelled Orders by Fulfillment Method — Pickup vs Delivery share of
     // the same ALL-real-cancellations population as the reasons breakdown
@@ -748,13 +785,19 @@ export async function handleOrdersFulfillment(req, res) {
       orderDate: o.created_at,
       amount: o.net_total,
       checkoutMethod: o.checkout_method || "Unknown",
+      paymentType: o.payment_type || "Unknown",
       category: o.category,
       cancellationReason: o.cancellation_reason,
     }));
 
     const cancellations = {
       total: allRealCancelledOrders.length,
-      reasons: CATEGORY_ORDER.map((c) => ({ category: c, count: byCategory.get(c).count, value: byCategory.get(c).value })),
+      reasons: CATEGORY_ORDER.map((c) => ({
+        category: c,
+        count: byCategory.get(c).count,
+        value: byCategory.get(c).value,
+        paymentTypes: paymentTypeBreakdown(byCategory.get(c).orders),
+      })),
       byFulfillmentMethod: cancelledByFulfillmentMethod,
       orders: cancellationsOrders,
     };
@@ -765,7 +808,10 @@ export async function handleOrdersFulfillment(req, res) {
     // TEST ACCOUNT orders too, so this filters to just the cancelled ones.
     const devTestCancelledCount = m.devTestOrders.filter((o) => o.order_status === "Cancelled").length;
     const rawCancelledCount = allRealCancelledOrders.length + devTestCancelledCount;
-    const cancellationRate = safeDivide(m.allRealCancelled, m.realOrdersReceived) * 100;
+    // Reverted 2026-09-15 (see realOrdersReceived's note above) — rate is
+    // stayingCancelled ("True Cancellation" equivalent) over realOrdersReceived,
+    // matching the Fulfillment Status Breakdown and Executive Overview.
+    const cancellationRate = safeDivide(m.stayingCancelled.length, m.realOrdersReceived) * 100;
 
     // Still Awaiting Fulfillment, split by payment_status — same shape as
     // the methodology's "Paid, no invoice" / "Pending (COD), no invoice"
@@ -845,12 +891,21 @@ export async function handleOrdersFulfillment(req, res) {
           sub: `${m.rawDedupedCount} raw deduped`,
           raw: m.rawDedupedCount,
           devTestExcluded: m.devTestOrders.length,
+          customerInitiatedExcluded: m.customerInitiatedCancelled.length,
           duplicateRetriesExcluded: m.duplicateRetryOrders.length,
         },
         fulfilledOrders: { value: m.fulfilled },
         completionRate: { value: completionRate },
         cancelledOrders: {
-          value: m.allRealCancelled,
+          // "Cancelled" (the headline figure and rate) is stayingCancelled
+          // only — see cancellationRate's note above. allRealCancelled (both
+          // types combined) and reordered (customerInitiatedCancelled alone)
+          // are exposed here too so the breakdown modal can show the full
+          // "21 total, 4 re-ordered, 17 True Cancellation" picture rather
+          // than silently hiding the excluded 4.
+          value: m.stayingCancelled.length,
+          allRealCancelled: m.allRealCancelled,
+          reordered: m.customerInitiatedCancelled.length,
           raw: rawCancelledCount,
           devTestExcluded: devTestCancelledCount,
           cancellationRate,
@@ -868,8 +923,8 @@ export async function handleOrdersFulfillment(req, res) {
       unresolvedOrders,
       returns,
       dataQuality: [
-        `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
-        `"Cancelled" (${m.allRealCancelled}) is ALL real cancellations this period — System-Initiated (Expired) + No Reason Logged (${m.stayingCancelled.length}) plus confirmed customer-initiated (${m.customerInitiatedCancelled.length}, e.g. changed mind, payment issue). This single figure is used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number (updated 2026-09-15 — previously the Fulfillment Status Breakdown and Executive Overview counted only the narrower System-Initiated + No Reason Logged population, which read as a mismatch against the broader Cancellation Rate KPI).`,
+        `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
+        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from this figure and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped.`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",
