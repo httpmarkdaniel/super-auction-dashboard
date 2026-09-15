@@ -91,19 +91,26 @@ function SkuCountWithHover({ count, topSkus }) {
         createPortal(
           <div
             ref={popupRef}
-            className="fixed z-50 w-72 rounded-md p-2.5 shadow-lg"
+            className="fixed z-50 w-80 rounded-md p-2.5 shadow-lg"
             style={{ top: pos.top, left: pos.left, background: hrh.surface, border: `1px solid ${hrh.border}` }}
           >
             <div className="text-[10.5px] font-semibold uppercase tracking-[0.04em] mb-1.5" style={{ color: hrh.ink2 }}>
               Top {topSkus.length} SKUs
             </div>
-            <ul className="space-y-1">
+            {/* Product name and detail (₱ change, units, stock on hand) each
+                get their own line — the detail string got long enough once
+                stock was added that cramming both into one flex row would
+                either truncate the product name too aggressively or
+                overflow the popup's width. */}
+            <ul className="space-y-1.5">
               {topSkus.map((s, i) => (
-                <li key={i} className="flex items-center justify-between gap-3 text-[11.5px]" style={{ color: hrh.ink }}>
-                  <span className="truncate">{s.product}</span>
-                  <span className="shrink-0 tabular-nums" style={{ color: hrh.muted }}>
+                <li key={i} className="text-[11.5px] leading-snug">
+                  <div className="truncate" style={{ color: hrh.ink }}>
+                    {s.product}
+                  </div>
+                  <div className="tabular-nums" style={{ color: hrh.muted }}>
                     {s.detail}
-                  </span>
+                  </div>
                 </li>
               ))}
             </ul>

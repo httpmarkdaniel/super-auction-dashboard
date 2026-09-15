@@ -558,13 +558,16 @@ export async function handleWeeklyBusinessReview(req, res) {
         // % change) — Disappeared has no current-period units to show, so
         // it reports the prior-period units instead (what WAS selling
         // before it dropped to zero); every other category reports units
-        // actually sold in the current period.
+        // actually sold in the current period. Current stock on hand
+        // (stockPhrase — same helper/wording as the Hero/Problem/Emerging
+        // insight cards below) is appended to all 4 categories now, per
+        // explicit request — not just Disappeared, which already had it.
         let detail;
-        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost (${formatNumLocal(p.prevUnits)} units)`;
-        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new (${formatNumLocal(p.curUnits)} units)`;
+        if (kind === "disappeared") detail = `−${formatPesoLocal(p.prevGmv)} lost (${formatNumLocal(p.prevUnits)} units)${stockPhrase(p)}`;
+        else if (kind === "emerging") detail = `+${formatPesoLocal(p.curGmv)} new (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
         else {
           const delta = p.curGmv - p.prevGmv;
-          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${formatNumLocal(p.curUnits)} units)`;
+          detail = `${delta >= 0 ? "+" : "−"}${formatPesoLocal(Math.abs(delta))} (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
         }
         return { product: p.product, sku: p.sku, detail };
       });
