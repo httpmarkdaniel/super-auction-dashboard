@@ -8,6 +8,38 @@ import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum } from "../format";
 
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept local
+// to this file rather than shared, same "self-contained per file"
+// convention this codebase already uses for other small pieces.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  clock: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </Icon>
+  ),
+  box: (
+    <Icon>
+      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z" />
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+};
+
 const OLDEST_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 200 },
   { key: "category", label: "Category" },
@@ -85,10 +117,15 @@ export default function InventoryAging() {
           </div>
 
           <KpiRow>
-            <KpiCard label="Slow-Moving SKUs" value={formatNum(data.kpis.slowMovingSkus.value)} sub="61+ days, sold before, not in last 30 days" />
-            <KpiCard label="Slow-Moving Value" value={formatPeso(data.kpis.slowMovingValue.value)} />
-            <KpiCard label="Non-Moving SKUs" value={formatNum(data.kpis.nonMovingSkus.value)} sub="61+ days, never sold" />
-            <KpiCard label="Non-Moving Value" value={formatPeso(data.kpis.nonMovingValue.value)} />
+            <KpiCard
+              label="Slow-Moving SKUs"
+              icon={ICONS.clock}
+              value={formatNum(data.kpis.slowMovingSkus.value)}
+              sub="61+ days, sold before, not in last 30 days"
+            />
+            <KpiCard label="Slow-Moving Value" icon={ICONS.peso} value={formatPeso(data.kpis.slowMovingValue.value)} />
+            <KpiCard label="Non-Moving SKUs" icon={ICONS.box} value={formatNum(data.kpis.nonMovingSkus.value)} sub="61+ days, never sold" />
+            <KpiCard label="Non-Moving Value" icon={ICONS.peso} value={formatPeso(data.kpis.nonMovingValue.value)} />
           </KpiRow>
 
           <div className="flex justify-end mb-2">

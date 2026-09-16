@@ -12,6 +12,44 @@ import { formatPct, formatNum, formatPeso, formatCompactPeso } from "../format";
 
 const METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2], Unknown: hrh.muted };
 
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  pickup: (
+    <Icon>
+      <path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0 1 18 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </Icon>
+  ),
+  delivery: (
+    <Icon>
+      <rect x="1" y="3" width="15" height="13" rx="1" />
+      <path d="M16 8h4l3 3v5h-7V8Z" />
+      <circle cx="5.5" cy="18.5" r="2.5" />
+      <circle cx="18.5" cy="18.5" r="2.5" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+  percent: (
+    <Icon>
+      <line x1="19" y1="5" x2="5" y2="19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </Icon>
+  ),
+};
+
 const SUB_TABS = [
   { key: "overview", label: "Overview" },
   { key: "pickup", label: "Pickup" },
@@ -154,6 +192,16 @@ export default function PickupAndDelivery({ filters }) {
   const pickupTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Pickup");
   const deliveryTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Delivery");
 
+  // Real daily sparklines — straight off `data.trend` (already date-sorted
+  // ascending), no bucketing needed since a card just needs the shape of
+  // the trend. AOV/Share have no daily breakdown anywhere in the API
+  // response (whole-window ratios), so those KPI cards get an icon only.
+  const trendAsc = data?.trend || [];
+  const pickupOrdersSpark = trendAsc.map((d) => d.pickupOrders);
+  const deliveryOrdersSpark = trendAsc.map((d) => d.deliveryOrders);
+  const pickupGmvSpark = trendAsc.map((d) => d.pickupGmv);
+  const deliveryGmvSpark = trendAsc.map((d) => d.deliveryGmv);
+
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
@@ -176,12 +224,12 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "overview" && (
         <>
           <KpiRow>
-            <KpiCard label="Pickup Orders" value={formatNum(data.kpis.pickupOrders.value)} />
-            <KpiCard label="Delivery Orders" value={formatNum(data.kpis.deliveryOrders.value)} />
-            <KpiCard label="Pickup GMV" value={formatPeso(data.kpis.pickupGmv.value)} />
-            <KpiCard label="Delivery GMV" value={formatPeso(data.kpis.deliveryGmv.value)} />
-            <KpiCard label="Pickup AOV" value={formatPeso(data.kpis.pickupAov.value)} />
-            <KpiCard label="Delivery AOV" value={formatPeso(data.kpis.deliveryAov.value)} />
+            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(data.kpis.pickupOrders.value)} sparkline={pickupOrdersSpark} />
+            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(data.kpis.deliveryOrders.value)} sparkline={deliveryOrdersSpark} />
+            <KpiCard label="Pickup GMV" icon={ICONS.peso} value={formatPeso(data.kpis.pickupGmv.value)} sparkline={pickupGmvSpark} />
+            <KpiCard label="Delivery GMV" icon={ICONS.peso} value={formatPeso(data.kpis.deliveryGmv.value)} sparkline={deliveryGmvSpark} />
+            <KpiCard label="Pickup AOV" icon={ICONS.peso} value={formatPeso(data.kpis.pickupAov.value)} />
+            <KpiCard label="Delivery AOV" icon={ICONS.peso} value={formatPeso(data.kpis.deliveryAov.value)} />
           </KpiRow>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
@@ -222,10 +270,10 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "pickup" && (
         <>
           <KpiRow>
-            <KpiCard label="Pickup Orders" value={formatNum(pickupSummary?.orders)} />
-            <KpiCard label="Pickup GMV" value={formatPeso(pickupSummary?.gmv)} />
-            <KpiCard label="Pickup AOV" value={formatPeso(pickupSummary?.aov)} />
-            <KpiCard label="Share of GMV" value={formatPct(pickupSummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(pickupSummary?.orders)} sparkline={pickupOrdersSpark} />
+            <KpiCard label="Pickup GMV" icon={ICONS.peso} value={formatPeso(pickupSummary?.gmv)} sparkline={pickupGmvSpark} />
+            <KpiCard label="Pickup AOV" icon={ICONS.peso} value={formatPeso(pickupSummary?.aov)} />
+            <KpiCard label="Share of GMV" icon={ICONS.percent} value={formatPct(pickupSummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
           </KpiRow>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
@@ -261,10 +309,10 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "delivery" && (
         <>
           <KpiRow>
-            <KpiCard label="Delivery Orders" value={formatNum(deliverySummary?.orders)} />
-            <KpiCard label="Delivery GMV" value={formatPeso(deliverySummary?.gmv)} />
-            <KpiCard label="Delivery AOV" value={formatPeso(deliverySummary?.aov)} />
-            <KpiCard label="Share of GMV" value={formatPct(deliverySummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(deliverySummary?.orders)} sparkline={deliveryOrdersSpark} />
+            <KpiCard label="Delivery GMV" icon={ICONS.peso} value={formatPeso(deliverySummary?.gmv)} sparkline={deliveryGmvSpark} />
+            <KpiCard label="Delivery AOV" icon={ICONS.peso} value={formatPeso(deliverySummary?.aov)} />
+            <KpiCard label="Share of GMV" icon={ICONS.percent} value={formatPct(deliverySummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
           </KpiRow>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">

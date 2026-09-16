@@ -7,6 +7,44 @@ import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
 
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept local
+// to this file rather than shared, same "self-contained per file"
+// convention this codebase already uses for other small pieces.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  tag: (
+    <Icon>
+      <path d="M20.59 13.41 11 3.83a2 2 0 0 0-1.41-.58H4a1 1 0 0 0-1 1v5.59a2 2 0 0 0 .59 1.41l9.58 9.58a2 2 0 0 0 2.82 0l4.6-4.6a2 2 0 0 0 0-2.82Z" />
+      <line x1="7" y1="7" x2="7.01" y2="7" />
+    </Icon>
+  ),
+  percent: (
+    <Icon>
+      <line x1="19" y1="5" x2="5" y2="19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+  clock: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </Icon>
+  ),
+};
+
 const PRODUCT_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 200, width: 200 },
   { key: "category", label: "Category", width: 130 },
@@ -74,10 +112,15 @@ export default function MarkdownAnalytics() {
           </div>
 
           <KpiRow>
-            <KpiCard label="Items Marked Down" value={formatNum(data.kpis.itemsMarkedDown.value)} />
-            <KpiCard label="Average Markdown %" value={formatPct(data.kpis.avgMarkdownPct.value)} />
-            <KpiCard label="Marked-Down GMV" value={formatPeso(data.kpis.markedDownGmv.value)} sub="lifetime sales, currently marked-down items" />
-            <KpiCard label="Aged + Marked + Unsold" value={formatNum(data.kpis.agedMarkedUnsold.value)} sub="61+ days, never sold" />
+            <KpiCard label="Items Marked Down" icon={ICONS.tag} value={formatNum(data.kpis.itemsMarkedDown.value)} />
+            <KpiCard label="Average Markdown %" icon={ICONS.percent} value={formatPct(data.kpis.avgMarkdownPct.value)} />
+            <KpiCard
+              label="Marked-Down GMV"
+              icon={ICONS.peso}
+              value={formatPeso(data.kpis.markedDownGmv.value)}
+              sub="lifetime sales, currently marked-down items"
+            />
+            <KpiCard label="Aged + Marked + Unsold" icon={ICONS.clock} value={formatNum(data.kpis.agedMarkedUnsold.value)} sub="61+ days, never sold" />
           </KpiRow>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">

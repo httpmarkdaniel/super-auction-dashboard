@@ -73,6 +73,46 @@ function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
   );
 }
 
+// Small hand-drawn stroke icons for VoucherAssistedSalesPanel's KPI row —
+// same feather-icon convention as TrafficConversion.jsx / Sidebar.jsx
+// (24x24 viewBox, stroke=currentColor). Kept local to this file rather than
+// a shared module since each HRH Online page owns its own icon picks, same
+// spirit as this codebase's per-file API duplication convention.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  cart: (
+    <Icon>
+      <circle cx="9" cy="21" r="1" />
+      <circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </Icon>
+  ),
+  users: (
+    <Icon>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+  tag: (
+    <Icon>
+      <path d="M20.59 13.41 11 3.83A2 2 0 0 0 9.59 3.24L3 3v6.59a2 2 0 0 0 .59 1.41l9.58 9.59a2 2 0 0 0 2.83 0l4.59-4.59a2 2 0 0 0 0-2.83Z" />
+      <circle cx="7.5" cy="7.5" r="1.5" fill="currentColor" stroke="none" />
+    </Icon>
+  ),
+};
+
 function formatRateWithCount(rate, count) {
   if (rate === null || rate === undefined) return "—";
   return `${formatPct(rate)} (${formatNum(count)})`;
@@ -286,11 +326,23 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
       className="mb-4"
     >
       <KpiRow>
-        <KpiCard label="Orders" value={formatNum(totals?.orders)} />
-        <KpiCard label="Distinct Customers" value={formatNum(totals?.distinctCustomers)} />
-        <KpiCard label="Total Order Value" value={formatPeso(totals?.orderPrice)} />
-        <KpiCard label="Total Discount Value" value={formatPeso(totals?.discountPrice)} />
-        <KpiCard label="Average Order Value" value={formatPeso(totals?.aov)} />
+        <KpiCard label="Orders" icon={ICONS.cart} value={formatNum(totals?.orders)} sparkline={voucherAssistedSales?.trend?.map((r) => r.orders)} />
+        {/* Distinct Customers: whole-window-only aggregate (see file-header comment — uniqExact per day can't be summed into a per-bucket series), so icon only, no sparkline. */}
+        <KpiCard label="Distinct Customers" icon={ICONS.users} value={formatNum(totals?.distinctCustomers)} />
+        <KpiCard
+          label="Total Order Value"
+          icon={ICONS.peso}
+          value={formatPeso(totals?.orderPrice)}
+          sparkline={voucherAssistedSales?.trend?.map((r) => r.orderPrice)}
+        />
+        <KpiCard
+          label="Total Discount Value"
+          icon={ICONS.tag}
+          value={formatPeso(totals?.discountPrice)}
+          sparkline={voucherAssistedSales?.trend?.map((r) => r.discountPrice)}
+        />
+        {/* Average Order Value: a derived ratio (orderPrice/orders), not a real per-day summable quantity, so icon only, no sparkline. */}
+        <KpiCard label="Average Order Value" icon={ICONS.peso} value={formatPeso(totals?.aov)} />
       </KpiRow>
       <StackedAreaChart
         data={trendData}

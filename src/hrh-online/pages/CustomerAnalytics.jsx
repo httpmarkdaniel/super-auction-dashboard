@@ -12,14 +12,66 @@ import { formatPeso, formatPct, formatNum } from "../format";
 
 const TREND_LABEL_FORMATTER = { day: formatShortDateLabel, week: formatWeekRangeLabel, month: formatMonthLabel };
 
+function safeDivide(a, b) {
+  return b ? a / b : 0;
+}
+
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept local
+// to this page rather than imported cross-page.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  users: (
+    <Icon>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+    </Icon>
+  ),
+  percent: (
+    <Icon>
+      <line x1="19" y1="5" x2="5" y2="19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+};
+
 // The 5 KPI scorecards, each paired with the formatter its value/previous
 // need — same shape/order as data.kpis from api/_hrh-customer-analytics.js.
+// `sparkline(dailyTrend)` derives a per-day array from the page's already-
+// fetched daily customerTrend (new+returning counts only — no GMV at that
+// grain, so salesPerCustomer has no sparkline function and gets icon only).
 const KPI_CARDS = [
-  { key: "uniqueCustomers", label: "Unique Customers", formatter: formatNum },
-  { key: "newCustomers", label: "New Customers", formatter: formatNum, sub: "1 lifetime order" },
-  { key: "returningCustomers", label: "Returning Customers", formatter: formatNum, sub: "2+ lifetime orders" },
-  { key: "repeatRate", label: "Repeat Rate", formatter: formatPct },
-  { key: "salesPerCustomer", label: "Sales / Customer", formatter: formatPeso },
+  { key: "uniqueCustomers", label: "Unique Customers", formatter: formatNum, icon: ICONS.users, sparkline: (t) => t.map((r) => r.newCustomers + r.returningCustomers) },
+  { key: "newCustomers", label: "New Customers", formatter: formatNum, sub: "1 lifetime order", icon: ICONS.users, sparkline: (t) => t.map((r) => r.newCustomers) },
+  {
+    key: "returningCustomers",
+    label: "Returning Customers",
+    formatter: formatNum,
+    sub: "2+ lifetime orders",
+    icon: ICONS.users,
+    sparkline: (t) => t.map((r) => r.returningCustomers),
+  },
+  {
+    key: "repeatRate",
+    label: "Repeat Rate",
+    formatter: formatPct,
+    icon: ICONS.percent,
+    sparkline: (t) => t.map((r) => safeDivide(r.returningCustomers, r.newCustomers + r.returningCustomers) * 100),
+  },
+  { key: "salesPerCustomer", label: "Sales / Customer", formatter: formatPeso, icon: ICONS.peso },
 ];
 
 // "Compare to" — an explicit, independent choice of comparison basis for
@@ -191,10 +243,12 @@ export default function CustomerAnalytics({ filters }) {
                 <KpiCard
                   key={c.key}
                   label={c.label}
+                  icon={c.icon}
                   value={c.formatter(k.value)}
                   delta={k.delta}
                   sub={c.sub}
                   previousLabel={c.formatter(k.previous)}
+                  sparkline={c.sparkline ? c.sparkline(data.customerTrend?.day || []) : undefined}
                 />
               );
             })}

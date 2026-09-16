@@ -8,14 +8,58 @@ import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
 
+// Small inline stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept
+// page-local (not a shared module) so this file has no cross-page
+// dependency. `trendKey` names the field in data.salesTrend this KPI has a
+// real daily series for — omitted (undefined) means no daily breakdown
+// exists in the API response, so that card gets an icon only, no
+// sparkline (never a fabricated/derived-on-the-fly trend).
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  chartLine: (
+    <Icon>
+      <path d="M3 3v18h18" />
+      <path d="m19 9-5 5-4-4-4 4" />
+    </Icon>
+  ),
+  peso: (
+    <Icon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </Icon>
+  ),
+  cart: (
+    <Icon>
+      <circle cx="9" cy="21" r="1" />
+      <circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </Icon>
+  ),
+  box: (
+    <Icon>
+      <path d="M21 8V21H3V8" />
+      <path d="M1 3h22v5H1z" />
+      <path d="M10 12h4" />
+    </Icon>
+  ),
+};
+
 // The 5 KPI scorecards, each paired with the formatter its value/previous
 // need. Same shape/order as data.kpis from api/hrh-executive-overview.js.
+// `trendKey`: see ICONS comment above — only gmv/orders/units have a real
+// daily series in data.salesTrend; nmv/aov don't, so they get no sparkline.
 const KPI_CARDS = [
-  { key: "gmv", label: "GMV", formatter: formatPeso },
-  { key: "nmv", label: "NMV", formatter: formatPeso },
-  { key: "aov", label: "AOV", formatter: formatPeso },
-  { key: "orders", label: "Orders", formatter: formatNum },
-  { key: "units", label: "Units", formatter: formatNum },
+  { key: "gmv", label: "GMV", formatter: formatPeso, icon: ICONS.chartLine, trendKey: "gmv" },
+  { key: "nmv", label: "NMV", formatter: formatPeso, icon: ICONS.peso },
+  { key: "aov", label: "AOV", formatter: formatPeso, icon: ICONS.peso },
+  { key: "orders", label: "Orders", formatter: formatNum, icon: ICONS.cart, trendKey: "orders" },
+  { key: "units", label: "Units", formatter: formatNum, icon: ICONS.box, trendKey: "units" },
 ];
 
 // "Compare to" — an explicit, independent choice of comparison basis for
@@ -179,9 +223,11 @@ export default function ExecutiveOverview({ filters }) {
                 <KpiCard
                   key={c.key}
                   label={c.label}
+                  icon={c.icon}
                   value={c.formatter(k.value)}
                   delta={k.delta}
                   previousLabel={c.formatter(k.previous)}
+                  sparkline={c.trendKey ? data.salesTrend.map((d) => d[c.trendKey]) : undefined}
                 />
               );
             })}
@@ -206,6 +252,7 @@ export default function ExecutiveOverview({ filters }) {
                 <KpiCard
                   key={c.channel}
                   label={CHANNEL_LABEL[c.channel] || c.channel}
+                  icon={ICONS.peso}
                   value={formatPeso(c.value)}
                   delta={c.delta}
                   previousLabel={formatPeso(c.previous)}

@@ -11,6 +11,69 @@ import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
 
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept local
+// to this page rather than imported cross-page, since neither file exports
+// them as a shared module.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  receipt: (
+    <Icon>
+      <path d="M4 2h16v20l-3-2-2 2-2-2-2 2-2-2-2 2-3-2Z" />
+      <path d="M8 7h8M8 11h8M8 15h5" />
+    </Icon>
+  ),
+  checkCircle: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <path d="m9 12 2 2 4-4" />
+    </Icon>
+  ),
+  percent: (
+    <Icon>
+      <line x1="19" y1="5" x2="5" y2="19" />
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <circle cx="17.5" cy="17.5" r="2.5" />
+    </Icon>
+  ),
+  alertTriangle: (
+    <Icon>
+      <path d="m10.29 3.86-8.18 14.14A2 2 0 0 0 3.82 21h16.36a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <path d="M12 9v4M12 17h.01" />
+    </Icon>
+  ),
+  clock: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </Icon>
+  ),
+  flag: (
+    <Icon>
+      <path d="M4 22V4a1 1 0 0 1 1-1h13l-2 5 2 5H5" />
+    </Icon>
+  ),
+  cart: (
+    <Icon>
+      <circle cx="9" cy="21" r="1" />
+      <circle cx="20" cy="21" r="1" />
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </Icon>
+  ),
+  rotateCcw: (
+    <Icon>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5" />
+    </Icon>
+  ),
+};
+
 const LIFECYCLE_COLOR = {
   Fulfilled: hrh.good,
   Cancelled: hrh.bad,
@@ -350,6 +413,17 @@ export default function OrdersFulfillment({ filters }) {
     ...r,
     completionRate: safeDivide(r.fulfilled, r.received) * 100,
   }));
+  // Raw (never re-bucketed) daily arrays, for KPI card sparklines — the
+  // bucketed arrays above follow whatever Day/Week/Month pill the user has
+  // selected, which would make a sparkline jump around independent of the
+  // number it's next to.
+  const rawFulfillmentTrend = data?.fulfillmentTrend || [];
+  const rawReturnsTrend = data?.returns?.trend || [];
+  const rawDailyVolume = whData?.dailyVolume || [];
+  const completionRateSpark = rawFulfillmentTrend.map((r) => safeDivide(r.fulfilled, r.received) * 100);
+  const cancellationRateSpark = rawFulfillmentTrend.map((r) => safeDivide(r.cancelled, r.received) * 100);
+  const returnRateByCountSpark = rawReturnsTrend.map((r) => safeDivide(r.returns, r.salesCount) * 100);
+  const returnRateByValueSpark = rawReturnsTrend.map((r) => safeDivide(r.returnsValue, r.salesValue) * 100);
   const whDailyVolume = bucketRows(whData?.dailyVolume, warehouseOpsBucket, ["orders", "picked", "packed", "shipped"]);
   const cancellationPerf = bucketRows(data?.fulfillmentTrend, cancellationBucket, ["received", "cancelled"]).map((r) => ({
     ...r,
@@ -420,17 +494,38 @@ export default function OrdersFulfillment({ filters }) {
 
           <KpiRow>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("received")}>
-              <KpiCard label="Real Orders Received" value={formatNum(data.kpis.realOrdersReceived.value)} sub={data.kpis.realOrdersReceived.sub} />
+              <KpiCard
+                label="Real Orders Received"
+                icon={ICONS.receipt}
+                value={formatNum(data.kpis.realOrdersReceived.value)}
+                sub={data.kpis.realOrdersReceived.sub}
+                sparkline={rawFulfillmentTrend.map((r) => r.received)}
+              />
             </button>
-            <KpiCard label="Fulfilled Orders" value={formatNum(data.kpis.fulfilledOrders.value)} />
+            <KpiCard
+              label="Fulfilled Orders"
+              icon={ICONS.checkCircle}
+              value={formatNum(data.kpis.fulfilledOrders.value)}
+              sparkline={rawFulfillmentTrend.map((r) => r.fulfilled)}
+            />
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("completion")}>
-              <KpiCard label="Completion Rate" value={formatPct(data.kpis.completionRate.value)} />
+              <KpiCard label="Completion Rate" icon={ICONS.percent} value={formatPct(data.kpis.completionRate.value)} sparkline={completionRateSpark} />
             </button>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("cancelled")}>
-              <KpiCard label="Cancelled Orders" value={formatNum(data.kpis.cancelledOrders.value)} />
+              <KpiCard
+                label="Cancelled Orders"
+                icon={ICONS.alertTriangle}
+                value={formatNum(data.kpis.cancelledOrders.value)}
+                sparkline={rawFulfillmentTrend.map((r) => r.cancelled)}
+              />
             </button>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("awaiting")}>
-              <KpiCard label="Still Awaiting Fulfillment" value={formatNum(data.kpis.stillAwaitingFulfillment.value)} />
+              <KpiCard
+                label="Still Awaiting Fulfillment"
+                icon={ICONS.clock}
+                value={formatNum(data.kpis.stillAwaitingFulfillment.value)}
+                sparkline={rawFulfillmentTrend.map((r) => r.awaiting)}
+              />
             </button>
           </KpiRow>
 
@@ -476,10 +571,18 @@ export default function OrdersFulfillment({ filters }) {
               </div>
 
               <KpiRow>
-                <KpiCard label="Orders Processed" value={formatNum(whData.kpis.ordersProcessed.value)} />
-                <KpiCard label="Avg Pick Time" value={formatDuration(whData.kpis.avgPickTime.value)} sub="pick → QC" />
-                <KpiCard label="Avg QC Time" value={formatDuration(whData.kpis.avgQcTime.value)} sub="QC → waybill" />
-                <KpiCard label="Avg Pick-to-Dispatch" value={formatDuration(whData.kpis.avgPickToDispatch.value)} sub="picking start → dispatch" />
+                <KpiCard
+                  label="Orders Processed"
+                  icon={ICONS.cart}
+                  value={formatNum(whData.kpis.ordersProcessed.value)}
+                  sparkline={rawDailyVolume.map((r) => r.orders)}
+                />
+                {/* No daily breakdown exists for these 3 averages (whData has
+                    no per-day pick/QC/dispatch time series) — icon only,
+                    no sparkline, rather than a fabricated trend. */}
+                <KpiCard label="Avg Pick Time" icon={ICONS.clock} value={formatDuration(whData.kpis.avgPickTime.value)} sub="pick → QC" />
+                <KpiCard label="Avg QC Time" icon={ICONS.clock} value={formatDuration(whData.kpis.avgQcTime.value)} sub="QC → waybill" />
+                <KpiCard label="Avg Pick-to-Dispatch" icon={ICONS.clock} value={formatDuration(whData.kpis.avgPickToDispatch.value)} sub="picking start → dispatch" />
               </KpiRow>
 
               <Panel
@@ -542,11 +645,25 @@ export default function OrdersFulfillment({ filters }) {
 
           <KpiRow>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("cancelled")}>
-              <KpiCard label="Total Cancelled (Real)" value={formatNum(data.kpis.cancelledOrders.value)} />
+              <KpiCard
+                label="Total Cancelled (Real)"
+                icon={ICONS.alertTriangle}
+                value={formatNum(data.kpis.cancelledOrders.value)}
+                sparkline={rawFulfillmentTrend.map((r) => r.cancelled)}
+              />
             </button>
-            <KpiCard label="Cancellation Rate" value={formatPct(data.kpis.cancelledOrders.cancellationRate)} sub="of Real Orders Received" />
-            <KpiCard label="System-Initiated Share" value={formatPct(systemInitiatedShare)} sub="expired, not customer choice" />
-            <KpiCard label="No Reason Logged" value={formatNum(cancelNoReasonCount)} />
+            <KpiCard
+              label="Cancellation Rate"
+              icon={ICONS.percent}
+              value={formatPct(data.kpis.cancelledOrders.cancellationRate)}
+              sub="of Real Orders Received"
+              sparkline={cancellationRateSpark}
+            />
+            {/* System-Initiated Share / No Reason Logged: whole-window
+                category breakdowns only (data.cancellations.reasons has no
+                daily series) — icon only. */}
+            <KpiCard label="System-Initiated Share" icon={ICONS.flag} value={formatPct(systemInitiatedShare)} sub="expired, not customer choice" />
+            <KpiCard label="No Reason Logged" icon={ICONS.flag} value={formatNum(cancelNoReasonCount)} />
           </KpiRow>
 
           <Panel
@@ -613,10 +730,22 @@ export default function OrdersFulfillment({ filters }) {
           </div>
 
           <KpiRow>
-            <KpiCard label="Total Sales Invoiced" value={formatNum(data.returns.kpis.totalSalesInvoiced.value)} sub={data.returns.kpis.totalSalesInvoiced.sub} />
-            <KpiCard label="Total Returns" value={formatNum(data.returns.kpis.totalReturns.value)} sub={data.returns.kpis.totalReturns.sub} />
-            <KpiCard label="Return Rate (by count)" value={formatPct(data.returns.kpis.returnRateByCount.value)} />
-            <KpiCard label="Return Rate (by value)" value={formatPct(data.returns.kpis.returnRateByValue.value)} />
+            <KpiCard
+              label="Total Sales Invoiced"
+              icon={ICONS.receipt}
+              value={formatNum(data.returns.kpis.totalSalesInvoiced.value)}
+              sub={data.returns.kpis.totalSalesInvoiced.sub}
+              sparkline={rawReturnsTrend.map((r) => r.salesCount)}
+            />
+            <KpiCard
+              label="Total Returns"
+              icon={ICONS.rotateCcw}
+              value={formatNum(data.returns.kpis.totalReturns.value)}
+              sub={data.returns.kpis.totalReturns.sub}
+              sparkline={rawReturnsTrend.map((r) => r.returns)}
+            />
+            <KpiCard label="Return Rate (by count)" icon={ICONS.percent} value={formatPct(data.returns.kpis.returnRateByCount.value)} sparkline={returnRateByCountSpark} />
+            <KpiCard label="Return Rate (by value)" icon={ICONS.percent} value={formatPct(data.returns.kpis.returnRateByValue.value)} sparkline={returnRateByValueSpark} />
           </KpiRow>
 
           <Panel

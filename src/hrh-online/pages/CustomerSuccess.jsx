@@ -24,6 +24,49 @@ const STATUS_PILL = {
   Unknown: { bg: "#f0f1f5", text: hrh.ink2 },
 };
 
+// Small hand-drawn stroke icons, same feather-style convention as
+// Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons.
+function Icon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const ICONS = {
+  message: (
+    <Icon>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </Icon>
+  ),
+  checkCircle: (
+    <Icon>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </Icon>
+  ),
+  xCircle: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+    </Icon>
+  ),
+  clock: (
+    <Icon>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </Icon>
+  ),
+  alertTriangle: (
+    <Icon>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </Icon>
+  ),
+};
+
 function StatusPill({ status }) {
   const c = STATUS_PILL[status] || STATUS_PILL.Unknown;
   return (
@@ -117,6 +160,17 @@ export default function CustomerSuccess({ filters }) {
   }));
   const trendRows = bucketRows(trendWithOther, trendBucket, ["total", "resolved", "didNotRespond", "other"]);
 
+  // Real daily sparklines for the 3 KPIs whose day-level numbers actually
+  // exist in `data.trend` (already date-sorted ascending) — rates are
+  // derived per-day from real total/resolved/didNotRespond counts, not
+  // fabricated. Pending/Escalated have no per-day breakdown anywhere in the
+  // API response (only lumped into trend's "other"), so those two KPI
+  // cards get an icon only, no sparkline.
+  const trendAsc = data?.trend || [];
+  const totalInquiriesSpark = trendAsc.map((d) => d.total);
+  const resolvedRateSpark = trendAsc.map((d) => (d.total > 0 ? (d.resolved / d.total) * 100 : 0));
+  const didNotRespondRateSpark = trendAsc.map((d) => (d.total > 0 ? (d.didNotRespond / d.total) * 100 : 0));
+
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
@@ -134,11 +188,23 @@ export default function CustomerSuccess({ filters }) {
           </div>
 
           <KpiRow>
-            <KpiCard label="Total Inquiries" value={formatNum(data.kpis.totalInquiries.value)} />
-            <KpiCard label="Resolved Rate" value={formatPct(data.kpis.resolvedRate.value)} sub={data.kpis.resolvedRate.sub} />
-            <KpiCard label="Did Not Respond Rate" value={formatPct(data.kpis.didNotRespondRate.value)} sub={data.kpis.didNotRespondRate.sub} />
-            <KpiCard label="Pending" value={formatNum(data.kpis.pending.value)} />
-            <KpiCard label="Escalated" value={formatNum(data.kpis.escalated.value)} />
+            <KpiCard label="Total Inquiries" icon={ICONS.message} value={formatNum(data.kpis.totalInquiries.value)} sparkline={totalInquiriesSpark} />
+            <KpiCard
+              label="Resolved Rate"
+              icon={ICONS.checkCircle}
+              value={formatPct(data.kpis.resolvedRate.value)}
+              sub={data.kpis.resolvedRate.sub}
+              sparkline={resolvedRateSpark}
+            />
+            <KpiCard
+              label="Did Not Respond Rate"
+              icon={ICONS.xCircle}
+              value={formatPct(data.kpis.didNotRespondRate.value)}
+              sub={data.kpis.didNotRespondRate.sub}
+              sparkline={didNotRespondRateSpark}
+            />
+            <KpiCard label="Pending" icon={ICONS.clock} value={formatNum(data.kpis.pending.value)} />
+            <KpiCard label="Escalated" icon={ICONS.alertTriangle} value={formatNum(data.kpis.escalated.value)} />
           </KpiRow>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
