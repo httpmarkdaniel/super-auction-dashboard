@@ -320,8 +320,225 @@ function stockStatus(inv) {
   return "HAS STOCK";
 }
 
+// Item-level field for the SKU drilldown's WHERE filter — the same
+// category_name/sub_category_name columns GROUP_FIELD above uses, just
+// keyed by the drilldown's own `parentGroupBy` param name.
+const DRILLDOWN_GROUP_FIELD = { category: "category_name", subcategory: "sub_category_name" };
+
+// SKU drilldown: given a Category/Subcategory row from Repeat Sellers/Top
+// Products/Dropped Products, return the individual real SKUs that make it
+// up — same shape as that table's own product-mode columns (one row per
+// real item_id instead of a rolled-up group), same underlying filter each
+// panel already applies (repeat-seller qualification isn't re-applied
+// here — a category can qualify on its combined sales even if a given
+// item within it didn't sell every week, so this shows every item with
+// ANY sales in the window, sorted by Wk4/current GMV like the parent).
+// A fully separate, early-return code path (not folded into the main
+// category-level aggregation below) since it needs a different GROUP BY
+// entirely (item_id, not category/subcategory) plus a WHERE filter scoped
+// to just the one clicked group value.
+async function handleProductDrilldown(req, res) {
+  try {
+    return await runProductDrilldown(req, res);
+  } catch (err) {
+    console.error("HRH Product Analytics drilldown error:", err);
+    return res.status(500).json({
+      error: "Failed to load SKU drilldown",
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function runProductDrilldown(req, res) {
+  const { channel = "All Channels", panel, parentGroupBy, groupValue } = req.query;
+  const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
+  const filterField = DRILLDOWN_GROUP_FIELD[parentGroupBy];
+  if (!filterField || !groupValue || !["repeatSellers", "topProducts", "droppedProducts"].includes(panel)) {
+    return res.status(400).json({ error: "Invalid drilldown parameters" });
+  }
+
+  if (panel === "repeatSellers") {
+    const bucketGranularity = req.query.bucketGranularity === "month" ? "month" : "week";
+    let current;
+    try {
+      ({ current } = resolveRange(req.query.range || "wtd", req.query.from, req.query.to));
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const [wk1, wk2, wk3, wk4] =
+      bucketGranularity === "month" ? monthlyBucketsEndingAt(current.to) : weeklyBucketsEndingAt(current.to);
+    const rows = await (
+      await client.query({
+        query: `
+          SELECT
+            \`ct.item_id\` AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_gmv,
+            coalesce(sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_gmv,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk1From:String} AND {wk1To:String}), 0) AS wk1_units,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk2From:String} AND {wk2To:String}), 0) AS wk2_units,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk3From:String} AND {wk3To:String}), 0) AS wk3_units,
+            coalesce(sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {wk4From:String} AND {wk4To:String}), 0) AS wk4_units
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel IN {channels:Array(String)}
+            AND transaction_date BETWEEN {wk1From:String} AND {wk4To:String}
+            AND ${filterField} = {groupValue:String}
+            AND \`ct.item_id\` IS NOT NULL
+          GROUP BY group_key
+          HAVING (wk1_gmv > 0) + (wk2_gmv > 0) + (wk3_gmv > 0) + (wk4_gmv > 0) >= 1
+          ORDER BY wk4_gmv DESC
+          LIMIT 500
+        `,
+        query_params: {
+          store: HRH_STORE,
+          channels,
+          groupValue,
+          wk1From: wk1.from,
+          wk1To: wk1.to,
+          wk2From: wk2.from,
+          wk2To: wk2.to,
+          wk3From: wk3.from,
+          wk3To: wk3.to,
+          wk4From: wk4.from,
+          wk4To: wk4.to,
+        },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const itemIds = rows.map((r) => Number(r.group_key));
+    const [inventoryMap, otherStoreMap] = await Promise.all([fetchInventory(itemIds), fetchOtherStoreStock(itemIds)]);
+    const drilldownRows = rows.map((r) => {
+      const wk1Gmv = toNum(r.wk1_gmv);
+      const wk2Gmv = toNum(r.wk2_gmv);
+      const wk3Gmv = toNum(r.wk3_gmv);
+      const wk4Gmv = toNum(r.wk4_gmv);
+      const priorAvg = (wk1Gmv + wk2Gmv + wk3Gmv) / 3;
+      let trend = "flat";
+      if (priorAvg > 0) {
+        if (wk4Gmv > priorAvg * 1.05) trend = "up";
+        else if (wk4Gmv < priorAvg * 0.95) trend = "down";
+      } else if (wk4Gmv > 0) {
+        trend = "up";
+      }
+      const inv = inventoryMap.get(String(r.group_key));
+      return {
+        sku: r.barcode,
+        product: r.display_name,
+        wk1Sales: wk1Gmv,
+        wk1Units: toNum(r.wk1_units),
+        wk2Sales: wk2Gmv,
+        wk2Units: toNum(r.wk2_units),
+        wk3Sales: wk3Gmv,
+        wk3Units: toNum(r.wk3_units),
+        wk4Sales: wk4Gmv,
+        wk4Units: toNum(r.wk4_units),
+        trend,
+        currentStockQty: inv ? inv.stockQty : null,
+        currentStockValue: inv ? inv.stockValue : null,
+        otherStoreStock: rollUpOtherStoreStock(otherStoreMap, [r.group_key]),
+      };
+    });
+    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    return res.status(200).json({ rows: drilldownRows });
+  }
+
+  // topProducts / droppedProducts share the same current-vs-previous
+  // comparison query, just grouped by item_id instead of category and
+  // filtered to the one clicked group value.
+  let current;
+  let previous;
+  try {
+    ({ current, previous } = resolveRange(req.query.range || (req.query.from && req.query.to ? "custom" : "wtd"), req.query.from, req.query.to));
+  } catch (rangeErr) {
+    return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+  }
+  const rows = await (
+    await client.query({
+      query: `
+        SELECT
+          \`ct.item_id\` AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,
+          sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+          sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+          sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+          sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+        FROM xv3.mart_net_sales
+        WHERE store_name = {store:String}
+          AND sales_channel IN {channels:Array(String)}
+          AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+          AND ${filterField} = {groupValue:String}
+          AND \`ct.item_id\` IS NOT NULL
+        GROUP BY group_key
+        HAVING cur_gmv > 0 OR prev_gmv > 0
+      `,
+      query_params: {
+        store: HRH_STORE,
+        channels,
+        groupValue,
+        curFrom: current.from,
+        curTo: current.to,
+        prevFrom: previous.from,
+        prevTo: previous.to,
+      },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const itemIds = rows.map((r) => Number(r.group_key));
+  const [inventoryMap, otherStoreMap] = await Promise.all([fetchInventory(itemIds), fetchOtherStoreStock(itemIds)]);
+  const comparisons = rows.map((r) => {
+    const curG = toNum(r.cur_gmv);
+    const prevG = toNum(r.prev_gmv);
+    const curU = toNum(r.cur_units);
+    const prevU = toNum(r.prev_units);
+    const inv = inventoryMap.get(String(r.group_key));
+    return {
+      sku: r.barcode,
+      product: r.display_name,
+      currentGmv: curG,
+      currentUnits: curU,
+      previousGmv: prevG,
+      previousUnits: prevU,
+      gmvChangePct: pctDelta(curG, prevG),
+      unitsChangePct: pctDelta(curU, prevU),
+      otherStoreStock: rollUpOtherStoreStock(otherStoreMap, [r.group_key]),
+      currentStockQty: inv ? inv.stockQty : null,
+      currentStockValue: inv ? inv.stockValue : null,
+      postedQty: inv ? inv.postedQty : null,
+    };
+  });
+  const drilldownRows =
+    panel === "topProducts"
+      ? comparisons
+          .filter((r) => r.currentGmv > 0)
+          .sort((a, b) => b.currentGmv - a.currentGmv)
+          .slice(0, 500)
+          .map(({ postedQty: _postedQty, ...rest }) => rest)
+      : comparisons
+          .filter((r) => r.currentGmv <= 0 && r.previousGmv > 0)
+          .sort((a, b) => b.previousGmv - a.previousGmv)
+          .slice(0, 500)
+          .map((r) => ({
+            sku: r.sku,
+            product: r.product,
+            previousGmv: r.previousGmv,
+            previousUnits: r.previousUnits,
+            currentGmv: r.currentGmv,
+            currentUnits: r.currentUnits,
+            currentStockQty: r.currentStockQty,
+            currentStockValue: r.currentStockValue,
+            otherStoreStock: r.otherStoreStock,
+            status: stockStatus(r.currentStockQty !== null ? { stockQty: r.currentStockQty, postedQty: r.postedQty } : null),
+          }));
+  res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+  return res.status(200).json({ rows: drilldownRows });
+}
+
 export default async function handler(req, res) {
   try {
+    if (req.query.drilldown === "1") {
+      return handleProductDrilldown(req, res);
+    }
     const { channel = "All Channels", from = "", to = "" } = req.query;
     // No explicit `range`: an explicit from/to (regression tests, older
     // links) behaves as "custom"; otherwise default to Week to Date.

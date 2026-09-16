@@ -4,6 +4,7 @@ import DataTable from "../components/DataTable";
 import SeverityBadge from "../components/SeverityBadge";
 import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
+import Modal from "../components/Modal";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
@@ -206,6 +207,18 @@ function topProductColumns(groupBy) {
   ];
 }
 
+// SKU drilldown — clicking a Category/Subcategory row in any of the 3
+// tables below opens a modal listing the real SKUs behind that rolled-up
+// row, in the SAME column shape as whichever table it was opened from
+// (just groupBy="product" instead of category/subcategory). See
+// api/hrh-product-analytics.js's runProductDrilldown for the query.
+const DRILLDOWN_PANEL_LABEL = { repeatSellers: "Repeat Sellers", topProducts: "Top Products", droppedProducts: "Dropped Products" };
+function drilldownColumns(panel, bucketGranularity, periodBuckets) {
+  if (panel === "repeatSellers") return repeatSellerColumns(bucketGranularity, periodBuckets, "product");
+  if (panel === "topProducts") return topProductColumns("product");
+  return droppedProductColumns("product");
+}
+
 function droppedProductColumns(groupBy) {
   return [
     ...identityColumns(groupBy),
@@ -292,9 +305,32 @@ export default function ProductAnalytics({ filters }) {
   const [comparisonGroupBy, setComparisonGroupBy] = useState("product");
   const [topProductsSort, setTopProductsSort] = useState("value");
   const [droppedProductsSort, setDroppedProductsSort] = useState("value");
+  // SKU drilldown modal — null when closed. `rows: null` + `loading: true`
+  // while the fetch is in flight; the panel/groupValue pair identifies
+  // which click is "current" so a stale response from a closed/reopened
+  // modal can't overwrite a newer one.
+  const [drilldown, setDrilldown] = useState(null);
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
+
+  const openDrilldown = useCallback(
+    async (panel, parentGroupBy, groupValue) => {
+      setDrilldown({ panel, parentGroupBy, groupValue, rows: null, loading: true, error: null });
+      try {
+        const qs = new URLSearchParams({ drilldown: "1", panel, parentGroupBy, groupValue, channel, ...params, bucketGranularity });
+        const res = await fetch(`/api/hrh-product-analytics?${qs.toString()}`);
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        const json = await res.json();
+        if (json.error) throw new Error(json.message || json.error);
+        setDrilldown((d) => (d && d.panel === panel && d.groupValue === groupValue ? { ...d, rows: json.rows, loading: false } : d));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setDrilldown((d) => (d && d.panel === panel && d.groupValue === groupValue ? { ...d, loading: false, error: message } : d));
+      }
+    },
+    [channel, params, bucketGranularity],
+  );
 
   const load = useCallback(async (ch, p, gran, grp, cmpGrp) => {
     setLoading(true);
@@ -382,6 +418,7 @@ export default function ProductAnalytics({ filters }) {
               paginate
               pageSize={10}
               stickyColumns={2}
+              onRowClick={groupBy !== "product" ? (r) => openDrilldown("repeatSellers", groupBy, r.product) : undefined}
               emptyLabel={`No repeat-selling ${groupBy === "product" ? "products" : groupBy + "s"} found for the selected 4-${bucketGranularity === "month" ? "month" : "week"} window.`}
             />
           </Panel>
@@ -402,6 +439,7 @@ export default function ProductAnalytics({ filters }) {
               rows={sortProductRows(data.topProducts, topProductsSort, "currentGmv", "currentStockQty")}
               paginate
               pageSize={10}
+              onRowClick={comparisonGroupBy !== "product" ? (r) => openDrilldown("topProducts", comparisonGroupBy, r.product) : undefined}
             />
           </Panel>
 
@@ -420,10 +458,31 @@ export default function ProductAnalytics({ filters }) {
               rows={sortProductRows(data.droppedProducts, droppedProductsSort, "previousGmv", "currentStockQty")}
               paginate
               pageSize={10}
+              onRowClick={comparisonGroupBy !== "product" ? (r) => openDrilldown("droppedProducts", comparisonGroupBy, r.product) : undefined}
             />
           </Panel>
             </>
           )}
+
+          <Modal
+            open={!!drilldown}
+            onClose={() => setDrilldown(null)}
+            title={drilldown?.groupValue}
+            subtitle={drilldown ? `${DRILLDOWN_PANEL_LABEL[drilldown.panel]} — SKUs in this ${GROUP_BY_IDENTITY_LABEL[drilldown.parentGroupBy].toLowerCase()}` : ""}
+            wide
+          >
+            {drilldown?.loading && <LoadingState label="Loading SKUs…" />}
+            {drilldown?.error && <ErrorState label={`Couldn't load SKU breakdown: ${drilldown.error}`} />}
+            {drilldown && !drilldown.loading && !drilldown.error && (
+              <DataTable
+                columns={drilldownColumns(drilldown.panel, bucketGranularity, data?.meta?.periodBuckets)}
+                rows={drilldown.rows}
+                paginate
+                pageSize={10}
+                emptyLabel="No individual SKUs found for this group in the selected window."
+              />
+            )}
+          </Modal>
         </>
       )}
     </div>
