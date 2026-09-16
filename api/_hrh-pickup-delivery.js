@@ -238,6 +238,8 @@ export async function handlePickupDelivery(req, res) {
         "Picker performance tiers (Top Performer / On Track / Watch / Needs Attention) are a quartile ranking of items/hour among this period's own active pickers -- a relative comparison, not a fixed company standard.",
         "QC Station is a real filter (3 stations in use). Status and Staging Location from the original mockup were dropped: current_status is 99.8% \"COMPLETED\" in this table (the Live Tracker derives real-time stage from timestamps instead), and staging_location has exactly one real value (a single dispatch location).",
         "Courier Performance shows whatever courier(s) actually appear in this data -- currently one (Gogo Express) -- rather than a multi-courier comparison that doesn't exist here.",
+        "A \"Delivery by Destination Region\" map from a supplied mockup was dropped entirely -- verified via system.columns that xv3.mart_xv3_order_report has no region/city/province/address field at all, so there's no real data to show there.",
+        "Top Delay Reasons and Orders by Current Status look at every order in the selected window (not just live in-progress ones); Top Delay Reasons uses the same >2x-trailing-median heuristic as Orders Requiring Attention, attributing each flagged order to its single worst stage.",
         "There is no \"delivered to customer\" timestamp anywhere in this data. The last real milestone is Shipped/Ready, which the raw timestamps confirm means handed off to the courier for Delivery (lands seconds after Dispatch Finalized, alongside a real courier). For Pickup there's no courier at all, so it most likely means marked ready/collected in-store -- inferred from the pattern, not a documented field definition.",
       ],
     });

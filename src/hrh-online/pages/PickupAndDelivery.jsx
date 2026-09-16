@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import { BarComparisonChart, TrendChart, BubbleChart } from "../components/Charts";
+import { BarComparisonChart, TrendChart, BubbleChart, RateTrendComboChart, DonutChart } from "../components/Charts";
 import { LoadingState, ErrorState, EmptyState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPct, formatNum } from "../format";
@@ -17,6 +17,10 @@ import {
   computeCourierStats,
   computePickupReadiness,
   computeAttentionOrders,
+  computeFunnel,
+  computeTimeDistribution,
+  computeStatusBreakdown,
+  computeDelayReasons,
   median,
   DAY_LABELS,
 } from "../pickupDeliveryCompute";
@@ -29,6 +33,14 @@ const TIER_COLORS = {
   Watch: "#d99a3d",
   "Needs Attention": hrh.bad,
   Unranked: hrh.muted,
+};
+const STATUS_COLORS = {
+  Shipped: hrh.good,
+  "Dispatch Finalized": hrh.blue,
+  Packing: hrh.accent,
+  QC: hrh.series[3],
+  Picking: hrh.series[1],
+  "Order Placed": hrh.muted,
 };
 
 function Icon({ children, size = 14 }) {
@@ -274,6 +286,38 @@ function LiveFulfillmentTracker({ orders, nowMs, referenceByMethod }) {
         </div>
       )}
     </Panel>
+  );
+}
+
+// From order placed to shipped, real counts + % retained at each real
+// milestone (skips Waybill so the same funnel works for Pickup too).
+function FunnelSteps({ stages }) {
+  return (
+    <div className="overflow-x-auto -mx-1 px-1">
+      <div className="flex items-center gap-1 min-w-max py-1">
+        {stages.map((s, i) => (
+          <div key={s.label} className="flex items-center">
+            <div
+              className="rounded-md px-4 py-3 text-center min-w-[110px]"
+              style={{ background: i === 0 ? hrh.navy : hrh.accentSoft, color: i === 0 ? "#fff" : hrh.accentText }}
+            >
+              <div className="text-[18px] font-bold leading-none mb-1">{formatNum(s.value)}</div>
+              <div className="text-[10.5px] font-semibold uppercase tracking-[0.03em] mb-1" style={{ opacity: 0.85 }}>
+                {s.label}
+              </div>
+              <div className="text-[11px] font-semibold" style={{ opacity: i === 0 ? 0.85 : 1 }}>
+                {s.pct == null ? "—" : formatPct(s.pct)}
+              </div>
+            </div>
+            {i < stages.length - 1 && (
+              <span className="px-1.5 text-[14px]" style={{ color: hrh.muted }}>
+                →
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -549,6 +593,10 @@ export default function PickupAndDelivery({ filters }) {
     [data, filteredInProgress, nowMs]
   );
   const timelineRows = useMemo(() => filteredOrders.slice(0, 100), [filteredOrders]);
+  const funnel = useMemo(() => computeFunnel(filteredOrders), [filteredOrders]);
+  const timeDistribution = useMemo(() => computeTimeDistribution(filteredOrders), [filteredOrders]);
+  const statusBreakdown = useMemo(() => computeStatusBreakdown(filteredOrders), [filteredOrders]);
+  const delayReasons = useMemo(() => (data ? computeDelayReasons(filteredOrders, data.recentOrders) : []), [data, filteredOrders]);
 
   const methodBarData = methodComparison.map((m) => ({
     label: m.method,
@@ -698,6 +746,56 @@ export default function PickupAndDelivery({ filters }) {
           <Panel title="Fulfillment Journey Breakdown" subtitle="Median time per stage (see the table below for P90)" className="mb-4">
             <JourneyFlow breakdown={journeyBreakdown} method={method} />
           </Panel>
+
+          {/* ------------------------ Funnel + Distribution ----------------------- */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <Panel title={`Fulfillment Funnel${method === "all" ? "" : ` (${method})`}`} subtitle="From order placed to shipped, for the selected Date Range">
+              <FunnelSteps stages={funnel} />
+            </Panel>
+            <Panel title={`Fulfillment Time Distribution${method === "all" ? "" : ` (${method})`}`} subtitle="Order Placed → Shipped, in minutes">
+              {timeDistribution.every((b) => b.orders === 0) ? (
+                <EmptyState label="No shipped orders in this window." />
+              ) : (
+                <RateTrendComboChart
+                  data={timeDistribution.map((b) => ({ ...b, dateLabel: b.label }))}
+                  bars={[{ key: "orders", name: "Orders", color: hrh.accent }]}
+                  rateKey="cumulativePct"
+                  rateName="Cumulative %"
+                />
+              )}
+            </Panel>
+          </div>
+
+          {/* -------------------------- Status + Delays ---------------------------- */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <Panel title="Orders by Current Status" subtitle="Every order's last reached real milestone">
+              {statusBreakdown.length === 0 ? (
+                <EmptyState label="No orders for this selection." />
+              ) : (
+                <DonutChart
+                  segments={statusBreakdown.map((s) => ({ label: s.label, value: s.value, color: STATUS_COLORS[s.label] || hrh.muted }))}
+                  centerValue={formatNum(filteredOrders.length)}
+                  centerLabel="Total Orders"
+                />
+              )}
+            </Panel>
+            <Panel
+              title="Top Delay Reasons"
+              subtitle="Each order's single worst stage vs. its trailing-90-day typical pace, where notably slow"
+            >
+              {delayReasons.length === 0 ? (
+                <EmptyState label="No orders in this window ran notably slower than typical." />
+              ) : (
+                <BarComparisonChart
+                  data={delayReasons}
+                  series={[{ key: "value", name: "Orders", color: hrh.bad }]}
+                  horizontal
+                  valueFormatter={formatNum}
+                  height={Math.max(160, delayReasons.length * 40)}
+                />
+              )}
+            </Panel>
+          </div>
 
           {/* --------------------------- Picker overview -------------------------- */}
           <Panel title="Picker Performance Overview" className="mb-4">
