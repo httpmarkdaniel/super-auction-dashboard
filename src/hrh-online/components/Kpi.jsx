@@ -1,47 +1,16 @@
 import { Children } from "react";
 import { hrh } from "../theme";
 
-// Tiny inline trend line — no axes/tooltip/library, just a shape-of-the-
-// trend cue in the corner of a KpiCard. Color always matches the LINE'S
-// OWN shape (last value vs. first — the same comparison that determines
-// which way it visually slopes, since higher values plot higher on
-// screen): green so it reads as "rising", red so it reads as "falling",
-// never a color that contradicts what the line visually does. Not tied
-// to the card's period-over-period delta badge (the ▲/▼ + % below) —
-// that's a separate, correct-on-its-own comparison (e.g. "down 39% vs
-// last month") that can legitimately disagree with the shape of just the
-// last few days shown here; forcing this line's color to match a
-// question it isn't answering was more confusing than useful. `values`:
-// plain array of numbers, oldest first.
-function Sparkline({ values, width = 56, height = 22 }) {
-  if (!values || values.length < 2) return null;
-  const color = values[values.length - 1] >= values[0] ? hrh.good : hrh.bad;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const points = values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * width;
-      const y = height - ((v - min) / range) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0">
-      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 // Compact executive KPI card — thin orange top accent, room for a future
 // comparison delta and a short contextual label, per the Phase 2 brief.
 // `previousLabel` (an already-formatted string, e.g. formatPeso(previous))
 // renders a "vs {previousLabel}" comparison line at the bottom of the card
 // alongside the delta badge — used by Executive Overview, whose "Compare
 // to" pill selector (Day/Week/Month) changes what "previous" means.
-// `icon`/`sparkline` are optional (only Traffic & Conversion passes them
-// today) — every other existing caller renders exactly as before.
-export function KpiCard({ label, value, delta, sub, previousLabel, icon, sparkline }) {
+// `icon` is optional. A `sparkline` prop is accepted but intentionally
+// ignored (not rendered) — sparklines were removed dashboard-wide per
+// explicit request; callers still passing one are harmless no-ops.
+export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
@@ -57,11 +26,8 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, sparkli
           {label}
         </div>
       </div>
-      <div className="flex items-end justify-between gap-2">
-        <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
-          {value}
-        </div>
-        {sparkline && sparkline.length > 1 && <Sparkline values={sparkline} />}
+      <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
+        {value}
       </div>
       {(hasDelta || sub) && (
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] flex-wrap">
