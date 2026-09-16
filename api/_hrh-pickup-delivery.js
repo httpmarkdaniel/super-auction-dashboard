@@ -201,19 +201,17 @@ export async function handlePickupDelivery(req, res) {
       // api/_hrh-orders-fulfillment.js).
       computeHmrphOnlineLifecycle(range_.from, range_.to),
       fetchFlatOrders("toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}", { from: range_.from, to: range_.to }),
-      // Live Fulfillment Tracker / Orders Requiring Attention / Pickup
-      // Readiness's live counts -- orders currently in the pipeline
-      // (picking started, not yet shipped_at), independent of the Date
-      // Range filter, same "always current" spirit as Auction Dashboard's
-      // Active Auctions. Oldest-first so the longest-waiting orders sort
-      // to the top.
+      // Live Fulfillment Tracker's live counts -- orders currently in the
+      // pipeline (picking started, not yet shipped_at), independent of the
+      // Date Range filter, same "always current" spirit as Auction
+      // Dashboard's Active Auctions. Oldest-first so the longest-waiting
+      // orders sort to the top.
       fetchFlatOrders("j.shipped_at IS NULL", {}, { limit: 50, orderAsc: true }),
       // Fixed trailing 90 days ending today -- the stable historical
-      // baseline every "typical"/"reference" figure on this page compares
-      // against (pace reference, attention thresholds, Pickup Readiness's
-      // median Order -> Ready). Deliberately NOT tied to the Date Range
-      // filter, so switching date ranges never changes what "typical"
-      // means.
+      // baseline the pace reference (Within Reference Time / the Live
+      // Tracker's pace line) compares against. Deliberately NOT tied to
+      // the Date Range filter, so switching date ranges never changes what
+      // "typical" means.
       fetchFlatOrders("toDate(j.order_placed_at) BETWEEN {trailingFrom:String} AND {today:String}", { trailingFrom, today }),
     ]);
 
@@ -242,12 +240,10 @@ export async function handlePickupDelivery(req, res) {
         "Orders Received only splits by the page's method pill (All/Pickup/Delivery) -- xv3.mart_xv3_order_report, its source table, has no picker or QC station column, so it can't also narrow when a Picker or QC Station filter is applied. \"% of Orders Received\" will read low in that case since the numerator (this picker's orders) is being compared to the whole method's total.",
         "Medians and percentiles filter out non-positive and implausibly long (>3 day) stage durations as data artifacts -- a handful of journey rows have clearly-wrong timestamps that would otherwise distort every average they touch.",
         "There's no official SLA policy field anywhere in this data, so \"Reference Time\" / \"Within Reference Time\" is a self-derived pace benchmark -- each method's own trailing-90-day median Order-Placed-to-Shipped time -- never an official target.",
-        "Orders Requiring Attention flags an order only when its current wait is more than 2x the typical (trailing-90-day median) wait for its next stage; a flat 2-hour fallback applies only where a stage has no historical baseline to compare against at all.",
         "Picker performance tiers (Top Performer / On Track / Watch / Needs Attention) are a quartile ranking of items/hour among this period's own active pickers -- a relative comparison, not a fixed company standard.",
         "QC Station is a real filter (3 stations in use). Status and Staging Location from the original mockup were dropped: current_status is 99.8% \"COMPLETED\" in this table (the Live Tracker derives real-time stage from timestamps instead), and staging_location has exactly one real value (a single dispatch location).",
         "Courier Performance shows whatever courier(s) actually appear in this data -- currently one (Gogo Express) -- rather than a multi-courier comparison that doesn't exist here.",
         "A \"Delivery by Destination Region\" map from a supplied mockup was dropped entirely -- verified via system.columns that xv3.mart_xv3_order_report has no region/city/province/address field at all, so there's no real data to show there.",
-        "Top Delay Reasons and Orders by Current Status look at every order in the selected window (not just live in-progress ones); Top Delay Reasons uses the same >2x-trailing-median heuristic as Orders Requiring Attention, attributing each flagged order to its single worst stage.",
         "There is no \"delivered to customer\" timestamp anywhere in this data. The last real milestone is Shipped/Ready, which the raw timestamps confirm means handed off to the courier for Delivery (lands seconds after Dispatch Finalized, alongside a real courier). For Pickup there's no courier at all, so it most likely means marked ready/collected in-store -- inferred from the pattern, not a documented field definition.",
       ],
     });

@@ -2,44 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import { BarComparisonChart, TrendChart, BubbleChart, RateTrendComboChart, DonutChart } from "../components/Charts";
+import { BarComparisonChart, BubbleChart } from "../components/Charts";
 import { LoadingState, ErrorState, EmptyState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPct, formatNum } from "../format";
 import {
   filterOrders,
   computeKpis,
-  computeTrend,
   computeJourneyBreakdown,
   computePickerStats,
   computeHeatmap,
   computeCourierStats,
-  computePickupReadiness,
-  computeAttentionOrders,
   computeFunnel,
-  computeTimeDistribution,
-  computeStatusBreakdown,
-  computeDelayReasons,
   median,
   DAY_LABELS,
 } from "../pickupDeliveryCompute";
 
-const PICKUP_COLOR = hrh.blue;
-const DELIVERY_COLOR = hrh.accent;
 const TIER_COLORS = {
   "Top Performer": hrh.good,
   "On Track": hrh.blue,
   Watch: "#d99a3d",
   "Needs Attention": hrh.bad,
   Unranked: hrh.muted,
-};
-const STATUS_COLORS = {
-  Shipped: hrh.good,
-  "Dispatch Finalized": hrh.blue,
-  Packing: hrh.accent,
-  QC: hrh.series[3],
-  Picking: hrh.series[1],
-  "Order Placed": hrh.muted,
 };
 
 function Icon({ children, size = 14 }) {
@@ -268,7 +252,7 @@ function FulfillmentTrackerCard({ order, nowMs, paceSeconds }) {
   );
 }
 
-function LiveFulfillmentTracker({ orders, nowMs, referenceByMethod }) {
+function LiveFulfillmentTracker({ orders, nowMs, referenceByMethod, liveTotal, method }) {
   return (
     <Panel
       title="Live Fulfillment Tracker"
@@ -276,7 +260,13 @@ function LiveFulfillmentTracker({ orders, nowMs, referenceByMethod }) {
       className="mb-4"
     >
       {orders.length === 0 ? (
-        <EmptyState label="Nothing currently in progress for this selection." />
+        <EmptyState
+          label={
+            liveTotal > 0
+              ? `No ${method} orders currently in the pipeline -- all ${liveTotal} order${liveTotal === 1 ? "" : "s"} in progress right now ${liveTotal === 1 ? "is" : "are"} ${method === "Pickup" ? "Delivery" : "Pickup"}.`
+              : "Nothing currently in progress -- every recent order has already shipped."
+          }
+        />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {orders.map((o) => (
@@ -407,28 +397,6 @@ function StageHeatmap({ heatmap }) {
   );
 }
 
-const TREND_METRICS = [
-  { key: "median", label: "Median Time" },
-  { key: "p90", label: "P90 Time" },
-  { key: "completed", label: "Completed Orders" },
-];
-const ATTENTION_COLUMNS = [
-  { key: "orderId", label: "Order #" },
-  { key: "method", label: "Method" },
-  { key: "picker", label: "Picker", render: (r) => r.picker || "—" },
-  { key: "currentStage", label: "Current Stage" },
-  { key: "waitingMinutes", label: "Waiting Time", render: (r) => formatMinutes(r.waitingMinutes) },
-  {
-    key: "issue",
-    label: "Issue",
-    render: (r) => (
-      <span>
-        {r.issue}
-        {!r.hasBaseline && <span style={{ color: hrh.muted }}> (no historical baseline -- 2h fallback)</span>}
-      </span>
-    ),
-  },
-];
 const LEADERBOARD_COLUMNS = [
   { key: "rank", label: "#" },
   { key: "picker", label: "Picker Name" },
@@ -512,7 +480,6 @@ export default function PickupAndDelivery({ filters }) {
   const [method, setMethod] = useState("Pickup");
   const [picker, setPicker] = useState("all");
   const [qcStation, setQcStation] = useState("all");
-  const [trendMetric, setTrendMetric] = useState("median");
   const [workloadMetric, setWorkloadMetric] = useState("orders");
 
   const ready = isDateRangeReady(dateRange);
@@ -573,35 +540,12 @@ export default function PickupAndDelivery({ filters }) {
     () => (data ? computeKpis(filteredOrders, ordersReceivedForFilter, referenceByMethod) : null),
     [data, filteredOrders, ordersReceivedForFilter, referenceByMethod]
   );
-  const trend = useMemo(() => computeTrend(filteredOrders), [filteredOrders]);
   const journeyBreakdown = useMemo(() => computeJourneyBreakdown(filteredOrders), [filteredOrders]);
   const pickerStats = useMemo(() => computePickerStats(filteredOrders), [filteredOrders]);
   const heatmap = useMemo(() => computeHeatmap(filteredOrders), [filteredOrders]);
   const courierStats = useMemo(() => computeCourierStats(filteredOrders), [filteredOrders]);
-  const readiness = useMemo(() => (data ? computePickupReadiness(filteredInProgress, data.recentOrders) : null), [data, filteredInProgress]);
-  const attentionOrders = useMemo(
-    () => (data ? computeAttentionOrders(filteredInProgress, data.recentOrders, nowMs) : []),
-    [data, filteredInProgress, nowMs]
-  );
   const timelineRows = useMemo(() => filteredOrders.slice(0, 100), [filteredOrders]);
   const funnel = useMemo(() => computeFunnel(filteredOrders), [filteredOrders]);
-  const timeDistribution = useMemo(() => computeTimeDistribution(filteredOrders), [filteredOrders]);
-  const statusBreakdown = useMemo(() => computeStatusBreakdown(filteredOrders), [filteredOrders]);
-  const delayReasons = useMemo(() => (data ? computeDelayReasons(filteredOrders, data.recentOrders) : []), [data, filteredOrders]);
-
-  // filteredOrders (and so `trend`) is already scoped to exactly one
-  // method, so the trend chart plots a single line for that method rather
-  // than a Pickup-vs-Delivery comparison.
-  const methodLower = method === "Pickup" ? "pickup" : "delivery";
-  const methodColor = method === "Pickup" ? PICKUP_COLOR : DELIVERY_COLOR;
-  const trendSeries = [
-    {
-      key: trendMetric === "completed" ? `${methodLower}Completed` : `${methodLower}${trendMetric === "median" ? "Median" : "P90"}`,
-      name: method,
-      color: methodColor,
-    },
-  ];
-  const trendValueFormatter = trendMetric === "completed" ? formatNum : (v) => formatMinutes(v);
 
   const bubbleData = pickerStats
     .filter((p) => p.itemsPerHr != null && p.medianPickMinutes != null)
@@ -691,115 +635,14 @@ export default function PickupAndDelivery({ filters }) {
             <KpiCard label="Within Reference Time" icon={ICONS.target} value={formatRate(kpis.referenceHitRate)} sub="vs. each method's own trailing 90-day pace" />
           </KpiRow>
 
-          {/* ------------------------------ Trend --------------------------------- */}
-          <Panel
-            title={`Fulfillment Trend (${method})`}
-            subtitle="Daily, for the selected Date Range"
-            className="mb-4"
-            action={
-              <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
-                {TREND_METRICS.map((m) => (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setTrendMetric(m.key)}
-                    className="text-[11px] font-semibold px-2.5 py-1"
-                    style={trendMetric === m.key ? { background: hrh.navy, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            }
-          >
-            {trend.length === 0 ? (
-              <EmptyState label="No fulfillment activity in this window." />
-            ) : (
-              <TrendChart data={trend} series={trendSeries} xKey="dateLabel" valueFormatter={trendValueFormatter} />
-            )}
-          </Panel>
-
           {/* ------------------------------ Journey ------------------------------ */}
           <Panel title="Fulfillment Journey Breakdown" subtitle="Median time per stage (see the table below for P90)" className="mb-4">
             <JourneyFlow breakdown={journeyBreakdown} method={method} />
           </Panel>
 
-          {/* ------------------------ Funnel + Distribution ----------------------- */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title={`Fulfillment Funnel (${method})`} subtitle="From order placed to shipped, for the selected Date Range">
-              <FunnelSteps stages={funnel} />
-            </Panel>
-            <Panel title={`Fulfillment Time Distribution (${method})`} subtitle="Order Placed → Shipped, in minutes">
-              {timeDistribution.every((b) => b.orders === 0) ? (
-                <EmptyState label="No shipped orders in this window." />
-              ) : (
-                <RateTrendComboChart
-                  data={timeDistribution.map((b) => ({ ...b, dateLabel: b.label }))}
-                  bars={[{ key: "orders", name: "Orders", color: hrh.accent }]}
-                  rateKey="cumulativePct"
-                  rateName="Cumulative %"
-                />
-              )}
-            </Panel>
-          </div>
-
-          {/* -------------------------- Status + Delays ---------------------------- */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Orders by Current Status" subtitle="Every order's last reached real milestone">
-              {statusBreakdown.length === 0 ? (
-                <EmptyState label="No orders for this selection." />
-              ) : (
-                <DonutChart
-                  segments={statusBreakdown.map((s) => ({ label: s.label, value: s.value, color: STATUS_COLORS[s.label] || hrh.muted }))}
-                  centerValue={formatNum(filteredOrders.length)}
-                  centerLabel="Total Orders"
-                />
-              )}
-            </Panel>
-            <Panel
-              title="Top Delay Reasons"
-              subtitle="Each order's single worst stage vs. its trailing-90-day typical pace, where notably slow"
-            >
-              {delayReasons.length === 0 ? (
-                <EmptyState label="No orders in this window ran notably slower than typical." />
-              ) : (
-                <BarComparisonChart
-                  data={delayReasons}
-                  series={[{ key: "value", name: "Orders", color: hrh.bad }]}
-                  horizontal
-                  valueFormatter={formatNum}
-                  height={Math.max(160, delayReasons.length * 40)}
-                />
-              )}
-            </Panel>
-          </div>
-
-          {/* --------------------------- Picker overview -------------------------- */}
-          <Panel title="Picker Performance Overview" className="mb-4">
-            <KpiRow>
-              <KpiCard label="Active Pickers" icon={ICONS.users} value={formatNum(pickerStats.length)} />
-              <KpiCard label="Orders Picked" icon={ICONS.checkCircle} value={formatNum(pickerStats.reduce((s, p) => s + p.orders, 0))} />
-              <KpiCard label="Items Picked" icon={ICONS.layers} value={formatNum(pickerStats.reduce((s, p) => s + p.items, 0))} />
-              <KpiCard label="Median Pick Time" icon={ICONS.clock} value={formatMinutes(median(filteredOrders.map((o) => o.orderToPackSeconds)))} />
-              <KpiCard
-                label="Items / Order"
-                icon={ICONS.box}
-                value={(() => {
-                  const items = pickerStats.reduce((s, p) => s + p.items, 0);
-                  const orders = pickerStats.reduce((s, p) => s + p.orders, 0);
-                  return orders ? (items / orders).toFixed(1) : "—";
-                })()}
-              />
-              <KpiCard
-                label="Picking Throughput"
-                icon={ICONS.trending}
-                value={(() => {
-                  const items = pickerStats.reduce((s, p) => s + p.items, 0);
-                  const hrs = filteredOrders.reduce((s, o) => s + (o.orderToPackSeconds > 0 ? o.orderToPackSeconds : 0), 0) / 3600;
-                  return hrs > 0 ? `${(items / hrs).toFixed(1)} items/hr` : "—";
-                })()}
-              />
-            </KpiRow>
+          {/* --------------------------------- Funnel ------------------------------ */}
+          <Panel title={`Fulfillment Funnel (${method})`} subtitle="From order placed to shipped, for the selected Date Range" className="mb-4">
+            <FunnelSteps stages={funnel} />
           </Panel>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
@@ -867,28 +710,7 @@ export default function PickupAndDelivery({ filters }) {
             </Panel>
           </div>
 
-          {/* ------------------------- Readiness / Courier ------------------------ */}
-          {method === "Pickup" && (
-            <Panel
-              title="Pickup Readiness"
-              className="mb-4"
-              badge={
-                <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
-                  Pickup
-                </span>
-              }
-            >
-              <KpiRow>
-                <KpiCard label="Orders Ready" icon={ICONS.box} value={formatNum(readiness.ordersReady)} />
-                <KpiCard label="Median Order → Ready" icon={ICONS.clock} value={formatMinutes(readiness.medianOrderToReadyMinutes)} />
-                <KpiCard label="Uncollected Orders" icon={ICONS.pickup} value={formatNum(readiness.uncollectedOrders)} />
-                <KpiCard label="Collected Today" icon={ICONS.checkCircle} value={formatNum(readiness.collectedToday)} />
-              </KpiRow>
-              <div className="text-[10.5px] mt-1" style={{ color: hrh.muted }}>
-                Live counts, independent of the Date Range filter above · Median Order → Ready is over a trailing 90 days.
-              </div>
-            </Panel>
-          )}
+          {/* ----------------------------- Courier -------------------------------- */}
           {method === "Delivery" && (
             <Panel title="Courier Performance" subtitle="Every real courier appearing in this data" className="mb-4">
               {courierStats.length === 0 ? (
@@ -932,15 +754,7 @@ export default function PickupAndDelivery({ filters }) {
             </Panel>
           )}
 
-          <LiveFulfillmentTracker orders={filteredInProgress} nowMs={nowMs} referenceByMethod={referenceByMethod} />
-
-          <Panel title="Orders Requiring Attention" subtitle="In-progress orders waiting notably longer than typical for their next stage" className="mb-4">
-            <DataTable
-              columns={ATTENTION_COLUMNS}
-              rows={attentionOrders.map((r) => ({ ...r, id: r.orderId }))}
-              emptyLabel="No orders currently flagged -- everything in progress is moving at a normal pace."
-            />
-          </Panel>
+          <LiveFulfillmentTracker orders={filteredInProgress} nowMs={nowMs} referenceByMethod={referenceByMethod} liveTotal={data.inProgress.length} method={method} />
 
           <Panel title="Recent Fulfillment Timeline" subtitle="Most recent orders matching the filters above" className="mb-4">
             <DataTable
