@@ -362,15 +362,19 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
 }
 
 // Channel/category comparison bars. series: [{ key, name, color? }].
-// `tooltipContent` lets a caller override the default ChartTooltip (e.g.
-// SalesAnalytics.jsx's OtherBreakdownTooltip, which names the real
-// categories/subcategories hidden behind an "Other" bar).
+// `tooltipContent` lets a caller override the default ChartTooltip.
 // `horizontal` (default false) lays the bars on their side — category
 // names run down the Y axis (self-explanatory as tick labels, so no
 // separate axis title needed there) and the value axis moves to the
 // bottom. In that mode `xAxisLabel` describes the bottom (value) axis,
 // since ChartWithAxisTitles is purely positional (bottom/left), not aware
-// of which axis holds which meaning.
+// of which axis holds which meaning. `stacked` (default false, vertical
+// mode only) stacks every series into one bar per bucket instead of
+// grouping them side by side — for series that are genuinely parts of one
+// whole (e.g. per-channel GMV summing to total GMV), same "stacked" concept
+// StackedAreaChart already offers for areas. Only the topmost series in
+// the stack gets rounded top corners; the rest stay square so they read
+// as one continuous bar, not separate rounded blocks.
 export function BarComparisonChart({
   data,
   series,
@@ -381,6 +385,7 @@ export function BarComparisonChart({
   xAxisLabel,
   yAxisLabel,
   horizontal = false,
+  stacked = false,
 }) {
   const TooltipContent = tooltipContent || ChartTooltip;
   if (horizontal) {
@@ -419,7 +424,15 @@ export function BarComparisonChart({
           <Tooltip content={<TooltipContent valueFormatter={valueFormatter} />} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           {series.map((s, i) => (
-            <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color || hrh.series[i % hrh.series.length]} radius={[2, 2, 0, 0]} maxBarSize={36} />
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              name={s.name}
+              stackId={stacked ? "1" : undefined}
+              fill={s.color || hrh.series[i % hrh.series.length]}
+              radius={stacked && i < series.length - 1 ? [0, 0, 0, 0] : [2, 2, 0, 0]}
+              maxBarSize={36}
+            />
           ))}
         </BarChart>
       </ResponsiveContainer>

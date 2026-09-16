@@ -403,16 +403,19 @@ export default async function handler(req, res) {
       topSalesDrivers[CHANNEL_DISPLAY[ch] || ch] = topSalesDriversFor(rows);
     }
 
-    // Sales Trend — same fixed trailing window + per-channel breakdown
-    // pattern as Executive Overview's Sales Trend (api/hrh-executive-
-    // overview.js): 6 months of daily GMV/Orders/Units back from today,
-    // completely independent of this page's Date Range filter, grouped by
-    // (date, channel) so the frontend's hover tooltip can show HMRPH
-    // Online/TikTok/Shopee breakdown regardless of the page's Channel
-    // filter (same "always all 3" convention Channel Comparison already
-    // uses on this page). ~183 days is a plain day-count approximation of
-    // "6 months back", not calendar-exact — fine for a trailing trend
-    // view, unlike MTD/YTD where exact month boundaries matter.
+    // Sales Trend — a stacked-by-channel GMV bar chart, same fixed trailing
+    // window as Executive Overview's own Sales Trend (api/hrh-executive-
+    // overview.js): 6 months of daily GMV back from today, completely
+    // independent of this page's Date Range filter. GMV only (no Orders/
+    // Units here, per explicit request) — always all 3 real channels,
+    // regardless of the page's Channel filter (same "always all 3"
+    // convention Channel Comparison already uses on this page). ~183 days
+    // is a plain day-count approximation of "6 months back", not
+    // calendar-exact — fine for a trailing trend view, unlike MTD/YTD
+    // where exact month boundaries matter. Flat per-channel GMV fields
+    // (not a nested per-day array) so bucketRows can sum each channel's
+    // own key straight across whichever days land in a bucket, same as
+    // any other multi-series trend on this page.
     const trailingTo = manilaTodayISODate();
     const trailingFrom = addDaysISO(trailingTo, -183);
     const trailingTrendRows = await (
@@ -421,9 +424,7 @@ export default async function handler(req, res) {
           SELECT
             transaction_date AS d,
             sales_channel AS ch,
-            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
-            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
-            sumIf(net_quantity, net_sales_amount > 0) AS units
+            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
             AND sales_channel IN {allChannels:Array(String)}
@@ -434,19 +435,22 @@ export default async function handler(req, res) {
         format: "JSONEachRow",
       })
     ).json();
+    const CHANNEL_GMV_FIELD = { "HMRPH ONLINE": "gmvHmrphOnline", TIKTOK: "gmvTiktok", SHOPEE: "gmvShopee" };
     const trailingByDate = new Map();
     for (const r of trailingTrendRows) {
-      const bucket = trailingByDate.get(r.d) || { gmv: 0, orders: 0, units: 0, channels: [] };
-      const chGmv = toNum(r.gmv);
-      bucket.gmv += chGmv;
-      bucket.orders += toNum(r.orders);
-      bucket.units += toNum(r.units);
-      if (chGmv > 0) bucket.channels.push({ label: CHANNEL_DISPLAY[r.ch] || r.ch, gmv: chGmv });
+      const bucket = trailingByDate.get(r.d) || { gmvHmrphOnline: 0, gmvTiktok: 0, gmvShopee: 0 };
+      const field = CHANNEL_GMV_FIELD[r.ch];
+      if (field) bucket[field] += toNum(r.gmv);
       trailingByDate.set(r.d, bucket);
     }
     const salesTrendTrailing = enumerateDatesISO(trailingFrom, trailingTo).map((d) => {
       const b = trailingByDate.get(d);
-      return { date: d, gmv: b?.gmv ?? 0, orders: b?.orders ?? 0, units: b?.units ?? 0, channelBreakdown: b?.channels || [] };
+      return {
+        date: d,
+        gmvHmrphOnline: b?.gmvHmrphOnline ?? 0,
+        gmvTiktok: b?.gmvTiktok ?? 0,
+        gmvShopee: b?.gmvShopee ?? 0,
+      };
     });
 
     // Payment Type / Checkout-Fulfillment Method — same canonical-population

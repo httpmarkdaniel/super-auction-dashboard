@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { KpiCard, KpiRow } from "../components/Kpi";
-import { StackedAreaChart, DonutChart, SalesTrendComboChart } from "../components/Charts";
+import { StackedAreaChart, DonutChart, BarComparisonChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { bucketRows, bucketArrayField } from "../trendBucket";
+import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 
@@ -13,45 +13,15 @@ import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 // always ending today), independent of the page's Date Range filter — same
 // pattern as Executive Overview's Sales Trend (see api/hrh-sales-
 // analytics.js's trailingFrom/trailingTo). These counts are how many of
-// bucketRows' most-recent buckets to keep after re-bucketing.
+// bucketRows' most-recent buckets to keep after re-bucketing. GMV only,
+// stacked by channel (HMRPH Online/TikTok/Shopee) — no Orders/Units here,
+// per explicit request.
 const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
-
-// Adds a per-channel GMV breakdown (HMRPH Online/TikTok/Shopee) under the
-// default GMV/Orders/Units rows — channelBreakdown is attached to each
-// bucketed row client-side via bucketArrayField, same as Executive
-// Overview's own Sales Trend tooltip. The backend already returns
-// display-ready channel names (CHANNEL_DISPLAY), so no local remap is
-// needed here. Channels with 0 GMV that bucket aren't listed.
-function SalesTrendChannelTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  const row = payload[0]?.payload;
-  const channelBreakdown = row?.channelBreakdown || [];
-  return (
-    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
-      <div className="font-semibold mb-1">{label}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-4">
-          <span className="flex items-center gap-1.5" style={{ color: "#a3adba" }}>
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-            {p.name}:
-          </span>
-          <span className="font-semibold">{p.dataKey === "gmv" ? formatCompactPeso(p.value) : formatNum(p.value)}</span>
-        </div>
-      ))}
-      {channelBreakdown.length > 0 && (
-        <div className="mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${hrh.navyBorder}` }}>
-          <div style={{ color: "#a3adba" }}>GMV by channel:</div>
-          {channelBreakdown.map((c) => (
-            <div key={c.label} className="flex items-center justify-between gap-4">
-              <span style={{ color: "#a3adba" }}>{c.label}</span>
-              <span className="font-semibold">{formatCompactPeso(c.gmv)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+const SALES_TREND_CHANNEL_SERIES = [
+  { key: "gmvHmrphOnline", name: "HMRPH Online", color: hrh.series[0] },
+  { key: "gmvTiktok", name: "TikTok", color: hrh.series[1] },
+  { key: "gmvShopee", name: "Shopee", color: hrh.series[2] },
+];
 
 // Small hand-drawn stroke icons for VoucherAssistedSalesPanel's KPI row —
 // same feather-icon convention as TrafficConversion.jsx / Sidebar.jsx
@@ -300,14 +270,14 @@ export default function SalesAnalytics({ filters }) {
   }, [channel, dateRange, ready, load]);
 
   // Fixed trailing window, independent of the Date Range filter — see
-  // TRAILING_BUCKET_COUNT comment. Same bucketRows/bucketArrayField pattern
-  // Executive Overview's own Sales Trend uses.
-  const salesTrendBuckets = bucketRows(data?.salesTrendTrailing, trendBucket, ["gmv", "orders", "units"]);
-  const salesTrendChannelByBucket = bucketArrayField(data?.salesTrendTrailing, trendBucket, "channelBreakdown");
-  const salesTrend = salesTrendBuckets.slice(-TRAILING_BUCKET_COUNT[trendBucket]).map((row) => ({
-    ...row,
-    channelBreakdown: salesTrendChannelByBucket.get(row.dateLabel) || [],
-  }));
+  // TRAILING_BUCKET_COUNT comment. Same bucketRows pattern Executive
+  // Overview's own Sales Trend uses, just summing 3 per-channel GMV keys
+  // instead of gmv/orders/units.
+  const salesTrend = bucketRows(
+    data?.salesTrendTrailing,
+    trendBucket,
+    SALES_TREND_CHANNEL_SERIES.map((s) => s.key),
+  ).slice(-TRAILING_BUCKET_COUNT[trendBucket]);
 
   return (
     <div>
@@ -323,11 +293,11 @@ export default function SalesAnalytics({ filters }) {
         <>
           <Panel
             title="Sales Trend"
-            subtitle={`Last ${TRAILING_BUCKET_COUNT[trendBucket]} ${trendBucket === "day" ? "days" : trendBucket + "s"}, ending today — independent of the Date Range filter above. Hover a bar for the HMRPH Online/TikTok/Shopee breakdown.`}
+            subtitle={`GMV by channel — last ${TRAILING_BUCKET_COUNT[trendBucket]} ${trendBucket === "day" ? "days" : trendBucket + "s"}, ending today, independent of the Date Range filter above`}
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
-            <SalesTrendComboChart data={salesTrend} tooltipContent={SalesTrendChannelTooltip} />
+            <BarComparisonChart data={salesTrend} series={SALES_TREND_CHANNEL_SERIES} xKey="dateLabel" valueFormatter={formatCompactPeso} stacked />
           </Panel>
 
           <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
