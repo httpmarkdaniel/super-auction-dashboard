@@ -198,7 +198,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
             Discount Value &amp; Orders by Voucher
           </div>
           <div className="text-[10.5px]" style={{ color: hrh.muted }}>
-            Bars = Discount Value (₱, left axis) · Lines = Orders (count, right axis)
+            Bars = Discount Value (₱) · hover a bar for that voucher's Orders count
           </div>
         </div>
         <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" />
@@ -277,7 +277,13 @@ export default function SalesAnalytics({ filters }) {
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
-            <BarComparisonChart data={salesTrend} series={SALES_TREND_CHANNEL_SERIES} xKey="dateLabel" valueFormatter={formatCompactPeso} stacked />
+            <BarComparisonChart
+              data={salesTrend}
+              series={SALES_TREND_CHANNEL_SERIES}
+              xKey="dateLabel"
+              valueFormatter={formatCompactPeso}
+              stacked={trendBucket === "day"}
+            />
           </Panel>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">

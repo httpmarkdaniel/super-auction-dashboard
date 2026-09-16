@@ -264,33 +264,56 @@ export function RateTrendComboChart({ data, bars, rateKey, rateName, height = 26
   );
 }
 
-function PairedComboTooltip({ active, payload, label, barValueFormatter, lineValueFormatter }) {
+// Groups the bar's own value with its paired `${key}__line` value (read
+// straight off the full data row via `p.payload`, not off a rendered Line
+// series — this works whether or not a Line is actually plotted, so the
+// secondary metric can live in the tooltip only, per explicit request,
+// without an extra visual layer on the chart itself).
+function PairedComboTooltip({ active, payload, label, barValueFormatter, lineValueFormatter, lineLabel }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md px-3 py-2 text-[12px] max-w-[300px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
       <div className="font-semibold mb-1">{label}</div>
-      {payload.map((p) => (
-        <div key={p.dataKey} className="flex items-center justify-between gap-4">
-          <span className="flex items-center gap-1.5 truncate" style={{ color: "#a3adba" }}>
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-            <span className="truncate">{p.name}:</span>
-          </span>
-          <span className="font-semibold shrink-0">{p.dataKey.endsWith("__line") ? lineValueFormatter(p.value) : barValueFormatter(p.value)}</span>
-        </div>
-      ))}
+      {payload.map((p) => {
+        const key = p.dataKey.replace(/__bar$/, "");
+        const lineValue = p.payload?.[`${key}__line`];
+        return (
+          <div key={p.dataKey} className="mb-1 last:mb-0">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+              <span className="truncate font-semibold">{p.name}</span>
+            </div>
+            <div className="ml-3.5 flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+              <span>Discount Value:</span>
+              <span className="font-semibold" style={{ color: "#fff" }}>
+                {barValueFormatter(p.value)}
+              </span>
+            </div>
+            {lineValue !== undefined && (
+              <div className="ml-3.5 flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+                <span>{lineLabel}:</span>
+                <span className="font-semibold" style={{ color: "#fff" }}>
+                  {lineValueFormatter(lineValue)}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// Every series gets BOTH a grouped bar (left axis) and a line (right axis),
-// same color for both — for when two genuinely different-unit metrics
-// (e.g. a peso value + a count) need comparing per-category on ONE chart
-// rather than two side-by-side ones. Deliberately dense (used with up to
-// ~7 series, per explicit request) — the line has no legend entry of its
-// own (`legendType="none"`) since its color already matches its bar, and
-// the tooltip labels it "(Orders)"-style to stay distinguishable there.
-// `series`: [{key, name, color}] — `data` rows must carry `${key}__bar`
-// and `${key}__line` fields (see SalesAnalytics.jsx's per-voucher merge).
+// Every series is a grouped bar (left-axis metric); a second, different-
+// unit metric per series (e.g. a count alongside a peso value) rides
+// along in `${key}__line` and shows up grouped under its bar in the
+// tooltip (see PairedComboTooltip) WITHOUT its own plotted line — set
+// `showLines` to actually draw those as lines on a second right-hand axis
+// instead (same color as their bar) when both metrics should be visible
+// on the chart itself, not just on hover. Deliberately dense (used with up
+// to ~7 series, per explicit request). `series`: [{key, name, color}] —
+// `data` rows must carry `${key}__bar` and `${key}__line` fields (see
+// SalesAnalytics.jsx's per-voucher merge).
 export function PairedBarLineChart({
   data,
   series,
@@ -298,7 +321,9 @@ export function PairedBarLineChart({
   height = 280,
   barValueFormatter = formatCompactPeso,
   lineValueFormatter = formatNum,
-  lineName = (name) => `${name} (Orders)`,
+  lineLabel = "Orders",
+  lineName = (name) => `${name} (${lineLabel})`,
+  showLines = false,
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -306,33 +331,36 @@ export function PairedBarLineChart({
         <CartesianGrid stroke={hrh.border} vertical={false} />
         <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
         <YAxis yAxisId="bar" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={barValueFormatter} width={60} />
-        <YAxis
-          yAxisId="line"
-          orientation="right"
-          tick={{ fontSize: 11, fill: hrh.ink2 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={lineValueFormatter}
-          allowDecimals={false}
-          width={44}
-        />
-        <Tooltip content={<PairedComboTooltip barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} />} />
+        {showLines && (
+          <YAxis
+            yAxisId="line"
+            orientation="right"
+            tick={{ fontSize: 11, fill: hrh.ink2 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={lineValueFormatter}
+            allowDecimals={false}
+            width={44}
+          />
+        )}
+        <Tooltip content={<PairedComboTooltip barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} lineLabel={lineLabel} />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {series.map((s) => (
           <Bar key={`${s.key}__bar`} yAxisId="bar" dataKey={`${s.key}__bar`} name={s.name} fill={s.color} radius={[2, 2, 0, 0]} maxBarSize={18} />
         ))}
-        {series.map((s) => (
-          <Line
-            key={`${s.key}__line`}
-            yAxisId="line"
-            dataKey={`${s.key}__line`}
-            name={lineName(s.name)}
-            stroke={s.color}
-            strokeWidth={2}
-            dot={false}
-            legendType="none"
-          />
-        ))}
+        {showLines &&
+          series.map((s) => (
+            <Line
+              key={`${s.key}__line`}
+              yAxisId="line"
+              dataKey={`${s.key}__line`}
+              name={lineName(s.name)}
+              stroke={s.color}
+              strokeWidth={2}
+              dot={false}
+              legendType="none"
+            />
+          ))}
       </ComposedChart>
     </ResponsiveContainer>
   );
