@@ -138,6 +138,54 @@ function enumerateDatesISO(from, to) {
   return dates;
 }
 
+// Voucher Assisted Sales' per-voucher trend — picks the top N vouchers by
+// total window ORDERS (usage count, the clearest "what's getting used"
+// signal) as their own series, collapses the rest into one "Other" series,
+// then zero-fills every day in the window for both Orders and Discount
+// Value so the two charts share the exact same top-voucher set/colors
+// (easier to compare "used a lot" vs. "cost a lot" for the same voucher).
+// `rows`: { d, voucher, orders, discountPrice }.
+function buildVoucherSeriesTrend(rows, from, to, topN) {
+  const totalsByVoucher = new Map();
+  for (const r of rows) {
+    const t = totalsByVoucher.get(r.voucher) || { orders: 0, discountPrice: 0 };
+    t.orders += r.orders;
+    t.discountPrice += r.discountPrice;
+    totalsByVoucher.set(r.voucher, t);
+  }
+  const sorted = Array.from(totalsByVoucher.entries()).sort((a, b) => b[1].orders - a[1].orders);
+  const topVouchers = sorted.slice(0, topN).map(([voucher]) => voucher);
+  const topSet = new Set(topVouchers);
+  const hasOther = sorted.length > topN;
+
+  const series = topVouchers.map((voucher, i) => ({ key: voucher, name: voucher, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
+  if (hasOther) series.push({ key: "Other", name: "Other", color: OTHER_COLOR });
+  const seriesKeys = series.map((s) => s.key);
+
+  const byDate = new Map();
+  for (const r of rows) {
+    const key = topSet.has(r.voucher) ? r.voucher : "Other";
+    const bucket = byDate.get(r.d) || { orders: {}, discountPrice: {} };
+    bucket.orders[key] = (bucket.orders[key] || 0) + r.orders;
+    bucket.discountPrice[key] = (bucket.discountPrice[key] || 0) + r.discountPrice;
+    byDate.set(r.d, bucket);
+  }
+  const dates = enumerateDatesISO(from, to);
+  const ordersData = dates.map((date) => {
+    const b = byDate.get(date);
+    const out = { date };
+    for (const k of seriesKeys) out[k] = b?.orders[k] || 0;
+    return out;
+  });
+  const discountData = dates.map((date) => {
+    const b = byDate.get(date);
+    const out = { date };
+    for (const k of seriesKeys) out[k] = b?.discountPrice[k] || 0;
+    return out;
+  });
+  return { series, ordersData, discountData };
+}
+
 // `?report=traffic` / `?report=customers` dispatch to Traffic & Conversion's
 // and Customer Analytics' completely separate handlers (api/_hrh-traffic-
 // analytics.js, api/_hrh-customer-analytics.js) BEFORE any of this file's own
@@ -539,7 +587,7 @@ export default async function handler(req, res) {
     // correct per-week/month unique count (the same customer buying twice
     // in one week would be double-counted), so it is computed once, exactly,
     // over the full selected window instead of faked via addition.
-    const [voucherDailyRows, voucherCustomerRows, voucherBreakdownRows] = await Promise.all([
+    const [voucherDailyRows, voucherCustomerRows, voucherBreakdownRows, voucherByDayAndCodeRows] = await Promise.all([
       (
         await client.query({
           query: `
@@ -604,6 +652,32 @@ export default async function handler(req, res) {
           format: "JSONEachRow",
         })
       ).json(),
+      // Per-voucher daily usage — feeds the "which specific vouchers are
+      // getting used" trend charts (see buildVoucherSeriesTrend above).
+      // Same voucher_name-falls-back-to-code display convention as
+      // voucherBreakdownRows below, just with a date dimension added.
+      (
+        await client.query({
+          query: `
+            SELECT
+              toString(toDate(order_created_at)) AS d,
+              voucher_code,
+              any(voucher_name) AS voucher_name,
+              count() AS orders,
+              sum(total_discount_price) AS discount_price
+            FROM cms.mart_cms_voucher_report
+            WHERE store_name = {store:String} AND order_status != 'Cancelled'
+              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+            GROUP BY d, voucher_code
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${current.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json(),
     ]);
     const voucherByDate = new Map(voucherDailyRows.map((r) => [r.d, r]));
     const voucherTrend = enumerateDatesISO(current.from, current.to).map((date) => {
@@ -631,6 +705,17 @@ export default async function handler(req, res) {
         discountRate: safeDivide(discountPrice, orderPrice) * 100,
       };
     });
+    const voucherByVoucherTrend = buildVoucherSeriesTrend(
+      voucherByDayAndCodeRows.map((r) => ({
+        d: r.d,
+        voucher: r.voucher_name || r.voucher_code,
+        orders: toNum(r.orders),
+        discountPrice: toNum(r.discount_price),
+      })),
+      current.from,
+      current.to,
+      6,
+    );
     const voucherAssistedSales = {
       totals: {
         orders: voucherTotalOrders,
@@ -640,6 +725,7 @@ export default async function handler(req, res) {
         aov: safeDivide(voucherTotalOrderPrice, voucherTotalOrders),
       },
       trend: voucherTrend,
+      byVoucherTrend: voucherByVoucherTrend,
       byVoucher,
     };
 
