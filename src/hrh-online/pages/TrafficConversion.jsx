@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import FunnelList from "../components/FunnelList";
-import { TrendChart } from "../components/Charts";
+import ShareBar from "../components/ShareBar";
+import { TrendChart, RateTrendComboChart } from "../components/Charts";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel } from "../trendBucket";
+import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
 
 function dateRangeParams(dateRange) {
@@ -29,8 +31,13 @@ function isDateRangeReady(dateRange) {
 // ecommerce events have no page dimension anywhere in this warehouse, so
 // they can't be scoped to one store. Add to Cart/Begin Checkout are left
 // out of the funnel entirely rather than shown as unscoped/fabricated
-// numbers. Not affected by the page's Channel filter — this page IS the
-// website channel (TikTok/Shopee don't send traffic to hmr.ph).
+// numbers. Device Mix, Source/Medium, and an hourly heatmap are NOT here —
+// no ClickHouse table anywhere crosses pagePath with device/source/hour
+// (verified against every ga4.* table's full column list), so those would
+// need a direct GA4 Data API integration, not this ClickHouse-ETL'd data —
+// tracked separately, not silently faked here. Not affected by the page's
+// Channel filter — this page IS the website channel (TikTok/Shopee don't
+// send traffic to hmr.ph).
 export default function TrafficConversion({ filters }) {
   const { dateRange } = filters;
   const [data, setData] = useState(null);
@@ -88,20 +95,44 @@ export default function TrafficConversion({ filters }) {
             <KpiCard label="Purchases" value={formatNum(kpis.purchases.value)} delta={kpis.purchases.delta} />
             <KpiCard label="Conversion Rate" value={formatPct(kpis.conversionRate.value, 2)} delta={kpis.conversionRate.delta} />
             <KpiCard label="Revenue / Page View" value={formatPeso(kpis.revenuePerView.value)} delta={kpis.revenuePerView.delta} />
+            <KpiCard label="Page Views / User" value={kpis.pageViewsPerUser.value.toFixed(2)} delta={kpis.pageViewsPerUser.delta} />
           </KpiRow>
 
-          <Panel title="Conversion Funnel" subtitle="Page Views (hmr.ph/shop/ONP) -> Purchases (real HRH Online website orders)" className="mb-4">
-            <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} />
-          </Panel>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+            <Panel title="Traffic Trend" subtitle="Daily Users and Page Views (hmr.ph/shop/ONP)">
+              <TrendChart
+                data={data.trafficTrend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
+                series={[
+                  { key: "pageViews", name: "Page Views", color: hrh.accent },
+                  { key: "users", name: "Users", color: hrh.series[0] },
+                ]}
+                xKey="dateLabel"
+                valueFormatter={formatNum}
+              />
+            </Panel>
+            <Panel title="Purchases & Conversion" subtitle="Daily Purchases (real store orders) and Conversion Rate">
+              <RateTrendComboChart
+                data={data.conversionTrend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
+                bars={[{ key: "purchases", name: "Purchases", color: hrh.accent }]}
+                rateKey="conversionRate"
+                rateName="Conversion Rate"
+              />
+            </Panel>
+          </div>
 
-          <Panel title="Conversion Trend">
-            <TrendChart
-              data={data.conversionTrend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
-              series={[{ key: "conversionRate", name: "Conversion Rate", color: "#eb6834" }]}
-              xKey="dateLabel"
-              valueFormatter={(v) => `${v.toFixed(1)}%`}
-            />
-          </Panel>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <Panel title="Conversion Funnel" subtitle="Page Views (hmr.ph/shop/ONP) -> Purchases (real HRH Online website orders)">
+              <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} />
+            </Panel>
+            <Panel title="New vs Returning Users" subtitle="Share of users in this period (hmr.ph/shop/ONP)">
+              <ShareBar
+                segments={[
+                  { label: "New Users", value: data.newVsReturning[0].value, color: hrh.series[0] },
+                  { label: "Returning Users", value: data.newVsReturning[1].value, color: hrh.accent },
+                ]}
+              />
+            </Panel>
+          </div>
         </>
       )}
     </div>

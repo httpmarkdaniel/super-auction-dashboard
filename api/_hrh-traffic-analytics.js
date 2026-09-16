@@ -219,6 +219,7 @@ export async function handleTrafficAnalytics(req, res) {
             SELECT
               date,
               sum(totalUsers) AS users,
+              sum(newUsers) AS newUsers,
               sum(screenPageViews) AS pageViews
             FROM ga4.ga4_pages_path_report FINAL
             WHERE property_id = {propertyId:String}
@@ -252,24 +253,41 @@ export async function handleTrafficAnalytics(req, res) {
         .then((r) => r.json()),
     ]);
 
-    // --- Aggregate pageRows into current/previous totals + daily page views ---
+    // --- Aggregate pageRows into current/previous totals + daily users/page views ---
     let curUsers = 0;
+    let curNewUsers = 0;
     let curPageViews = 0;
     let prevUsers = 0;
     let prevPageViews = 0;
+    const usersByDate = new Map(); // date (yyyymmdd) -> users (current window only)
     const pageViewsByDate = new Map(); // date (yyyymmdd) -> page views (current window only)
     for (const r of pageRows) {
       const users = toNum(r.users);
+      const newUsers = toNum(r.newUsers);
       const pageViews = toNum(r.pageViews);
       if (r.date >= curFromKey && r.date <= curToKey) {
         curUsers += users;
+        curNewUsers += newUsers;
         curPageViews += pageViews;
+        usersByDate.set(r.date, (usersByDate.get(r.date) || 0) + users);
         pageViewsByDate.set(r.date, (pageViewsByDate.get(r.date) || 0) + pageViews);
       } else if (r.date >= prevFromKey && r.date <= prevToKey) {
         prevUsers += users;
         prevPageViews += pageViews;
       }
     }
+    // "Returning" is derived (Users - New Users), summed the same way Users
+    // itself already is across the window (day-grain totals, so a visitor
+    // active on 2 different days is counted twice in both — consistent with
+    // itself, not a new precision issue introduced here).
+    //
+    // Caveat worth knowing before reading this split: GA4's `newUsers` is
+    // scoped to the WHOLE property (first-ever visit to any hmr.ph page,
+    // not first visit to /shop/ONP specifically) — so a longtime hmr.ph
+    // visitor landing on this store page for the first time still counts as
+    // "returning" here. Expect this to skew heavily toward Returning even
+    // for a genuinely new-to-this-store audience.
+    const curReturningUsers = Math.max(curUsers - curNewUsers, 0);
 
     // --- Aggregate salesRows into current/previous totals + daily orders ---
     let curOrders = 0;
@@ -294,6 +312,8 @@ export async function handleTrafficAnalytics(req, res) {
     const prevConversionRate = safeDivide(prevOrders, prevPageViews) * 100;
     const curRevPerView = safeDivide(curGmv, curPageViews);
     const prevRevPerView = safeDivide(prevGmv, prevPageViews);
+    const curViewsPerUser = safeDivide(curPageViews, curUsers);
+    const prevViewsPerUser = safeDivide(prevPageViews, prevUsers);
 
     const kpis = {
       users: { value: curUsers, delta: pctDelta(curUsers, prevUsers) },
@@ -301,6 +321,7 @@ export async function handleTrafficAnalytics(req, res) {
       purchases: { value: curOrders, delta: pctDelta(curOrders, prevOrders) },
       conversionRate: { value: curConversionRate, delta: pctDelta(curConversionRate, prevConversionRate) },
       revenuePerView: { value: curRevPerView, delta: pctDelta(curRevPerView, prevRevPerView) },
+      pageViewsPerUser: { value: curViewsPerUser, delta: pctDelta(curViewsPerUser, prevViewsPerUser) },
     };
 
     // --- Conversion Funnel (current window only) — 2 stages, see
@@ -311,11 +332,24 @@ export async function handleTrafficAnalytics(req, res) {
       { stage: "Purchases", count: curOrders },
     ];
 
-    // --- Conversion Trend (daily, current window, zero-filled) ---
+    // New vs Returning Users (current window only) — see the curReturningUsers
+    // comment above on how "Returning" is derived.
+    const newVsReturning = [
+      { label: "New Users", value: curNewUsers },
+      { label: "Returning Users", value: curReturningUsers },
+    ];
+
+    // --- Traffic Trend (daily Users + Page Views, current window, zero-filled) ---
+    const trafficTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
+      const key = isoToYyyymmdd(iso);
+      return { date: iso, users: usersByDate.get(key) || 0, pageViews: pageViewsByDate.get(key) || 0 };
+    });
+
+    // --- Purchases & Conversion Trend (daily, current window, zero-filled) ---
     const conversionTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
       const pageViews = pageViewsByDate.get(isoToYyyymmdd(iso)) || 0;
-      const orders = ordersByDate.get(iso) || 0;
-      return { date: iso, pageViews, orders, conversionRate: safeDivide(orders, pageViews) * 100 };
+      const purchases = ordersByDate.get(iso) || 0;
+      return { date: iso, pageViews, purchases, conversionRate: safeDivide(purchases, pageViews) * 100 };
     });
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
@@ -331,6 +365,8 @@ export async function handleTrafficAnalytics(req, res) {
       },
       kpis,
       funnel,
+      newVsReturning,
+      trafficTrend,
       conversionTrend,
     });
   } catch (err) {
