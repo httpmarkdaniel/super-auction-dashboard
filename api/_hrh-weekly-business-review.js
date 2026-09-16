@@ -301,15 +301,16 @@ async function fetchStockQty(itemIds) {
   return map;
 }
 
-// "Meaningful" movement threshold for Slide 4's Grew/Dipped buckets — a
-// deliberate, disclosed +/-20% cutoff (see dataQuality), not derived from
-// any spec. Below this band a product is just flat, not categorized at all.
+// Slide 4's Grew/Dipped buckets used to require a +/-20% cutoff to be
+// "meaningful" — removed 2026-09-16 per explicit request, so every SKU
+// with ANY real increase or decrease (and real sales in both periods)
+// lands in Grew or Dipped now; only an exact 0% change (curGmv === prevGmv)
+// stays uncategorized as genuinely flat.
 //
-// 2026-09-15: a ₱500 materiality floor was briefly added on top of this (a
-// %-only rule let phone cases/tape/pet powder qualify off a tiny base),
-// then explicitly removed again per user request — back to the plain
-// %/zero-sales rule below, no minimum peso floor.
-const MOVEMENT_THRESHOLD_PCT = 20;
+// 2026-09-15: a ₱500 materiality floor was briefly added on top of the old
+// threshold (a %-only rule let phone cases/tape/pet powder qualify off a
+// tiny base), then explicitly removed again per user request — no minimum
+// peso floor here either.
 
 function formatPesoLocal(n) {
   return `₱${Math.round(n).toLocaleString("en-PH")}`;
@@ -382,7 +383,8 @@ export async function handleWeeklyBusinessReview(req, res) {
               sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
               sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
               sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
-              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
+              maxIf(transaction_date, net_sales_amount > 0) AS last_sold_date
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
               AND sales_channel IN {channels:Array(String)}
@@ -514,6 +516,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         prevUnits,
         pct: pctDelta(curGmv, prevGmv),
         stockQty: stockMap.has(String(r.item_id)) ? stockMap.get(String(r.item_id)) : undefined,
+        lastSoldDate: r.last_sold_date ? String(r.last_sold_date).slice(0, 10) : null,
       };
     });
 
@@ -521,8 +524,10 @@ export async function handleWeeklyBusinessReview(req, res) {
     for (const p of products) {
       if (p.prevGmv > 0 && p.curGmv <= 0) categorized.disappeared.push(p);
       else if (p.prevGmv <= 0 && p.curGmv > 0) categorized.emerging.push(p);
-      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct >= MOVEMENT_THRESHOLD_PCT) categorized.grew.push(p);
-      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct <= -MOVEMENT_THRESHOLD_PCT) categorized.dipped.push(p);
+      // No minimum % threshold — every real increase/decrease counts (see
+      // the note above this function's old MOVEMENT_THRESHOLD_PCT).
+      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct > 0) categorized.grew.push(p);
+      else if (p.prevGmv > 0 && p.curGmv > 0 && p.pct < 0) categorized.dipped.push(p);
     }
     for (const p of categorized.disappeared) p.stockStatus = stockStatus(p.stockQty);
 
@@ -561,7 +566,10 @@ export async function handleWeeklyBusinessReview(req, res) {
           kind === "disappeared"
             ? `${formatPesoLocal(p.prevGmv)} (${formatNumLocal(p.prevUnits)} units)${stockPhrase(p)}`
             : `${formatPesoLocal(p.curGmv)} (${formatNumLocal(p.curUnits)} units)${stockPhrase(p)}`;
-        return { product: p.product, sku: p.sku, detail };
+        // Last Date Sold — most useful for Disappeared (when did it stop
+        // selling?), included for every category since it's the same real
+        // maxIf(transaction_date) field regardless of kind.
+        return { product: p.product, sku: p.sku, detail, lastSoldDate: p.lastSoldDate };
       });
     }
 
@@ -572,7 +580,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         movement: categorized.grew.length ? `+${pctDelta(grewTotals.curGmv, grewTotals.prevGmv)?.toFixed(1)}%` : "—",
         notes: categorized.grew.length
           ? `Sales increased by ${pctDelta(grewTotals.curGmv, grewTotals.prevGmv)?.toFixed(1)}% combined (${formatPesoLocal(grewTotals.prevGmv)} → ${formatPesoLocal(grewTotals.curGmv)}) across ${categorized.grew.length} SKU(s), vs. ${previousLabel}.`
-          : "No SKUs met the +20% growth threshold this period.",
+          : "No SKUs had any real sales increase this period.",
         topSkus: topSkusFor(categorized.grew, "grew"),
       },
       {
@@ -581,7 +589,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         movement: categorized.dipped.length ? `${pctDelta(dippedTotals.curGmv, dippedTotals.prevGmv)?.toFixed(1)}%` : "—",
         notes: categorized.dipped.length
           ? `Sales decreased by ${Math.abs(pctDelta(dippedTotals.curGmv, dippedTotals.prevGmv) ?? 0).toFixed(1)}% combined (${formatPesoLocal(dippedTotals.prevGmv)} → ${formatPesoLocal(dippedTotals.curGmv)}) across ${categorized.dipped.length} SKU(s), vs. ${previousLabel}.`
-          : "No SKUs dropped past the -20% decline threshold this period.",
+          : "No SKUs had any real sales decrease this period.",
         topSkus: topSkusFor(categorized.dipped, "dipped"),
       },
       {
@@ -604,17 +612,24 @@ export async function handleWeeklyBusinessReview(req, res) {
       },
     ];
 
-    // ================= SLIDE 5 — Top 10 SKU Movers =================
-    const top10 = [...products]
-      .filter((p) => p.curUnits > 0)
+    // ================= SLIDE 5 — Top SKU Movers =================
+    // Every SKU with real current-period activity (not pre-truncated to
+    // 10) — the frontend sorts by units OR value and takes its own top 10,
+    // so "Top 10 by Units" and "Top 10 by Value" can be two different sets
+    // instead of the value ranking being limited to whatever made the
+    // units-based top 10.
+    const skuMovers = [...products]
+      .filter((p) => p.curUnits > 0 || p.curGmv > 0)
       .sort((a, b) => b.curUnits - a.curUnits)
-      .slice(0, 10)
       .map((p) => ({
         product: p.product,
         sku: p.sku,
         currentUnits: p.curUnits,
         previousUnits: p.prevUnits,
         unitChange: p.curUnits - p.prevUnits,
+        currentGmv: p.curGmv,
+        previousGmv: p.prevGmv,
+        gmvChange: p.curGmv - p.prevGmv,
         pctChange: p.pct,
       }));
 
@@ -668,12 +683,12 @@ export async function handleWeeklyBusinessReview(req, res) {
       weeklyTrend,
       insights,
       skuMovement,
-      top10,
+      skuMovers,
       skuInsights,
       dataQuality: [
         "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
         "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % (2026-09-15) is fixed to real Month-to-Date vs. the same elapsed days last month, independent of the Date Range filter, and is always shown.",
-        "Grew/Dipped (Slide 4) use a +/-20% combined-GMV movement threshold — also a deliberate, disclosed choice; products moving less than that are left uncategorized (flat) rather than forced into a bucket.",
+        "Grew/Dipped (Slide 4) count every SKU with any real GMV increase or decrease between the two periods (no minimum % threshold) — only an exact 0% change (identical GMV in both periods) is left uncategorized as genuinely flat.",
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",
         "SKU-level comparisons (Slides 4-5) use the same current-vs-previous-comparable-period engine as Product Analytics' Top Products/Dropped Products, not week-over-week/month-over-month specifically — the task's own Slide 4/5 definitions ask for a generic \"comparable prior period\", unlike Slide 2's explicit WoW/MoM columns.",
       ],

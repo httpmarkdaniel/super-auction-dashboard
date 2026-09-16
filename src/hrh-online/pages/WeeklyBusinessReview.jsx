@@ -33,10 +33,17 @@ function PctWithAmount({ pct, previous }) {
   );
 }
 
+function formatDateLabel(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
 const SKU_DETAIL_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 380 },
   { key: "sku", label: "SKU", render: (r) => r.sku || "—", width: 100 },
   { key: "detail", label: "Total Sales / Units / Stock" },
+  { key: "lastSoldDate", label: "Last Date Sold", render: (r) => formatDateLabel(r.lastSoldDate) },
 ];
 
 // Click-to-open FULL modal for the SKU Movement table's "SKUs" count — the
@@ -106,15 +113,23 @@ const TOP10_TABLE_COLUMNS = [
   { key: "currentUnits", label: "Current Units", render: (r) => formatNum(r.currentUnits) },
   { key: "previousUnits", label: "Previous Units", render: (r) => formatNum(r.previousUnits) },
   { key: "unitChange", label: "Unit Change", render: (r) => `${r.unitChange >= 0 ? "+" : ""}${formatNum(r.unitChange)}` },
+  { key: "currentGmv", label: "Current Sales", render: (r) => formatPeso(r.currentGmv) },
+  { key: "previousGmv", label: "Previous Sales", render: (r) => formatPeso(r.previousGmv) },
+  { key: "gmvChange", label: "Sales Change", render: (r) => `${r.gmvChange >= 0 ? "+" : ""}${formatPeso(r.gmvChange)}` },
   { key: "pctChange", label: "% Change", render: (r) => (r.pctChange === null || r.pctChange === undefined ? "New" : formatPct(r.pctChange)) },
+];
+
+const MOVERS_SORT_OPTIONS = [
+  { key: "units", label: "Units" },
+  { key: "value", label: "Value" },
 ];
 
 // Recreates slides 2-5 of "Ecomm Weekly Business Review.pdf" as a live,
 // real-data section — see api/_hrh-weekly-business-review.js's own top
 // comment for what that deck actually contains (a template: every metric
 // cell is "--" with "Replace with actual data" instructions) and the full
-// methodology (WoW/MoM validity thresholds, +/-20% SKU movement threshold,
-// reused stock-status logic, etc).
+// methodology (WoW/MoM validity thresholds, no minimum %/peso threshold for
+// Grew/Dipped, reused stock-status logic, etc).
 //
 // Own standalone sidebar page rather than appended to an existing one —
 // this report is inherently cross-channel (comparing all 3 platforms) and
@@ -127,6 +142,7 @@ export default function WeeklyBusinessReview({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [moversSort, setMoversSort] = useState("units");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -157,6 +173,13 @@ export default function WeeklyBusinessReview({ filters }) {
   }, [params, ready, load]);
 
   const platformRows = data ? [...data.platformTable.rows, data.platformTable.total] : [];
+  // "Top 10 by Units" and "Top 10 by Value" are genuinely different sets —
+  // data.skuMovers is every SKU with real current-period activity, so
+  // re-sorting here and taking the top 10 for whichever metric is selected
+  // never misses a SKU that only ranks highly by the OTHER metric.
+  const topMovers = data
+    ? [...data.skuMovers].sort((a, b) => (moversSort === "value" ? b.currentGmv - a.currentGmv : b.currentUnits - a.currentUnits)).slice(0, 10)
+    : [];
 
   return (
     <div>
@@ -231,20 +254,58 @@ export default function WeeklyBusinessReview({ filters }) {
           </Panel>
 
           {/* ============================== SLIDE 5 ============================== */}
-          <Panel title="Top 10 SKU Movers — Units Sold" subtitle={`${data.meta.currentLabel} vs. ${data.meta.previousLabel}`} className="mb-4">
-            <BarComparisonChart
-              data={data.top10.map((r) => ({ ...r, label: r.product.length > 28 ? `${r.product.slice(0, 28)}…` : r.product }))}
-              xKey="label"
-              horizontal
-              height={340}
-              valueFormatter={formatNum}
-              series={[
-                { key: "currentUnits", name: "Current Period Units", color: hrh.blue },
-                { key: "previousUnits", name: "Previous Comparable Period Units", color: hrh.muted },
-              ]}
-            />
+          <Panel
+            title={`Top 10 SKU Movers — ${moversSort === "value" ? "Sales Value" : "Units Sold"}`}
+            subtitle={`${data.meta.currentLabel} vs. ${data.meta.previousLabel}`}
+            className="mb-4"
+            action={
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+                  Sort by
+                </span>
+                <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
+                  {MOVERS_SORT_OPTIONS.map((o) => (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setMoversSort(o.key)}
+                      className="text-[11.5px] font-semibold px-2.5 h-6"
+                      style={moversSort === o.key ? { background: hrh.navy, color: "#fff" } : { background: "transparent", color: hrh.ink2 }}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            }
+          >
+            {moversSort === "value" ? (
+              <BarComparisonChart
+                data={topMovers.map((r) => ({ ...r, label: r.product.length > 28 ? `${r.product.slice(0, 28)}…` : r.product }))}
+                xKey="label"
+                horizontal
+                height={340}
+                valueFormatter={formatCompactPeso}
+                series={[
+                  { key: "currentGmv", name: "Current Period Sales", color: hrh.blue },
+                  { key: "previousGmv", name: "Previous Comparable Period Sales", color: hrh.muted },
+                ]}
+              />
+            ) : (
+              <BarComparisonChart
+                data={topMovers.map((r) => ({ ...r, label: r.product.length > 28 ? `${r.product.slice(0, 28)}…` : r.product }))}
+                xKey="label"
+                horizontal
+                height={340}
+                valueFormatter={formatNum}
+                series={[
+                  { key: "currentUnits", name: "Current Period Units", color: hrh.blue },
+                  { key: "previousUnits", name: "Previous Comparable Period Units", color: hrh.muted },
+                ]}
+              />
+            )}
             <div className="mt-4">
-              <DataTable columns={TOP10_TABLE_COLUMNS} rows={data.top10} emptyLabel="No units sold in this period." />
+              <DataTable columns={TOP10_TABLE_COLUMNS} rows={topMovers} emptyLabel="No sales in this period." />
             </div>
           </Panel>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
