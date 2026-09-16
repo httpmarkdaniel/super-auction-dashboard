@@ -186,6 +186,33 @@ function resolveRange(range, fromParam, toParam) {
   return { from: mondayOfWeek(today), to: today }; // wtd (default)
 }
 
+// "Compare to" — same Day/Week/Month comparison-window logic as
+// api/_hrh-customer-analytics.js's resolveComparisonWindow, duplicated
+// here per this codebase's convention (each api/hrh-*.js file keeps its
+// own small self-contained date helpers rather than importing them, so
+// no file can accidentally change another page's behavior).
+function daysInMonth(year, month1Based) {
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
+}
+function shiftMonthsClampedISO(iso, deltaMonths) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total0 = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total0 / 12);
+  const nm1 = (((total0 % 12) + 12) % 12) + 1;
+  const nd = Math.min(d, daysInMonth(ny, nm1));
+  return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function resolveComparisonWindow(current, compareTo) {
+  const { from, to } = current;
+  if (compareTo === "day") return { from: addDaysISO(from, -1), to: addDaysISO(to, -1) };
+  if (compareTo === "month") return { from: shiftMonthsClampedISO(from, -1), to: shiftMonthsClampedISO(to, -1) };
+  return { from: addDaysISO(from, -7), to: addDaysISO(to, -7) }; // "week" (default)
+}
+function pctDelta(current, previous) {
+  if (!previous) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
 // ---------------------------------------------------------------------
 // Core methodology, shared by Orders & Fulfillment and Executive
 // Overview's lifecycle card (imported there) so the two pages can never
@@ -670,6 +697,7 @@ export async function handleOrdersFulfillment(req, res) {
     const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : "week";
 
     let range_;
     try {
@@ -677,6 +705,7 @@ export async function handleOrdersFulfillment(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
+    const comparison = resolveComparisonWindow(range_, compareTo);
 
     // CHANNEL SCOPE: the Fulfillment/Cancellation methodology (order_report
     // + net_sales order_no linkage) is verified only for HMRPH Online.
@@ -687,10 +716,47 @@ export async function handleOrdersFulfillment(req, res) {
     // so it's computed for whatever channel scope is selected regardless.
     const fulfillmentUnsupported = channel === "TikTok" || channel === "Shopee";
 
-    const [m, returns] = await Promise.all([
+    // Every scorecard on this page now compares against a previous period
+    // (same "Compare to" Day/Week/Month control as Customer Analytics/
+    // Executive Overview) — computeHmrphOnlineLifecycle/computeReturnsAnalysis
+    // are plain (from, to) functions already, so the previous period is
+    // just a second call with a shifted window, run in the same Promise.all
+    // rather than a second round-trip.
+    const [m, returns, mPrev, returnsPrev] = await Promise.all([
       fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(range_.from, range_.to),
       computeReturnsAnalysis(range_.from, range_.to, channels),
+      fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(comparison.from, comparison.to),
+      computeReturnsAnalysis(comparison.from, comparison.to, channels),
     ]);
+
+    // Returns' KPIs get their previous/delta merged in here so both the
+    // early "unsupported channel" return below and the normal response
+    // further down share the exact same shape.
+    const returnsWithComparison = {
+      ...returns,
+      kpis: {
+        totalSalesInvoiced: {
+          ...returns.kpis.totalSalesInvoiced,
+          previous: returnsPrev.kpis.totalSalesInvoiced.value,
+          delta: pctDelta(returns.kpis.totalSalesInvoiced.value, returnsPrev.kpis.totalSalesInvoiced.value),
+        },
+        totalReturns: {
+          ...returns.kpis.totalReturns,
+          previous: returnsPrev.kpis.totalReturns.value,
+          delta: pctDelta(returns.kpis.totalReturns.value, returnsPrev.kpis.totalReturns.value),
+        },
+        returnRateByCount: {
+          ...returns.kpis.returnRateByCount,
+          previous: returnsPrev.kpis.returnRateByCount.value,
+          delta: pctDelta(returns.kpis.returnRateByCount.value, returnsPrev.kpis.returnRateByCount.value),
+        },
+        returnRateByValue: {
+          ...returns.kpis.returnRateByValue,
+          previous: returnsPrev.kpis.returnRateByValue.value,
+          delta: pctDelta(returns.kpis.returnRateByValue.value, returnsPrev.kpis.returnRateByValue.value),
+        },
+      },
+    };
 
     if (fulfillmentUnsupported) {
       res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
@@ -699,6 +765,8 @@ export async function handleOrdersFulfillment(req, res) {
           channel,
           range,
           current: { from: range_.from, to: range_.to },
+          previous: { from: comparison.from, to: comparison.to },
+          compareTo,
           unsupportedChannel: true,
           limitationNote:
             "This methodology (order-to-invoice fulfillment matching) is validated for HMRPH Online only — TikTok and Shopee orders don't flow through the same order/cancellation source table, so no equivalent lifecycle can be computed for them here without separate validation. Returns below still reflects this channel.",
@@ -710,12 +778,13 @@ export async function handleOrdersFulfillment(req, res) {
         cancellations: null,
         cancellationByPeriodDaily: [],
         unresolvedOrders: [],
-        returns,
+        returns: returnsWithComparison,
         dataQuality: [],
       });
     }
 
     const completionRate = safeDivide(m.fulfilled, m.realOrdersReceived) * 100;
+    const prevCompletionRate = safeDivide(mPrev.fulfilled, mPrev.realOrdersReceived) * 100;
 
     // Fulfillment Status Breakdown — reconciles exactly to Real Orders
     // Received (Fulfilled + Cancelled + Still Awaiting). "Cancelled" here
@@ -885,6 +954,22 @@ export async function handleOrdersFulfillment(req, res) {
     // stayingCancelled ("True Cancellation" equivalent) over realOrdersReceived,
     // matching the Fulfillment Status Breakdown and Executive Overview.
     const cancellationRate = safeDivide(m.stayingCancelled.length, m.realOrdersReceived) * 100;
+    const prevCancellationRate = safeDivide(mPrev.stayingCancelled.length, mPrev.realOrdersReceived) * 100;
+
+    // System-Initiated Share / No Reason Logged — reuses byCategory (built
+    // above from the same allRealCancelledOrders/stayingCancelled
+    // population as everywhere else on this page) rather than re-deriving
+    // the frontend used to compute this client-side from
+    // cancellations.reasons; moved server-side so it can carry a real
+    // previous-period comparison the same way every other scorecard here
+    // does. Previous period re-categorizes mPrev.stayingCancelled the same
+    // way (each order already carries its own .category from
+    // computeHmrphOnlineLifecycle's classification loop).
+    const curSystemInitiatedShare = safeDivide(byCategory.get("System-Initiated (Expired)").count, allRealCancelledOrders.length) * 100;
+    const curCancelNoReasonCount = byCategory.get("No Reason Logged").count;
+    const prevSystemInitiatedCount = mPrev.stayingCancelled.filter((o) => o.category === "System-Initiated (Expired)").length;
+    const prevCancelNoReasonCount = mPrev.stayingCancelled.filter((o) => o.category === "No Reason Logged").length;
+    const prevSystemInitiatedShare = safeDivide(prevSystemInitiatedCount, mPrev.stayingCancelled.length) * 100;
 
     // Still Awaiting Fulfillment, split by payment_status — same shape as
     // the methodology's "Paid, no invoice" / "Pending (COD), no invoice"
@@ -954,6 +1039,8 @@ export async function handleOrdersFulfillment(req, res) {
         channel: "HMRPH Online",
         range,
         current: { from: range_.from, to: range_.to },
+        previous: { from: comparison.from, to: comparison.to },
+        compareTo,
         methodologyNote:
           "Fulfillment is determined from invoices in xv3.mart_net_sales (direct order_no match, or a probable match by customer name + date + fee-adjusted amount), never from order_status — see dataQuality for known matching caveats.",
         generatedAt: new Date().toISOString(),
@@ -961,14 +1048,16 @@ export async function handleOrdersFulfillment(req, res) {
       kpis: {
         realOrdersReceived: {
           value: m.realOrdersReceived,
+          previous: mPrev.realOrdersReceived,
+          delta: pctDelta(m.realOrdersReceived, mPrev.realOrdersReceived),
           sub: `${m.rawDedupedCount} raw deduped`,
           raw: m.rawDedupedCount,
           devTestExcluded: m.devTestOrders.length,
           customerInitiatedExcluded: m.customerInitiatedCancelled.length,
           duplicateRetriesExcluded: m.duplicateRetryOrders.length,
         },
-        fulfilledOrders: { value: m.fulfilled },
-        completionRate: { value: completionRate },
+        fulfilledOrders: { value: m.fulfilled, previous: mPrev.fulfilled, delta: pctDelta(m.fulfilled, mPrev.fulfilled) },
+        completionRate: { value: completionRate, previous: prevCompletionRate, delta: pctDelta(completionRate, prevCompletionRate) },
         cancelledOrders: {
           // "Cancelled" (the headline figure and rate) is stayingCancelled
           // only — see cancellationRate's note above. allRealCancelled (both
@@ -977,16 +1066,37 @@ export async function handleOrdersFulfillment(req, res) {
           // "21 total, 4 re-ordered, 17 True Cancellation" picture rather
           // than silently hiding the excluded 4.
           value: m.stayingCancelled.length,
+          previous: mPrev.stayingCancelled.length,
+          delta: pctDelta(m.stayingCancelled.length, mPrev.stayingCancelled.length),
           allRealCancelled: m.allRealCancelled,
           reordered: m.customerInitiatedCancelled.length,
           raw: rawCancelledCount,
           devTestExcluded: devTestCancelledCount,
           cancellationRate,
         },
+        // Own top-level entry (rather than only nested in cancelledOrders)
+        // so the Cancellation tab's "Cancellation Rate" scorecard gets its
+        // own previous/delta, same as every other card on this page.
+        cancellationRate: { value: cancellationRate, previous: prevCancellationRate, delta: pctDelta(cancellationRate, prevCancellationRate) },
         stillAwaitingFulfillment: {
           value: m.stillAwaiting,
+          previous: mPrev.stillAwaiting,
+          delta: pctDelta(m.stillAwaiting, mPrev.stillAwaiting),
           paid: { count: paidUnresolved.length, value: sumAmount(paidUnresolved) },
           pending: { count: pendingUnresolved.length, value: sumAmount(pendingUnresolved) },
+        },
+        // Moved server-side (previously computed client-side from
+        // cancellations.reasons) so both can carry a real previous-period
+        // comparison like every other scorecard here.
+        systemInitiatedShare: {
+          value: curSystemInitiatedShare,
+          previous: prevSystemInitiatedShare,
+          delta: pctDelta(curSystemInitiatedShare, prevSystemInitiatedShare),
+        },
+        cancelNoReasonCount: {
+          value: curCancelNoReasonCount,
+          previous: prevCancelNoReasonCount,
+          delta: pctDelta(curCancelNoReasonCount, prevCancelNoReasonCount),
         },
       },
       lifecycle,
@@ -994,7 +1104,7 @@ export async function handleOrdersFulfillment(req, res) {
       cancellations,
       cancellationByPeriodDaily,
       unresolvedOrders,
-      returns,
+      returns: returnsWithComparison,
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
         `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 7 categories (everything except System-Initiated (Expired) and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,

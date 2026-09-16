@@ -125,6 +125,34 @@ function safeDivide(a, b) {
   return b ? a / b : 0;
 }
 
+// "Compare to" — an explicit, independent choice of comparison basis for
+// every scorecard's bottom-of-card delta, decoupled from the Date Range
+// filter itself — same control/pattern as Customer Analytics and
+// Executive Overview (see resolveComparisonWindow in
+// api/_hrh-orders-fulfillment.js / api/_hrh-barcode-analytics.js): Day
+// shifts the whole selected window back 1 day, Week back 7 days, Month
+// back 1 calendar month, regardless of the window's own length or type.
+// One control drives every sub-tab (Fulfillment/Warehouse Operations/
+// Cancellation/Returns all fetch with the same compareTo).
+const COMPARE_OPTIONS = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+];
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatIsoDateLabel(iso) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${SHORT_MONTHS[m - 1]} ${d}, ${y}`;
+}
+function effectivePeriodLabel(period) {
+  if (!period) return null;
+  const from = formatIsoDateLabel(period.from);
+  const to = formatIsoDateLabel(period.to);
+  if (!from || !to) return null;
+  return from === to ? from : `${from} – ${to}`;
+}
+
 // Auto granularity for "Cancelled Orders by Period" — WTD/MTD/YTD map
 // directly to day/week/month (their own typical span always falls in
 // that bucket anyway); Custom derives it from the actual selected span
@@ -340,6 +368,7 @@ export default function OrdersFulfillment({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [subTab, setSubTab] = useState("fulfillment");
+  const [compareTo, setCompareTo] = useState("week");
   const [fulfillmentBucket, setFulfillmentBucket] = useState("day");
   const [cancellationBucket, setCancellationBucket] = useState("day");
   const [returnsBucket, setReturnsBucket] = useState("day");
@@ -359,11 +388,11 @@ export default function OrdersFulfillment({ filters }) {
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p, signal) => {
+  const load = useCallback(async (ch, p, cmp, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p, report: "ordersFulfillment" });
+      const qs = new URLSearchParams({ channel: ch, ...p, compareTo: cmp, report: "ordersFulfillment" });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -377,11 +406,11 @@ export default function OrdersFulfillment({ filters }) {
     }
   }, []);
 
-  const loadWarehouseOps = useCallback(async (p, signal) => {
+  const loadWarehouseOps = useCallback(async (p, cmp, signal) => {
     setWhLoading(true);
     setWhError(null);
     try {
-      const qs = new URLSearchParams({ ...p, report: "barcodeAnalytics" });
+      const qs = new URLSearchParams({ ...p, compareTo: cmp, report: "barcodeAnalytics" });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -398,16 +427,16 @@ export default function OrdersFulfillment({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    load(channel, params, controller.signal);
+    load(channel, params, compareTo, controller.signal);
     return () => controller.abort();
-  }, [channel, params, ready, load]);
+  }, [channel, params, compareTo, ready, load]);
 
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    loadWarehouseOps(params, controller.signal);
+    loadWarehouseOps(params, compareTo, controller.signal);
     return () => controller.abort();
-  }, [params, ready, loadWarehouseOps]);
+  }, [params, compareTo, ready, loadWarehouseOps]);
 
   const fulfillmentPerf = bucketRows(data?.fulfillmentTrend, fulfillmentBucket, ["received", "fulfilled", "cancelled", "awaiting"]).map((r) => ({
     ...r,
@@ -458,10 +487,6 @@ export default function OrdersFulfillment({ filters }) {
   const returnsByMethodSegments =
     data?.returns?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
   const lifecycleCancelledInDenominator = data?.lifecycle?.find((l) => l.label === "Cancelled")?.value ?? 0;
-  const systemInitiatedShare = data?.cancellations
-    ? safeDivide(data.cancellations.reasons.find((r) => r.category === "System-Initiated (Expired)")?.count || 0, data.cancellations.total) * 100
-    : 0;
-  const cancelNoReasonCount = data?.cancellations?.reasons.find((r) => r.category === "No Reason Logged")?.count || 0;
 
   const cancelDrilldownOrders = drilldown?.kind === "cancellation" ? (data?.cancellations?.orders || []).filter((o) => o.category === drilldown.category) : [];
   const returnDrilldownOrders = drilldown?.kind === "return" ? (data?.returns?.orders || []).filter((o) => o.category === drilldown.category) : [];
@@ -469,8 +494,27 @@ export default function OrdersFulfillment({ filters }) {
 
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Orders &amp; Fulfillment
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
+          Orders &amp; Fulfillment
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+              Compare to
+            </span>
+            <TrendBucketPills value={compareTo} onChange={setCompareTo} options={COMPARE_OPTIONS} />
+          </div>
+          {data?.meta?.current && !data.meta?.unsupportedChannel && (
+            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+              {effectivePeriodLabel(data.meta.current)}
+              <span className="font-normal" style={{ color: hrh.muted }}>
+                {" "}
+                vs {effectivePeriodLabel(data.meta.previous)}
+              </span>
+            </span>
+          )}
+        </div>
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
@@ -498,6 +542,8 @@ export default function OrdersFulfillment({ filters }) {
                 label="Real Orders Received"
                 icon={ICONS.receipt}
                 value={formatNum(data.kpis.realOrdersReceived.value)}
+                delta={data.kpis.realOrdersReceived.delta}
+                previousLabel={formatNum(data.kpis.realOrdersReceived.previous)}
                 sub={data.kpis.realOrdersReceived.sub}
                 sparkline={rawFulfillmentTrend.map((r) => r.received)}
               />
@@ -506,16 +552,27 @@ export default function OrdersFulfillment({ filters }) {
               label="Fulfilled Orders"
               icon={ICONS.checkCircle}
               value={formatNum(data.kpis.fulfilledOrders.value)}
+              delta={data.kpis.fulfilledOrders.delta}
+              previousLabel={formatNum(data.kpis.fulfilledOrders.previous)}
               sparkline={rawFulfillmentTrend.map((r) => r.fulfilled)}
             />
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("completion")}>
-              <KpiCard label="Completion Rate" icon={ICONS.percent} value={formatPct(data.kpis.completionRate.value)} sparkline={completionRateSpark} />
+              <KpiCard
+                label="Completion Rate"
+                icon={ICONS.percent}
+                value={formatPct(data.kpis.completionRate.value)}
+                delta={data.kpis.completionRate.delta}
+                previousLabel={formatPct(data.kpis.completionRate.previous)}
+                sparkline={completionRateSpark}
+              />
             </button>
             <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("cancelled")}>
               <KpiCard
                 label="Cancelled Orders"
                 icon={ICONS.alertTriangle}
                 value={formatNum(data.kpis.cancelledOrders.value)}
+                delta={data.kpis.cancelledOrders.delta}
+                previousLabel={formatNum(data.kpis.cancelledOrders.previous)}
                 sparkline={rawFulfillmentTrend.map((r) => r.cancelled)}
               />
             </button>
@@ -524,6 +581,8 @@ export default function OrdersFulfillment({ filters }) {
                 label="Still Awaiting Fulfillment"
                 icon={ICONS.clock}
                 value={formatNum(data.kpis.stillAwaitingFulfillment.value)}
+                delta={data.kpis.stillAwaitingFulfillment.delta}
+                previousLabel={formatNum(data.kpis.stillAwaitingFulfillment.previous)}
                 sparkline={rawFulfillmentTrend.map((r) => r.awaiting)}
               />
             </button>
@@ -575,14 +634,41 @@ export default function OrdersFulfillment({ filters }) {
                   label="Orders Processed"
                   icon={ICONS.cart}
                   value={formatNum(whData.kpis.ordersProcessed.value)}
+                  delta={whData.kpis.ordersProcessed.delta}
+                  previousLabel={formatNum(whData.kpis.ordersProcessed.previous)}
                   sparkline={rawDailyVolume.map((r) => r.orders)}
                 />
                 {/* No daily breakdown exists for these 3 averages (whData has
                     no per-day pick/QC/dispatch time series) — icon only,
-                    no sparkline, rather than a fabricated trend. */}
-                <KpiCard label="Avg Pick Time" icon={ICONS.clock} value={formatDuration(whData.kpis.avgPickTime.value)} sub="pick → QC" />
-                <KpiCard label="Avg QC Time" icon={ICONS.clock} value={formatDuration(whData.kpis.avgQcTime.value)} sub="QC → waybill" />
-                <KpiCard label="Avg Pick-to-Dispatch" icon={ICONS.clock} value={formatDuration(whData.kpis.avgPickToDispatch.value)} sub="picking start → dispatch" />
+                    no sparkline, rather than a fabricated trend. Delta is
+                    still a plain %-change vs the "Compare to" period same
+                    as every other card — lower is better for a duration,
+                    but the sign/color convention is left consistent
+                    dashboard-wide rather than special-cased here. */}
+                <KpiCard
+                  label="Avg Pick Time"
+                  icon={ICONS.clock}
+                  value={formatDuration(whData.kpis.avgPickTime.value)}
+                  delta={whData.kpis.avgPickTime.delta}
+                  previousLabel={formatDuration(whData.kpis.avgPickTime.previous)}
+                  sub="pick → QC"
+                />
+                <KpiCard
+                  label="Avg QC Time"
+                  icon={ICONS.clock}
+                  value={formatDuration(whData.kpis.avgQcTime.value)}
+                  delta={whData.kpis.avgQcTime.delta}
+                  previousLabel={formatDuration(whData.kpis.avgQcTime.previous)}
+                  sub="QC → waybill"
+                />
+                <KpiCard
+                  label="Avg Pick-to-Dispatch"
+                  icon={ICONS.clock}
+                  value={formatDuration(whData.kpis.avgPickToDispatch.value)}
+                  delta={whData.kpis.avgPickToDispatch.delta}
+                  previousLabel={formatDuration(whData.kpis.avgPickToDispatch.previous)}
+                  sub="picking start → dispatch"
+                />
               </KpiRow>
 
               <Panel
@@ -649,21 +735,35 @@ export default function OrdersFulfillment({ filters }) {
                 label="Total Cancelled (Real)"
                 icon={ICONS.alertTriangle}
                 value={formatNum(data.kpis.cancelledOrders.value)}
+                delta={data.kpis.cancelledOrders.delta}
+                previousLabel={formatNum(data.kpis.cancelledOrders.previous)}
                 sparkline={rawFulfillmentTrend.map((r) => r.cancelled)}
               />
             </button>
             <KpiCard
               label="Cancellation Rate"
               icon={ICONS.percent}
-              value={formatPct(data.kpis.cancelledOrders.cancellationRate)}
+              value={formatPct(data.kpis.cancellationRate.value)}
+              delta={data.kpis.cancellationRate.delta}
+              previousLabel={formatPct(data.kpis.cancellationRate.previous)}
               sub="of Real Orders Received"
               sparkline={cancellationRateSpark}
             />
-            {/* System-Initiated Share / No Reason Logged: whole-window
-                category breakdowns only (data.cancellations.reasons has no
-                daily series) — icon only. */}
-            <KpiCard label="System-Initiated Share" icon={ICONS.flag} value={formatPct(systemInitiatedShare)} sub="expired, not customer choice" />
-            <KpiCard label="No Reason Logged" icon={ICONS.flag} value={formatNum(cancelNoReasonCount)} />
+            <KpiCard
+              label="System-Initiated Share"
+              icon={ICONS.flag}
+              value={formatPct(data.kpis.systemInitiatedShare.value)}
+              delta={data.kpis.systemInitiatedShare.delta}
+              previousLabel={formatPct(data.kpis.systemInitiatedShare.previous)}
+              sub="expired, not customer choice"
+            />
+            <KpiCard
+              label="No Reason Logged"
+              icon={ICONS.flag}
+              value={formatNum(data.kpis.cancelNoReasonCount.value)}
+              delta={data.kpis.cancelNoReasonCount.delta}
+              previousLabel={formatNum(data.kpis.cancelNoReasonCount.previous)}
+            />
           </KpiRow>
 
           <Panel
@@ -734,6 +834,8 @@ export default function OrdersFulfillment({ filters }) {
               label="Total Sales Invoiced"
               icon={ICONS.receipt}
               value={formatNum(data.returns.kpis.totalSalesInvoiced.value)}
+              delta={data.returns.kpis.totalSalesInvoiced.delta}
+              previousLabel={formatNum(data.returns.kpis.totalSalesInvoiced.previous)}
               sub={data.returns.kpis.totalSalesInvoiced.sub}
               sparkline={rawReturnsTrend.map((r) => r.salesCount)}
             />
@@ -741,11 +843,27 @@ export default function OrdersFulfillment({ filters }) {
               label="Total Returns"
               icon={ICONS.rotateCcw}
               value={formatNum(data.returns.kpis.totalReturns.value)}
+              delta={data.returns.kpis.totalReturns.delta}
+              previousLabel={formatNum(data.returns.kpis.totalReturns.previous)}
               sub={data.returns.kpis.totalReturns.sub}
               sparkline={rawReturnsTrend.map((r) => r.returns)}
             />
-            <KpiCard label="Return Rate (by count)" icon={ICONS.percent} value={formatPct(data.returns.kpis.returnRateByCount.value)} sparkline={returnRateByCountSpark} />
-            <KpiCard label="Return Rate (by value)" icon={ICONS.percent} value={formatPct(data.returns.kpis.returnRateByValue.value)} sparkline={returnRateByValueSpark} />
+            <KpiCard
+              label="Return Rate (by count)"
+              icon={ICONS.percent}
+              value={formatPct(data.returns.kpis.returnRateByCount.value)}
+              delta={data.returns.kpis.returnRateByCount.delta}
+              previousLabel={formatPct(data.returns.kpis.returnRateByCount.previous)}
+              sparkline={returnRateByCountSpark}
+            />
+            <KpiCard
+              label="Return Rate (by value)"
+              icon={ICONS.percent}
+              value={formatPct(data.returns.kpis.returnRateByValue.value)}
+              delta={data.returns.kpis.returnRateByValue.delta}
+              previousLabel={formatPct(data.returns.kpis.returnRateByValue.previous)}
+              sparkline={returnRateByValueSpark}
+            />
           </KpiRow>
 
           <Panel

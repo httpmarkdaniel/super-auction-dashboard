@@ -103,6 +103,32 @@ function resolveRange(range, fromParam, toParam) {
   return { from: mondayOfWeek(today), to: today }; // wtd (default)
 }
 
+// "Compare to" — same Day/Week/Month comparison-window logic as
+// api/_hrh-customer-analytics.js's resolveComparisonWindow, duplicated
+// per this codebase's convention (each api/hrh-*.js file keeps its own
+// small self-contained date helpers).
+function daysInMonth(year, month1Based) {
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
+}
+function shiftMonthsClampedISO(iso, deltaMonths) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total0 = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total0 / 12);
+  const nm1 = (((total0 % 12) + 12) % 12) + 1;
+  const nd = Math.min(d, daysInMonth(ny, nm1));
+  return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function resolveComparisonWindow(current, compareTo) {
+  const { from, to } = current;
+  if (compareTo === "day") return { from: addDaysISO(from, -1), to: addDaysISO(to, -1) };
+  if (compareTo === "month") return { from: shiftMonthsClampedISO(from, -1), to: shiftMonthsClampedISO(to, -1) };
+  return { from: addDaysISO(from, -7), to: addDaysISO(to, -7) }; // "week" (default)
+}
+function pctDelta(current, previous) {
+  if (!previous) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
 const DIST_BUCKETS = [
   { label: "≤1h", where: "hrs <= 1" },
   { label: "1-6h", where: "hrs > 1 AND hrs <= 6" },
@@ -311,10 +337,46 @@ async function computeLifecycleFunnel(from, to) {
   };
 }
 
+// Orders processed in the window (by order_placed_at) plus avg duration
+// for each real stage: pick→QC, QC→waybill, and total pick→dispatch
+// (picking_started_at to dispatch_finalized_at, computed directly rather
+// than summed from the intermediate stage columns, so it can't drift from
+// nulls in any one intermediate stage). Extracted into its own function so
+// the "Compare to" previous period can call it a second time with a
+// shifted window instead of duplicating the query inline.
+async function fetchWarehouseKpis(from, to) {
+  const rows = await client
+    .query({
+      query: `
+        SELECT
+          count() AS orders,
+          avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
+          avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds,
+          avgIf(
+            dateDiff('second', picking_started_at, dispatch_finalized_at),
+            picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
+          ) AS avg_pick_to_dispatch_seconds
+        FROM xv3.mart_order_fulfilment_journey
+        WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
+      `,
+      query_params: { from, to },
+      format: "JSONEachRow",
+    })
+    .then((r) => r.json());
+  const k = rows[0] || {};
+  return {
+    orders: toNum(k.orders),
+    avgPickSeconds: toNum(k.avg_pick_seconds),
+    avgQcSeconds: toNum(k.avg_qc_seconds),
+    avgPickToDispatchSeconds: toNum(k.avg_pick_to_dispatch_seconds),
+  };
+}
+
 export async function handleBarcodeAnalytics(req, res) {
   try {
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : "week";
 
     let range_;
     try {
@@ -322,35 +384,15 @@ export async function handleBarcodeAnalytics(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
+    const comparison = resolveComparisonWindow(range_, compareTo);
 
-    // All 5 queries below (plus the lifecycle funnel's own 3) are
+    // All 6 queries below (plus the lifecycle funnel's own 3) are
     // independent of each other — same date range, different tables/
     // aggregations, nothing depends on another's result — so they're fired
     // together via Promise.all instead of one round-trip at a time.
-    const [kpiRows, pickerRows, qcRows, distRows, dailyRows, lifecycleFunnel] = await Promise.all([
-      // KPIs — orders processed in the window (by order_placed_at) plus avg
-      // duration for each real stage: pick→QC, QC→waybill, and total
-      // pick→dispatch (picking_started_at to dispatch_finalized_at,
-      // computed directly rather than summed from the intermediate stage
-      // columns, so it can't drift from nulls in any one intermediate stage).
-      client
-        .query({
-          query: `
-            SELECT
-              count() AS orders,
-              avgIf(picking_to_qc_seconds, picking_to_qc_seconds IS NOT NULL) AS avg_pick_seconds,
-              avgIf(qc_to_waybill_seconds, qc_to_waybill_seconds IS NOT NULL) AS avg_qc_seconds,
-              avgIf(
-                dateDiff('second', picking_started_at, dispatch_finalized_at),
-                picking_started_at IS NOT NULL AND dispatch_finalized_at IS NOT NULL
-              ) AS avg_pick_to_dispatch_seconds
-            FROM xv3.mart_order_fulfilment_journey
-            WHERE toDate(order_placed_at) BETWEEN {from:String} AND {to:String}
-          `,
-          query_params: { from: range_.from, to: range_.to },
-          format: "JSONEachRow",
-        })
-        .then((r) => r.json()),
+    const [kCur, kPrev, pickerRows, qcRows, distRows, dailyRows, lifecycleFunnel] = await Promise.all([
+      fetchWarehouseKpis(range_.from, range_.to),
+      fetchWarehouseKpis(comparison.from, comparison.to),
       // Picker Performance — real named pickers, ranked by volume. Excludes
       // null picker_name (a single row store-wide, verified) rather than
       // showing an "Unassigned" bucket with nothing meaningful in it.
@@ -431,7 +473,6 @@ export async function handleBarcodeAnalytics(req, res) {
         .then((r) => r.json()),
       computeLifecycleFunnel(range_.from, range_.to),
     ]);
-    const k = kpiRows[0] || {};
     const pickerPerformance = pickerRows.map((r) => ({
       picker: r.picker_name,
       orders: toNum(r.orders),
@@ -463,15 +504,24 @@ export async function handleBarcodeAnalytics(req, res) {
       meta: {
         range,
         current: { from: range_.from, to: range_.to },
+        previous: { from: comparison.from, to: comparison.to },
+        compareTo,
         methodologyNote:
           "Real warehouse-ops timestamps from xv3.mart_order_fulfilment_journey (picking, QC, packing, dispatch) — HRH Online's own fulfillment operations across all 3 channels (this table has no store/channel column, but is exclusively HRH Online's, verified elsewhere). Pick Rate / picking_status from a different table is intentionally excluded — HMR MART runs its own WMS.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        ordersProcessed: { value: toNum(k.orders) },
-        avgPickTime: { value: toNum(k.avg_pick_seconds) },
-        avgQcTime: { value: toNum(k.avg_qc_seconds) },
-        avgPickToDispatch: { value: toNum(k.avg_pick_to_dispatch_seconds) },
+        ordersProcessed: { value: kCur.orders, previous: kPrev.orders, delta: pctDelta(kCur.orders, kPrev.orders) },
+        // Lower is better for these 3 durations — delta is still a plain
+        // %-change (current vs previous), the frontend decides how to
+        // color/arrow it, same as every other timing metric elsewhere.
+        avgPickTime: { value: kCur.avgPickSeconds, previous: kPrev.avgPickSeconds, delta: pctDelta(kCur.avgPickSeconds, kPrev.avgPickSeconds) },
+        avgQcTime: { value: kCur.avgQcSeconds, previous: kPrev.avgQcSeconds, delta: pctDelta(kCur.avgQcSeconds, kPrev.avgQcSeconds) },
+        avgPickToDispatch: {
+          value: kCur.avgPickToDispatchSeconds,
+          previous: kPrev.avgPickToDispatchSeconds,
+          delta: pctDelta(kCur.avgPickToDispatchSeconds, kPrev.avgPickToDispatchSeconds),
+        },
       },
       pickerPerformance,
       qcThroughput,
