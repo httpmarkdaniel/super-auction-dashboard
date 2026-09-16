@@ -2,21 +2,20 @@ import { Children } from "react";
 import { hrh } from "../theme";
 
 // Tiny inline trend line — no axes/tooltip/library, just a shape-of-the-
-// trend cue in the corner of a KpiCard. Always green or red, never a
-// neutral gray. `up`: true/false when the card has a real period-over-
-// period delta — the line then matches THAT comparison (same direction
-// as the ▲/▼ badge below it), since the delta is the actual "did it
-// increase or decrease" answer, and can disagree with the shape of the
-// days shown here (e.g. down 39% vs last month while still trending
-// up across the last few days of this one). Only when there's no delta
-// at all (a handful of cards, like Voucher Assisted Sales, have no
-// previous-period comparison in their data) does this fall back to the
-// line's own last-vs-first value. `values`: plain array of numbers,
-// oldest first.
-function Sparkline({ values, up, width = 56, height = 22 }) {
+// trend cue in the corner of a KpiCard. Color always matches the LINE'S
+// OWN shape (last value vs. first — the same comparison that determines
+// which way it visually slopes, since higher values plot higher on
+// screen): green so it reads as "rising", red so it reads as "falling",
+// never a color that contradicts what the line visually does. Not tied
+// to the card's period-over-period delta badge (the ▲/▼ + % below) —
+// that's a separate, correct-on-its-own comparison (e.g. "down 39% vs
+// last month") that can legitimately disagree with the shape of just the
+// last few days shown here; forcing this line's color to match a
+// question it isn't answering was more confusing than useful. `values`:
+// plain array of numbers, oldest first.
+function Sparkline({ values, width = 56, height = 22 }) {
   if (!values || values.length < 2) return null;
-  const trendUp = up === undefined ? values[values.length - 1] >= values[0] : up;
-  const color = trendUp ? hrh.good : hrh.bad;
+  const color = values[values.length - 1] >= values[0] ? hrh.good : hrh.bad;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -62,7 +61,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, sparkli
         <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
           {value}
         </div>
-        {sparkline && sparkline.length > 1 && <Sparkline values={sparkline} up={hasDelta ? positive : undefined} />}
+        {sparkline && sparkline.length > 1 && <Sparkline values={sparkline} />}
       </div>
       {(hasDelta || sub) && (
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] flex-wrap">
