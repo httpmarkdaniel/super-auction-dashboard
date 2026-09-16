@@ -218,8 +218,22 @@ export default function TrafficConversion({ filters }) {
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Scoped Conversion Funnel" subtitle="Page Views (hmr.ph/shop/ONP) -> Purchases (real HRH Online website orders)">
+            <Panel
+              title="Scoped Conversion Funnel"
+              subtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
+            >
               <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} />
+              <div className="mt-3.5 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
+                  Total Revenue
+                </span>
+                <span className="font-display text-[16px] tabular-nums" style={{ color: hrh.ink }}>
+                  {formatPeso(data.totalRevenue)}
+                </span>
+              </div>
+              <p className="text-[10.5px] mt-1.5" style={{ color: hrh.muted }}>
+                Not a funnel stage — pesos aren't the same unit as the counts above, so it's shown separately rather than distorting the bar widths.
+              </p>
             </Panel>
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
               <EmptyState label="No ClickHouse table crosses this store's pages with device type — would need a direct GA4 Data API query, not yet wired up." />

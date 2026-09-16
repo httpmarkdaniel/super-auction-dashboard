@@ -35,19 +35,39 @@ const client = createClient({
 //   - "Sessions": ga4_pages_path_report (GA4's "Pages and screens" report)
 //     has no sessions metric, only totalUsers/screenPageViews/eventCount —
 //     Page Views is used as the traffic KPI instead.
-//   - Add to Cart / Begin Checkout: these live only in ga4_events_report,
-//     which is aggregated by (date, eventName) with NO page dimension at
-//     all — there is no column to join it back to pagePath by. No GA4
-//     table anywhere in this warehouse carries page + event together.
-// Given that, "Purchases" and "Revenue" below are NOT GA4 purchase events —
-// they're the real, already-correctly-scoped HRH Online website order data
-// (xv3.mart_net_sales, store_name = HRH ONLINE, sales_channel = HMRPH
-// ONLINE — the same channel/store scope Executive Overview and Sales
-// Analytics already use for this store's own website channel, as opposed
-// to TikTok/Shopee which don't drive traffic to hmr.ph). The funnel is
-// therefore 2 stages (Page Views -> Purchases), not the original 5 — the
-// middle stages have no honest scoped source and are omitted rather than
-// shown as unscoped whole-site numbers or fabricated placeholders.
+//   - Add to Cart: lives only in ga4_events_report, which is aggregated by
+//     (date, eventName) with NO page dimension at all — there is no column
+//     to join it back to pagePath by. No GA4 table anywhere in this
+//     warehouse carries page + event together, so this stage is omitted
+//     entirely rather than shown as an unscoped whole-site number.
+//
+// Re-investigated again 2026-09-16 for a fuller funnel: "Begin Checkout"
+// and "Purchase" turn out to have a genuinely scoped real substitute after
+// all — xv3.mart_xv3_order_report (store_name = HRH ONLINE, same store
+// scope as everywhere else) carries `order_status`/`payment_status` per
+// order. Every row in that table IS a completed checkout (an order record
+// only exists once checkout finished), and `payment_status = 'Paid'` is a
+// real, separate signal from "order exists" — so the funnel's Checkout and
+// Payment Confirmed stages count orders from THIS table, deliberately
+// counting every order regardless of what happened to it later (unlike
+// the "Purchases" KPI and "Real Orders Received" elsewhere on the
+// dashboard, which are net of cancellations by design — see
+// hrh-online-metric-definitions memory). Don't "fix" these two numbers to
+// match Purchases/Real Orders Received if they look different — they're
+// answering a different question (did checkout/payment happen at all,
+// not "how many orders net out to real sales").
+//
+// "Purchases"/"Revenue" in the KPI row stay on xv3.mart_net_sales (store
+// HRH ONLINE, sales_channel HMRPH ONLINE) — same locked GMV/Orders
+// definition Executive Overview and Sales Analytics use — rather than
+// switching to mart_xv3_order_report, so this page's headline numbers
+// don't silently diverge from the rest of the dashboard's contract.
+//
+// Revenue is NOT a funnel bar: funnel width is normally proportional to a
+// raw count of the same unit across every stage (page views, users,
+// orders) — pesos are a different scale entirely and would break that
+// scaling. Total Revenue is shown as its own callout under the funnel
+// panel instead, per explicit decision.
 //
 // ga4_pages_path_report is a ReplacingMergeTree keyed on
 // (property_id, date, pagePath), versioned by _airbyte_extracted_at — same
@@ -209,7 +229,7 @@ export async function handleTrafficAnalytics(req, res) {
     const prevFromKey = isoToYyyymmdd(previous.from);
     const prevToKey = isoToYyyymmdd(previous.to);
 
-    const [pageRows, salesRows] = await Promise.all([
+    const [pageRows, salesRows, orderStatusRows] = await Promise.all([
       // Users + Page Views on HRH Online's own storefront pages only (see
       // file-header comment) — one query spanning the whole
       // previous+current super-range, grouped by date.
@@ -248,6 +268,25 @@ export async function handleTrafficAnalytics(req, res) {
             GROUP BY transaction_date
           `,
           query_params: { store: HRH_STORE, channels: HMRPH_ONLINE_CHANNEL, prevFrom: previous.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Checkout + Payment Confirmed funnel stages (see file-header comment
+      // on why these deliberately count every order regardless of later
+      // cancellation, unlike Purchases/Real Orders Received elsewhere).
+      client
+        .query({
+          query: `
+            SELECT
+              toDate(created_at) AS d,
+              count() AS orders,
+              countIf(payment_status = 'Paid') AS paid
+            FROM xv3.mart_xv3_order_report
+            WHERE store_name = {store:String}
+              AND toDate(created_at) BETWEEN {prevFrom:String} AND {curTo:String}
+            GROUP BY d
+          `,
+          query_params: { store: HRH_STORE, prevFrom: previous.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -310,6 +349,17 @@ export async function handleTrafficAnalytics(req, res) {
       }
     }
 
+    // --- Aggregate orderStatusRows into current-window Checkout/Payment
+    // Confirmed funnel counts (see file-header comment on scope). ---
+    let curCheckoutOrders = 0;
+    let curPaidOrders = 0;
+    for (const r of orderStatusRows) {
+      if (r.d >= current.from && r.d <= current.to) {
+        curCheckoutOrders += toNum(r.orders);
+        curPaidOrders += toNum(r.paid);
+      }
+    }
+
     const curConversionRate = safeDivide(curOrders, curPageViews) * 100;
     const prevConversionRate = safeDivide(prevOrders, prevPageViews) * 100;
     const curRevPerView = safeDivide(curGmv, curPageViews);
@@ -326,12 +376,17 @@ export async function handleTrafficAnalytics(req, res) {
       pageViewsPerUser: { value: curViewsPerUser, delta: pctDelta(curViewsPerUser, prevViewsPerUser) },
     };
 
-    // --- Conversion Funnel (current window only) — 2 stages, see
-    // file-header comment on why Add to Cart/Begin Checkout are omitted.
+    // --- Conversion Funnel (current window only) — 4 count-based stages,
+    // see file-header comment on why Add to Cart is omitted and why
+    // Checkout/Payment Confirmed come from a different table (and can
+    // legitimately differ from the Purchases KPI). Revenue is NOT a stage
+    // here — shown as `totalRevenue` instead, see file-header comment.
     // Dropoff % is computed client-side by FunnelList, not here. ---
     const funnel = [
       { stage: "Page Views", count: curPageViews },
-      { stage: "Purchases", count: curOrders },
+      { stage: "Users", count: curUsers },
+      { stage: "Checkout", count: curCheckoutOrders },
+      { stage: "Payment Confirmed", count: curPaidOrders },
     ];
 
     // New vs Returning Users (current window only) — see the curReturningUsers
@@ -369,11 +424,12 @@ export async function handleTrafficAnalytics(req, res) {
         previous,
         property: GA4_PROPERTY_ID,
         scopeNote:
-          "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Purchases/Revenue: real HRH Online website orders (HMRPH Online channel), not GA4 purchase events — those can't be scoped to a single store in this data source. Add to Cart/Begin Checkout are omitted, not zeroed: no scoped source exists for them.",
+          "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Checkout/Payment Confirmed: real order-status counts from HRH Online's own order records (every order regardless of later cancellation — a different question from the Purchases KPI, which nets out cancellations). Purchases/Revenue: real HRH Online website orders (HMRPH Online channel), not GA4 purchase events — those can't be scoped to a single store in this data source. Add to Cart is omitted, not zeroed: no scoped source exists for it anywhere in this warehouse.",
         generatedAt: new Date().toISOString(),
       },
       kpis,
       funnel,
+      totalRevenue: curGmv,
       newVsReturning,
       dailyTrend,
     });
