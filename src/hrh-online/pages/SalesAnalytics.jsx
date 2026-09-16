@@ -17,10 +17,13 @@ import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 // stacked by channel (HMRPH Online/TikTok/Shopee) — no Orders/Units here,
 // per explicit request.
 const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
+// Colors per explicit request, not each brand's own real color — just this
+// chart's own consistent code: HMRPH Online = dark blue, TikTok = orange
+// (hrh.accent, HMR's own brand orange), Shopee = green (hrh.good).
 const SALES_TREND_CHANNEL_SERIES = [
   { key: "gmvHmrphOnline", name: "HMRPH Online", color: hrh.series[0] },
-  { key: "gmvTiktok", name: "TikTok", color: hrh.series[1] },
-  { key: "gmvShopee", name: "Shopee", color: hrh.series[2] },
+  { key: "gmvTiktok", name: "TikTok", color: hrh.accent },
+  { key: "gmvShopee", name: "Shopee", color: hrh.good },
 ];
 
 // Small hand-drawn stroke icons for VoucherAssistedSalesPanel's KPI row —
