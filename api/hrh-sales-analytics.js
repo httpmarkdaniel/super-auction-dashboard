@@ -396,60 +396,50 @@ export default async function handler(req, res) {
       };
     });
 
-    // Top Sales Drivers — per-product GMV/Units for the current window,
-    // keyed by the SAME display strings the page's global Channel filter
-    // already uses ("All Channels"/"HMRPH Online"/"TikTok"/"Shopee") so the
-    // frontend can look it up directly with `channel` from the shared
-    // filter bar — no separate dropdown for this panel. Computed for every
-    // key at once (like channelMix in api/hrh-executive-overview.js), so
-    // switching the global filter doesn't need a refetch. "All Channels" is
-    // a genuine merge by item_id (not per-channel rows just concatenated),
-    // so a product sold on multiple channels shows its combined total
-    // rather than 3 separate near-duplicate entries. Canonical product key
-    // is `ct.item_id` (locked contract, same as api/hrh-product-analytics.js
-    // — the literal dot requires backticks).
-    const salesDriverRows = await (
+    // Top Sales Drivers — now scoped to voucher-assisted orders ONLY (per
+    // explicit request), not per-channel. cms.mart_cms_voucher_report has no
+    // item/SKU-level detail at all (verified: it's one row per ORDER, not
+    // per line item), so this joins its order_number back to
+    // xv3.mart_net_sales' order_no to find which real SKUs were actually
+    // part of a voucher-using order, then ranks those by GMV/units — same
+    // "canonical `ct.item_id` key, top 8 by value/qty" shape as before.
+    // Coverage isn't 100% (verified: ~319/375, ~85%, of this window's
+    // voucher orders have a matching order_no in the sales ledger) — orders
+    // with no match are simply absent from this ranking, not padded with a
+    // fabricated 0.
+    const voucherDriverRows = await (
       await client.query({
         query: `
           SELECT
-            sales_channel AS ch,
             \`ct.item_id\` AS item_id,
             argMax(product_name, transaction_date) AS product_name,
             sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
             sumIf(net_quantity, net_sales_amount > 0) AS units
           FROM xv3.mart_net_sales
           WHERE store_name = {store:String}
-            AND sales_channel IN {allChannels:Array(String)}
-            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            AND order_no IN (
+              SELECT DISTINCT order_number FROM cms.mart_cms_voucher_report
+              WHERE store_name = {store:String} AND order_status != 'Cancelled'
+                AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+            )
             AND \`ct.item_id\` IS NOT NULL
-          GROUP BY sales_channel, \`ct.item_id\`
+          GROUP BY item_id
           HAVING gmv > 0
         `,
-        query_params: { store: HRH_STORE, allChannels, curFrom: current.from, curTo: current.to },
+        query_params: {
+          store: HRH_STORE,
+          curFromDt: `${current.from} 00:00:00`,
+          curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
+        },
         format: "JSONEachRow",
       })
     ).json();
     const TOP_SALES_DRIVERS_SHOWN = 8;
-    function topSalesDriversFor(rows) {
-      return {
-        byValue: [...rows].sort((a, b) => b.gmv - a.gmv).slice(0, TOP_SALES_DRIVERS_SHOWN),
-        byQty: [...rows].sort((a, b) => b.units - a.units).slice(0, TOP_SALES_DRIVERS_SHOWN),
-      };
-    }
-    const byItemAllChannels = new Map();
-    for (const r of salesDriverRows) {
-      const cur = byItemAllChannels.get(r.item_id) || { product: r.product_name, gmv: 0, units: 0 };
-      cur.gmv += toNum(r.gmv);
-      cur.units += toNum(r.units);
-      byItemAllChannels.set(r.item_id, cur);
-    }
-    const topSalesDrivers = { "All Channels": topSalesDriversFor(Array.from(byItemAllChannels.values())) };
-    for (const ch of allChannels) {
-      const rows = salesDriverRows
-        .filter((r) => r.ch === ch)
-        .map((r) => ({ product: r.product_name, gmv: toNum(r.gmv), units: toNum(r.units) }));
-      topSalesDrivers[CHANNEL_DISPLAY[ch] || ch] = topSalesDriversFor(rows);
-    }
+    const voucherTopSalesDriverRows = voucherDriverRows.map((r) => ({ product: r.product_name, gmv: toNum(r.gmv), units: toNum(r.units) }));
+    const voucherTopSalesDrivers = {
+      byValue: [...voucherTopSalesDriverRows].sort((a, b) => b.gmv - a.gmv).slice(0, TOP_SALES_DRIVERS_SHOWN),
+      byQty: [...voucherTopSalesDriverRows].sort((a, b) => b.units - a.units).slice(0, TOP_SALES_DRIVERS_SHOWN),
+    };
 
     // Sales Trend — a stacked-by-channel GMV bar chart, same fixed trailing
     // window as Executive Overview's own Sales Trend (api/hrh-executive-
@@ -587,7 +577,7 @@ export default async function handler(req, res) {
     // correct per-week/month unique count (the same customer buying twice
     // in one week would be double-counted), so it is computed once, exactly,
     // over the full selected window instead of faked via addition.
-    const [voucherDailyRows, voucherCustomerRows, voucherBreakdownRows, voucherByDayAndCodeRows] = await Promise.all([
+    const [voucherDailyRows, voucherCustomerRows, voucherByDayAndCodeRows] = await Promise.all([
       (
         await client.query({
           query: `
@@ -625,37 +615,10 @@ export default async function handler(req, res) {
           format: "JSONEachRow",
         })
       ).json(),
-      // Which specific vouchers were used — voucher_code is 100% populated
-      // (verified), voucher_name is the human-readable campaign name (null
-      // for exactly 1 row store-wide; falls back to the code below).
-      (
-        await client.query({
-          query: `
-            SELECT
-              voucher_code,
-              any(voucher_name) AS voucher_name,
-              count() AS orders,
-              uniqExact(customer_name) AS distinct_customers,
-              sum(total_order_price) AS order_price,
-              sum(total_discount_price) AS discount_price
-            FROM cms.mart_cms_voucher_report
-            WHERE store_name = {store:String} AND order_status != 'Cancelled'
-              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
-            GROUP BY voucher_code
-            ORDER BY orders DESC
-          `,
-          query_params: {
-            store: HRH_STORE,
-            curFromDt: `${current.from} 00:00:00`,
-            curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
-          },
-          format: "JSONEachRow",
-        })
-      ).json(),
       // Per-voucher daily usage — feeds the "which specific vouchers are
       // getting used" trend charts (see buildVoucherSeriesTrend above).
-      // Same voucher_name-falls-back-to-code display convention as
-      // voucherBreakdownRows below, just with a date dimension added.
+      // voucher_name is the human-readable campaign name (null for exactly
+      // 1 row store-wide, verified) — falls back to voucher_code below.
       (
         await client.query({
           query: `
@@ -692,19 +655,6 @@ export default async function handler(req, res) {
     const voucherTotalOrders = voucherTrend.reduce((s, r) => s + r.orders, 0);
     const voucherTotalOrderPrice = voucherTrend.reduce((s, r) => s + r.orderPrice, 0);
     const voucherTotalDiscountPrice = voucherTrend.reduce((s, r) => s + r.discountPrice, 0);
-    const byVoucher = voucherBreakdownRows.map((r) => {
-      const orderPrice = toNum(r.order_price);
-      const discountPrice = toNum(r.discount_price);
-      return {
-        voucher: r.voucher_name || r.voucher_code,
-        code: r.voucher_code,
-        orders: toNum(r.orders),
-        customers: toNum(r.distinct_customers),
-        orderPrice,
-        discountPrice,
-        discountRate: safeDivide(discountPrice, orderPrice) * 100,
-      };
-    });
     const voucherByVoucherTrend = buildVoucherSeriesTrend(
       voucherByDayAndCodeRows.map((r) => ({
         d: r.d,
@@ -726,7 +676,7 @@ export default async function handler(req, res) {
       },
       trend: voucherTrend,
       byVoucherTrend: voucherByVoucherTrend,
-      byVoucher,
+      topSalesDrivers: voucherTopSalesDrivers,
     };
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
@@ -739,7 +689,6 @@ export default async function handler(req, res) {
         checkoutCoverageNote,
       },
       channelComparison,
-      topSalesDrivers,
       salesTrendTrailing,
       paymentType,
       fulfillmentMethod,

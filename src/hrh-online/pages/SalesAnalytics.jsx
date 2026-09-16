@@ -79,44 +79,34 @@ const DRIVER_QTY_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 220 },
   { key: "units", label: "Units", render: (r) => formatNum(r.units) },
 ];
-// Real per-product GMV/Units for the current window (api/hrh-sales-analytics.js
-// precomputes every channel at once, keyed by the same display strings the
-// page's global Channel filter uses), so this just reads off `channel` from
-// the shared filter bar — no separate dropdown to keep in sync.
-function TopSalesDriversPanel({ topSalesDrivers, channel }) {
-  const data = topSalesDrivers?.[channel] || { byValue: [], byQty: [] };
+// Real per-product GMV/Units among voucher-assisted orders only (see
+// api/hrh-sales-analytics.js's voucherDriverRows — joins voucher orders
+// back to their real line-item sales; ~85% coverage, not every voucher
+// order has a matching sales record, see that file's comment).
+function TopSalesDriversPanel({ topSalesDrivers }) {
+  const data = topSalesDrivers || { byValue: [], byQty: [] };
   return (
     <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
       <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2.5" style={{ color: hrh.ink2 }}>
-        Top Sales Drivers
+        Top Sales Drivers — Voucher Assisted Only
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <div className="text-[11px] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
             By Value
           </div>
-          <DataTable columns={DRIVER_VALUE_COLUMNS} rows={data.byValue} emptyLabel="No sales in this window" />
+          <DataTable columns={DRIVER_VALUE_COLUMNS} rows={data.byValue} emptyLabel="No voucher-assisted sales in this window" />
         </div>
         <div>
           <div className="text-[11px] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
             By Qty
           </div>
-          <DataTable columns={DRIVER_QTY_COLUMNS} rows={data.byQty} emptyLabel="No sales in this window" />
+          <DataTable columns={DRIVER_QTY_COLUMNS} rows={data.byQty} emptyLabel="No voucher-assisted sales in this window" />
         </div>
       </div>
     </div>
   );
 }
-
-const VOUCHER_TABLE_COLUMNS = [
-  { key: "voucher", label: "Voucher", maxWidth: 260 },
-  { key: "code", label: "Code" },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "customers", label: "Customers", render: (r) => formatNum(r.customers) },
-  { key: "orderPrice", label: "Total Order Value", render: (r) => formatPeso(r.orderPrice) },
-  { key: "discountPrice", label: "Total Discount Value", render: (r) => formatPeso(r.discountPrice) },
-  { key: "discountRate", label: "Discount Rate", render: (r) => formatPct(r.discountRate) },
-];
 
 const CHANNEL_TABLE_COLUMNS = [
   { key: "channel", label: "Channel" },
@@ -201,12 +191,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
           <TrendChart data={discountByVoucher} series={voucherSeries} xKey="dateLabel" valueFormatter={formatCompactPeso} />
         </div>
       </div>
-      <div className="mt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-          Vouchers Applied
-        </div>
-        <DataTable columns={VOUCHER_TABLE_COLUMNS} rows={voucherAssistedSales?.byVoucher} paginate pageSize={10} />
-      </div>
+      <TopSalesDriversPanel topSalesDrivers={voucherAssistedSales?.topSalesDrivers} />
     </Panel>
   );
 }
@@ -283,13 +268,10 @@ export default function SalesAnalytics({ filters }) {
             <BarComparisonChart data={salesTrend} series={SALES_TREND_CHANNEL_SERIES} xKey="dateLabel" valueFormatter={formatCompactPeso} stacked />
           </Panel>
 
-          <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
-
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
             <div className="xl:col-span-2">
               <Panel title="Channel Comparison" className="h-full">
                 <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-                <TopSalesDriversPanel topSalesDrivers={data.topSalesDrivers} channel={channel} />
               </Panel>
             </div>
             <div className="flex flex-col gap-4 h-full">
@@ -326,6 +308,8 @@ export default function SalesAnalytics({ filters }) {
               </Panel>
             </div>
           </div>
+
+          <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
         </>
       )}
     </div>
