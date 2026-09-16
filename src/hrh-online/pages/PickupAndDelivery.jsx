@@ -9,7 +9,6 @@ import { formatPct, formatNum } from "../format";
 import {
   filterOrders,
   computeKpis,
-  computeMethodComparison,
   computeTrend,
   computeJourneyBreakdown,
   computePickerStats,
@@ -322,12 +321,8 @@ function FunnelSteps({ stages }) {
 }
 
 // Horizontal stepper for the real pick -> QC -> waybill -> pack -> dispatch
-// -> ship pipeline, median (and P90) minutes per stage. When both methods
-// are in view it shows both lines per stage (Pickup/Delivery colored to
-// match every other chart on this page); a single-method filter shows just
-// that method's median + P90.
+// -> ship pipeline, median + P90 minutes per stage for the active method.
 function JourneyFlow({ breakdown, method }) {
-  const showBoth = method === "all";
   const visible = breakdown.filter((stage) => !stage.deliveryOnly || method !== "Pickup");
   return (
     <div className="overflow-x-auto -mx-1 px-1">
@@ -344,17 +339,10 @@ function JourneyFlow({ breakdown, method }) {
               <div className="text-[11.5px] font-semibold mb-1 leading-tight" style={{ color: hrh.ink }}>
                 {stage.label}
               </div>
-              {showBoth ? (
-                <div className="text-[10.5px] leading-snug">
-                  <div style={{ color: PICKUP_COLOR }}>Pickup: {stage.Pickup ? formatMinutes(stage.Pickup.medianMinutes) : "—"}</div>
-                  <div style={{ color: DELIVERY_COLOR }}>Delivery: {stage.Delivery ? formatMinutes(stage.Delivery.medianMinutes) : "—"}</div>
-                </div>
-              ) : (
-                <div className="text-[10.5px] leading-snug" style={{ color: hrh.ink2 }}>
-                  {stage[method] ? formatMinutes(stage[method].medianMinutes) : "—"}
-                  {stage[method] && <div style={{ color: hrh.muted }}>P90: {formatMinutes(stage[method].p90Minutes)}</div>}
-                </div>
-              )}
+              <div className="text-[10.5px] leading-snug" style={{ color: hrh.ink2 }}>
+                {stage[method] ? formatMinutes(stage[method].medianMinutes) : "—"}
+                {stage[method] && <div style={{ color: hrh.muted }}>P90: {formatMinutes(stage[method].p90Minutes)}</div>}
+              </div>
             </div>
             {i < visible.length - 1 && (
               <div className="flex items-center h-8 px-0.5 text-[13px]" style={{ color: hrh.muted }}>
@@ -521,7 +509,7 @@ export default function PickupAndDelivery({ filters }) {
   const [error, setError] = useState(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const [method, setMethod] = useState("all");
+  const [method, setMethod] = useState("Pickup");
   const [picker, setPicker] = useState("all");
   const [qcStation, setQcStation] = useState("all");
   const [trendMetric, setTrendMetric] = useState("median");
@@ -585,7 +573,6 @@ export default function PickupAndDelivery({ filters }) {
     () => (data ? computeKpis(filteredOrders, ordersReceivedForFilter, referenceByMethod) : null),
     [data, filteredOrders, ordersReceivedForFilter, referenceByMethod]
   );
-  const methodComparison = useMemo(() => computeMethodComparison(filteredOrders, referenceByMethod), [filteredOrders, referenceByMethod]);
   const trend = useMemo(() => computeTrend(filteredOrders), [filteredOrders]);
   const journeyBreakdown = useMemo(() => computeJourneyBreakdown(filteredOrders), [filteredOrders]);
   const pickerStats = useMemo(() => computePickerStats(filteredOrders), [filteredOrders]);
@@ -602,23 +589,18 @@ export default function PickupAndDelivery({ filters }) {
   const statusBreakdown = useMemo(() => computeStatusBreakdown(filteredOrders), [filteredOrders]);
   const delayReasons = useMemo(() => (data ? computeDelayReasons(filteredOrders, data.recentOrders) : []), [data, filteredOrders]);
 
-  const methodBarData = methodComparison.map((m) => ({
-    label: m.method,
-    medianFulfillment: m.medianFulfillmentMinutes,
-    p90Fulfillment: m.p90FulfillmentMinutes,
-    packingDuration: m.packingDurationMinutes,
-    orderToPack: m.orderToPackMinutes,
-  }));
-  const trendSeries =
-    trendMetric === "completed"
-      ? [
-          { key: "pickupCompleted", name: "Pickup", color: PICKUP_COLOR },
-          { key: "deliveryCompleted", name: "Delivery", color: DELIVERY_COLOR },
-        ]
-      : [
-          { key: `pickup${trendMetric === "median" ? "Median" : "P90"}`, name: "Pickup", color: PICKUP_COLOR },
-          { key: `delivery${trendMetric === "median" ? "Median" : "P90"}`, name: "Delivery", color: DELIVERY_COLOR },
-        ];
+  // filteredOrders (and so `trend`) is already scoped to exactly one
+  // method, so the trend chart plots a single line for that method rather
+  // than a Pickup-vs-Delivery comparison.
+  const methodLower = method === "Pickup" ? "pickup" : "delivery";
+  const methodColor = method === "Pickup" ? PICKUP_COLOR : DELIVERY_COLOR;
+  const trendSeries = [
+    {
+      key: trendMetric === "completed" ? `${methodLower}Completed` : `${methodLower}${trendMetric === "median" ? "Median" : "P90"}`,
+      name: method,
+      color: methodColor,
+    },
+  ];
   const trendValueFormatter = trendMetric === "completed" ? formatNum : (v) => formatMinutes(v);
 
   const bubbleData = pickerStats
@@ -656,7 +638,7 @@ export default function PickupAndDelivery({ filters }) {
           {/* ---------------------------- Filter bar ---------------------------- */}
           <div className="flex items-center gap-2 mb-4 flex-wrap">
             <div className="flex rounded-md overflow-hidden shrink-0" style={{ border: `1px solid ${hrh.border}` }}>
-              {["all", "Pickup", "Delivery"].map((m) => (
+              {["Pickup", "Delivery"].map((m) => (
                 <button
                   key={m}
                   type="button"
@@ -664,17 +646,16 @@ export default function PickupAndDelivery({ filters }) {
                   className="text-[12px] font-semibold px-3 py-1.5"
                   style={method === m ? { background: hrh.navy, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
                 >
-                  {m === "all" ? "All" : m}
+                  {m}
                 </button>
               ))}
             </div>
             <FilterSelect value={picker} onChange={setPicker} options={pickerOptions} allLabel="All Pickers" />
             <FilterSelect value={qcStation} onChange={setQcStation} options={qcStationOptions} allLabel="All QC Stations" />
-            {(method !== "all" || picker !== "all" || qcStation !== "all") && (
+            {(picker !== "all" || qcStation !== "all") && (
               <button
                 type="button"
                 onClick={() => {
-                  setMethod("all");
                   setPicker("all");
                   setQcStation("all");
                 }}
@@ -710,46 +691,33 @@ export default function PickupAndDelivery({ filters }) {
             <KpiCard label="Within Reference Time" icon={ICONS.target} value={formatRate(kpis.referenceHitRate)} sub="vs. each method's own trailing 90-day pace" />
           </KpiRow>
 
-          {/* ------------------------- Comparison + Trend ------------------------ */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Pickup vs Delivery Performance" subtitle="Key fulfillment metrics by method, for the selected Date Range">
-              <BarComparisonChart
-                data={methodBarData}
-                series={[
-                  { key: "medianFulfillment", name: "Median Fulfillment", color: hrh.series[0] },
-                  { key: "p90Fulfillment", name: "P90 Fulfillment", color: hrh.accent },
-                  { key: "packingDuration", name: "Packing Duration", color: hrh.series[2] },
-                  { key: "orderToPack", name: "Order → Pack", color: hrh.series[1] },
-                ]}
-                valueFormatter={(v) => formatMinutes(v)}
-              />
-            </Panel>
-            <Panel
-              title="Fulfillment Trend"
-              subtitle="Daily, for the selected Date Range"
-              action={
-                <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
-                  {TREND_METRICS.map((m) => (
-                    <button
-                      key={m.key}
-                      type="button"
-                      onClick={() => setTrendMetric(m.key)}
-                      className="text-[11px] font-semibold px-2.5 py-1"
-                      style={trendMetric === m.key ? { background: hrh.navy, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              }
-            >
-              {trend.length === 0 ? (
-                <EmptyState label="No fulfillment activity in this window." />
-              ) : (
-                <TrendChart data={trend} series={trendSeries} xKey="dateLabel" valueFormatter={trendValueFormatter} />
-              )}
-            </Panel>
-          </div>
+          {/* ------------------------------ Trend --------------------------------- */}
+          <Panel
+            title={`Fulfillment Trend (${method})`}
+            subtitle="Daily, for the selected Date Range"
+            className="mb-4"
+            action={
+              <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
+                {TREND_METRICS.map((m) => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setTrendMetric(m.key)}
+                    className="text-[11px] font-semibold px-2.5 py-1"
+                    style={trendMetric === m.key ? { background: hrh.navy, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            {trend.length === 0 ? (
+              <EmptyState label="No fulfillment activity in this window." />
+            ) : (
+              <TrendChart data={trend} series={trendSeries} xKey="dateLabel" valueFormatter={trendValueFormatter} />
+            )}
+          </Panel>
 
           {/* ------------------------------ Journey ------------------------------ */}
           <Panel title="Fulfillment Journey Breakdown" subtitle="Median time per stage (see the table below for P90)" className="mb-4">
@@ -758,10 +726,10 @@ export default function PickupAndDelivery({ filters }) {
 
           {/* ------------------------ Funnel + Distribution ----------------------- */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title={`Fulfillment Funnel${method === "all" ? "" : ` (${method})`}`} subtitle="From order placed to shipped, for the selected Date Range">
+            <Panel title={`Fulfillment Funnel (${method})`} subtitle="From order placed to shipped, for the selected Date Range">
               <FunnelSteps stages={funnel} />
             </Panel>
-            <Panel title={`Fulfillment Time Distribution${method === "all" ? "" : ` (${method})`}`} subtitle="Order Placed → Shipped, in minutes">
+            <Panel title={`Fulfillment Time Distribution (${method})`} subtitle="Order Placed → Shipped, in minutes">
               {timeDistribution.every((b) => b.orders === 0) ? (
                 <EmptyState label="No shipped orders in this window." />
               ) : (
@@ -899,71 +867,70 @@ export default function PickupAndDelivery({ filters }) {
             </Panel>
           </div>
 
-          {/* ------------------------- Readiness + Courier ------------------------ */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            {method !== "Delivery" && (
-              <Panel
-                title="Pickup Readiness"
-                badge={
-                  <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
-                    Pickup
-                  </span>
-                }
-              >
-                <KpiRow>
-                  <KpiCard label="Orders Ready" icon={ICONS.box} value={formatNum(readiness.ordersReady)} />
-                  <KpiCard label="Median Order → Ready" icon={ICONS.clock} value={formatMinutes(readiness.medianOrderToReadyMinutes)} />
-                  <KpiCard label="Uncollected Orders" icon={ICONS.pickup} value={formatNum(readiness.uncollectedOrders)} />
-                  <KpiCard label="Collected Today" icon={ICONS.checkCircle} value={formatNum(readiness.collectedToday)} />
-                </KpiRow>
-                <div className="text-[10.5px] mt-1" style={{ color: hrh.muted }}>
-                  Live counts, independent of the Date Range filter above · Median Order → Ready is over a trailing 90 days.
-                </div>
-              </Panel>
-            )}
-            {method !== "Pickup" && (
-              <Panel title="Courier Performance (Delivery)" subtitle="Every real courier appearing in this data">
-                {courierStats.length === 0 ? (
-                  <EmptyState label="No delivery activity for this selection." />
-                ) : (
-                  <div className="space-y-3">
-                    {courierStats.map((c) => (
-                      <div key={c.courier} className="rounded-md p-3" style={{ border: `1px solid ${hrh.border}` }}>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-[13px]" style={{ color: hrh.ink }}>
-                            {c.courier}
-                          </span>
-                          <span className="text-[11px]" style={{ color: hrh.muted }}>
-                            {formatNum(c.orders)} orders
-                          </span>
+          {/* ------------------------- Readiness / Courier ------------------------ */}
+          {method === "Pickup" && (
+            <Panel
+              title="Pickup Readiness"
+              className="mb-4"
+              badge={
+                <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
+                  Pickup
+                </span>
+              }
+            >
+              <KpiRow>
+                <KpiCard label="Orders Ready" icon={ICONS.box} value={formatNum(readiness.ordersReady)} />
+                <KpiCard label="Median Order → Ready" icon={ICONS.clock} value={formatMinutes(readiness.medianOrderToReadyMinutes)} />
+                <KpiCard label="Uncollected Orders" icon={ICONS.pickup} value={formatNum(readiness.uncollectedOrders)} />
+                <KpiCard label="Collected Today" icon={ICONS.checkCircle} value={formatNum(readiness.collectedToday)} />
+              </KpiRow>
+              <div className="text-[10.5px] mt-1" style={{ color: hrh.muted }}>
+                Live counts, independent of the Date Range filter above · Median Order → Ready is over a trailing 90 days.
+              </div>
+            </Panel>
+          )}
+          {method === "Delivery" && (
+            <Panel title="Courier Performance" subtitle="Every real courier appearing in this data" className="mb-4">
+              {courierStats.length === 0 ? (
+                <EmptyState label="No delivery activity for this selection." />
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {courierStats.map((c) => (
+                    <div key={c.courier} className="rounded-md p-3" style={{ border: `1px solid ${hrh.border}` }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold text-[13px]" style={{ color: hrh.ink }}>
+                          {c.courier}
+                        </span>
+                        <span className="text-[11px]" style={{ color: hrh.muted }}>
+                          {formatNum(c.orders)} orders
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-[11.5px]">
+                        <div>
+                          <div style={{ color: hrh.muted }}>Median Dispatch → Ship</div>
+                          <div className="font-semibold" style={{ color: hrh.ink }}>
+                            {formatMinutes(c.medianDispatchToShipMinutes)}
+                          </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2 text-[11.5px]">
-                          <div>
-                            <div style={{ color: hrh.muted }}>Median Dispatch → Ship</div>
-                            <div className="font-semibold" style={{ color: hrh.ink }}>
-                              {formatMinutes(c.medianDispatchToShipMinutes)}
-                            </div>
+                        <div>
+                          <div style={{ color: hrh.muted }}>P90</div>
+                          <div className="font-semibold" style={{ color: hrh.ink }}>
+                            {formatMinutes(c.p90DispatchToShipMinutes)}
                           </div>
-                          <div>
-                            <div style={{ color: hrh.muted }}>P90</div>
-                            <div className="font-semibold" style={{ color: hrh.ink }}>
-                              {formatMinutes(c.p90DispatchToShipMinutes)}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={{ color: hrh.muted }}>% Shipped</div>
-                            <div className="font-semibold" style={{ color: hrh.ink }}>
-                              {formatRate(c.pctShipped)}
-                            </div>
+                        </div>
+                        <div>
+                          <div style={{ color: hrh.muted }}>% Shipped</div>
+                          <div className="font-semibold" style={{ color: hrh.ink }}>
+                            {formatRate(c.pctShipped)}
                           </div>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </Panel>
-            )}
-          </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+          )}
 
           <LiveFulfillmentTracker orders={filteredInProgress} nowMs={nowMs} referenceByMethod={referenceByMethod} />
 

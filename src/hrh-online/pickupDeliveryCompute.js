@@ -82,24 +82,6 @@ export function computeKpis(orders, ordersReceived, referenceByMethod) {
   };
 }
 
-export function computeMethodComparison(orders, referenceByMethod) {
-  return METHODS.map((method) => {
-    const rows = orders.filter((o) => o.method === method);
-    const shipped = rows.filter((o) => o.shippedAt);
-    const ref = referenceByMethod[method];
-    const withinRef = shipped.filter((o) => ref && o.orderToShipSeconds <= ref).length;
-    return {
-      method,
-      orders: rows.length,
-      medianFulfillmentMinutes: toMinutes(median(shipped.map((o) => o.orderToShipSeconds))),
-      p90FulfillmentMinutes: toMinutes(percentile(shipped.map((o) => o.orderToShipSeconds), 0.9)),
-      packingDurationMinutes: toMinutes(median(rows.map((o) => o.packingDurationSeconds))),
-      orderToPackMinutes: toMinutes(median(rows.map((o) => o.orderToPackSeconds))),
-      referenceHitRate: shipped.length ? (withinRef / shipped.length) * 100 : null,
-    };
-  });
-}
-
 function dateLabel(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "UTC" });
