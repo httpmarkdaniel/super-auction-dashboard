@@ -2,13 +2,16 @@ import { Children } from "react";
 import { hrh } from "../theme";
 
 // Tiny inline trend line — no axes/tooltip/library, just a shape-of-the-
-// trend cue in the corner of a KpiCard. Colored to match the card's own
-// delta direction (or neutral muted if there's no delta) rather than
-// always-green/red, since a rising line reads as "good" or "bad" only
-// relative to what the metric means, which the card's own arrow already
-// states. `values`: plain array of numbers, oldest first.
-function Sparkline({ values, color, width = 56, height = 22 }) {
+// trend cue in the corner of a KpiCard. Always green or red, never a
+// neutral gray: colored by comparing the line's own last value to its
+// first (does IT go up or down over the shown window), independent of
+// the card's period-over-period delta badge — a card can lack a delta
+// (no previous-period comparison) while its sparkline still clearly
+// rises or falls, and that shape deserves its own real color, not a
+// muted "unknown" one. `values`: plain array of numbers, oldest first.
+function Sparkline({ values, width = 56, height = 22 }) {
   if (!values || values.length < 2) return null;
+  const color = values[values.length - 1] >= values[0] ? hrh.good : hrh.bad;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
@@ -54,9 +57,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, sparkli
         <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
           {value}
         </div>
-        {sparkline && sparkline.length > 1 && (
-          <Sparkline values={sparkline} color={hasDelta ? (positive ? hrh.good : hrh.bad) : hrh.muted} />
-        )}
+        {sparkline && sparkline.length > 1 && <Sparkline values={sparkline} />}
       </div>
       {(hasDelta || sub) && (
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] flex-wrap">
