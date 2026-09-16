@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { computeHmrphOnlineLifecycle } from "./_hrh-orders-fulfillment.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -10,28 +11,20 @@ const client = createClient({
 // Underscore-prefixed (see api/_hrh-traffic-analytics.js's comment) —
 // dispatched from api/hrh-sales-analytics.js via ?report=pickupDelivery.
 //
-// Pickup vs Delivery is checkout_method on xv3.mart_xv3_order_report —
-// same field already used by Orders & Fulfillment's "Cancelled by
-// Fulfillment Method" and Returns' "Returns by Fulfillment Method".
-// GMV/category/payment-type come from xv3.mart_net_sales (sale-side,
-// net_sales_amount > 0), joined to checkout_method by order_no ->
-// order_number (direct match only — same field, no probable-matching
-// here; unmatched sales, mostly TikTok/Shopee which never populate
-// order_report, show as "Unknown" rather than a guess).
+// Re-scoped 2026-09-16 to fulfillment/operations only, per explicit
+// request — dropped everything sales-side (GMV/AOV/payment type/category
+// mix, all previously joined in from xv3.mart_net_sales) in favor of the
+// much richer xv3.mart_order_fulfilment_journey table, which turns out to
+// carry a full pick -> QC -> waybill -> pack -> dispatch -> ship pipeline
+// (verified via system.columns — this file previously only used 4 of its
+// ~15 real timestamp/duration fields).
 //
-// investigated: xv3.mart_order_fulfilment_journey (courier_service IS
-// NULL as a pickup proxy) was considered and rejected — only ~55% of its
-// rows even match back to order_report, and courier_service NULL isn't
-// exact (17 of 902 null-courier rows are actually Delivery in a Sep
-// sample). checkout_method is the direct, authoritative field.
+// Pickup vs Delivery is still checkout_method on xv3.mart_xv3_order_report
+// (same field Orders & Fulfillment's "Cancelled by Fulfillment Method" and
+// Returns' "Returns by Fulfillment Method" use), joined to the journey
+// table by order_id -> order_number (direct match, same as before).
 const HRH_STORE = "HRH ONLINE";
-const CHANNEL_MAP = {
-  "All Channels": ["HMRPH ONLINE", "TIKTOK", "SHOPEE"],
-  "HMRPH Online": ["HMRPH ONLINE"],
-  TikTok: ["TIKTOK"],
-  Shopee: ["SHOPEE"],
-};
-const METHODS = ["Pickup", "Delivery", "Unknown"];
+const METHODS = ["Pickup", "Delivery"];
 
 function toNum(v) {
   const n = Number(v);
@@ -88,29 +81,13 @@ function resolveRange(range, fromParam, toParam) {
   }
   return { from: mondayOfWeek(today), to: today }; // wtd (default)
 }
-// Payment type free text has a few case variants ("GCash" / "Gcash")
-// that are the same method — grouped case-insensitively, but displayed
-// using whichever casing was seen FIRST rather than forcing Title Case
-// (blanket title-casing would mangle already-correct strings like "BPI"
-// -> "Bpi" or "Debit/Credit Card" -> "Debit/credit Card", most of which
-// have only one real casing in the data).
-function makePaymentTypeNormalizer() {
-  const seen = new Map();
-  return (raw) => {
-    if (!raw) return "Unknown";
-    const key = raw.trim().toLowerCase();
-    if (!seen.has(key)) seen.set(key, raw.trim());
-    return seen.get(key);
-  };
-}
-
 // ---------------------------------------------------------------------
-// Fulfillment Timing — real pick/pack/dispatch/ship timestamps from
-// xv3.mart_order_fulfilment_journey, joined to checkout_method by
-// order_id -> order_number (same direct join as the rest of this file).
-// Scoped to HMRPH Online implicitly, same as everywhere else that reads
-// xv3.mart_xv3_order_report — the join itself only ever matches HMRPH
-// Online orders.
+// Fulfillment Operations — real pick -> QC -> waybill -> pack -> dispatch
+// -> ship pipeline from xv3.mart_order_fulfilment_journey, joined to
+// checkout_method by order_id -> order_number (same direct join as the
+// rest of this file). Scoped to HMRPH Online implicitly, same as
+// everywhere else that reads xv3.mart_xv3_order_report — the join itself
+// only ever matches HMRPH Online orders.
 //
 // IMPORTANT — there is no "delivered to customer" timestamp anywhere in
 // this data. The last real milestone is shipped_at, which the raw
@@ -122,64 +99,122 @@ function makePaymentTypeNormalizer() {
 // something like "marked ready/collected in-store", not a delivery
 // event — inferred from the pattern, not a documented field definition.
 // Labeled accordingly rather than calling either one "Delivered".
-async function computeFulfillmentTiming(from, to) {
-  const rows = await (
-    await client.query({
-      query: `
+//
+// Stage completion rates (Packed/Shipped/QC/Waybill) are computed WITHIN
+// this table — i.e. "of orders that at least started picking, what %
+// reached this stage" — since picking_started_at is populated on every
+// row here (verified: never null), a journey row's mere existence already
+// means picking began. Waybill coverage is verified Delivery-only (0% for
+// Pickup in every window checked — Pickup orders don't get a shipping
+// waybill), so it's reported for Delivery only, not shown as a misleading
+// 0% "failure" for Pickup.
+async function computeFulfillmentOperations(from, to) {
+  const [stageRows, detailRows, pickerRows] = await Promise.all([
+    client
+      .query({
+        query: `
         SELECT
           o.checkout_method,
           avgIf(j.order_to_pack_seconds, j.order_to_pack_seconds IS NOT NULL) AS avg_order_to_pack,
+          avgIf(j.picking_to_qc_seconds, j.picking_to_qc_seconds IS NOT NULL) AS avg_pick_to_qc,
+          avgIf(j.qc_to_waybill_seconds, j.qc_to_waybill_seconds IS NOT NULL) AS avg_qc_to_waybill,
           avgIf(j.packing_to_dispatch_finalized_seconds, j.packing_to_dispatch_finalized_seconds IS NOT NULL) AS avg_pack_to_dispatch,
           avgIf(j.dispatch_finalized_to_ship_seconds, j.dispatch_finalized_to_ship_seconds IS NOT NULL) AS avg_dispatch_to_ship,
           avgIf(j.order_to_ship_seconds, j.order_to_ship_seconds IS NOT NULL) AS avg_order_to_ship,
           count() AS n,
-          countIf(j.shipped_at IS NOT NULL) AS n_shipped
+          countIf(j.is_packed = 1) AS n_packed,
+          countIf(j.is_shipped = 1) AS n_shipped,
+          countIf(j.qc_session_start_at IS NOT NULL) AS n_qc,
+          countIf(j.waybill_printed_at IS NOT NULL) AS n_waybill
         FROM xv3.mart_order_fulfilment_journey j
         INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+        WHERE o.store_name = {store:String}
+          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           AND o.checkout_method IN ('Pickup', 'Delivery')
         GROUP BY o.checkout_method
       `,
-      query_params: { from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
-  const byMethod = new Map(rows.map((r) => [r.checkout_method, r]));
-
-  const detailRows = await (
-    await client.query({
-      query: `
+        query_params: { store: HRH_STORE, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    // Recent timeline — the full pick -> QC -> waybill -> pack -> dispatch
+    // -> ship record per order, not just the 4 stages shown before.
+    client
+      .query({
+        query: `
         SELECT
           j.order_id,
           o.checkout_method,
           j.order_placed_at,
           j.picking_started_at,
+          j.qc_session_start_at,
+          j.waybill_printed_at,
           j.packing_finished_at,
           j.dispatch_finalized_at,
           j.shipped_at,
-          j.courier_service
+          j.courier_service,
+          j.picker_name
         FROM xv3.mart_order_fulfilment_journey j
         INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+        WHERE o.store_name = {store:String}
+          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           AND o.checkout_method IN ('Pickup', 'Delivery')
         ORDER BY j.order_placed_at DESC
         LIMIT 200
       `,
-      query_params: { from, to },
-      format: "JSONEachRow",
-    })
-  ).json();
+        query_params: { store: HRH_STORE, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+    // Picker productivity — not split by method (a picker works both
+    // Pickup and Delivery orders), for the same window. mart_order_
+    // fulfilment_journey has no store_name of its own (verified via
+    // system.columns), so this joins to order_report for the store filter
+    // like every other query here — without it, this table's ~27 other
+    // stores' pickers would leak in too (verified: this exact bug briefly
+    // inflated Pick Rate to 177% before the join was added everywhere).
+    client
+      .query({
+        query: `
+        SELECT
+          j.picker_name,
+          count() AS orders,
+          avgIf(j.order_to_pack_seconds, j.order_to_pack_seconds IS NOT NULL) AS avg_pick_seconds,
+          avgIf(j.total_duration_seconds, j.total_duration_seconds IS NOT NULL) AS avg_total_seconds
+        FROM xv3.mart_order_fulfilment_journey j
+        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
+        WHERE o.store_name = {store:String}
+          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+          AND j.picker_name IS NOT NULL AND trim(j.picker_name) != ''
+        GROUP BY j.picker_name
+        ORDER BY orders DESC
+      `,
+        query_params: { store: HRH_STORE, from, to },
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json()),
+  ]);
+  const byMethod = new Map(stageRows.map((r) => [r.checkout_method, r]));
 
   const stageSummary = ["Pickup", "Delivery"].map((method) => {
     const r = byMethod.get(method);
+    const n = toNum(r?.n);
     return {
       method,
-      orders: toNum(r?.n),
+      orders: n,
       avgOrderToPackSeconds: toNum(r?.avg_order_to_pack),
+      avgPickToQcSeconds: toNum(r?.avg_pick_to_qc),
+      avgQcToWaybillSeconds: toNum(r?.avg_qc_to_waybill),
       avgPackToDispatchSeconds: toNum(r?.avg_pack_to_dispatch),
       avgDispatchToShipSeconds: toNum(r?.avg_dispatch_to_ship),
       avgOrderToShipSeconds: toNum(r?.avg_order_to_ship),
-      shippedCount: toNum(r?.n_shipped),
+      packRate: safeDivide(toNum(r?.n_packed), n) * 100,
+      shipRate: safeDivide(toNum(r?.n_shipped), n) * 100,
+      qcRate: safeDivide(toNum(r?.n_qc), n) * 100,
+      // Waybill coverage is meaningless for Pickup (verified 0% in every
+      // window checked — no shipping waybill for an in-store pickup), so
+      // it's null ("N/A") there rather than a misleading 0%.
+      waybillRate: method === "Delivery" ? safeDivide(toNum(r?.n_waybill), n) * 100 : null,
     };
   });
 
@@ -188,19 +223,29 @@ async function computeFulfillmentTiming(from, to) {
     method: r.checkout_method,
     orderPlacedAt: r.order_placed_at,
     pickedAt: r.picking_started_at,
+    qcAt: r.qc_session_start_at,
+    waybillAt: r.waybill_printed_at,
     packedAt: r.packing_finished_at,
     dispatchedAt: r.dispatch_finalized_at,
     shippedAt: r.shipped_at,
     courier: r.courier_service,
+    picker: r.picker_name,
   }));
 
-  return { stageSummary, timeline };
+  const pickerProductivity = pickerRows
+    .map((r) => ({
+      picker: r.picker_name,
+      orders: toNum(r.orders),
+      avgPickSeconds: toNum(r.avg_pick_seconds),
+      avgTotalSeconds: toNum(r.avg_total_seconds),
+    }))
+    .sort((a, b) => b.orders - a.orders);
+
+  return { stageSummary, timeline, pickerProductivity };
 }
 
 export async function handlePickupDelivery(req, res) {
   try {
-    const channel = req.query.channel || "All Channels";
-    const channels = CHANNEL_MAP[channel] || CHANNEL_MAP["All Channels"];
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
 
@@ -211,145 +256,93 @@ export async function handlePickupDelivery(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
-    const timing = await computeFulfillmentTiming(range_.from, range_.to);
-
-    const salesRows = await (
-      await client.query({
-        query: `
-          SELECT order_no, invoice_id, transaction_date, net_sales_amount, category_name
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
-            AND transaction_type = 'sale' AND net_sales_amount > 0
-            AND transaction_date BETWEEN {from:String} AND {to:String}
-        `,
-        query_params: { store: HRH_STORE, channels, from: range_.from, to: range_.to },
-        format: "JSONEachRow",
-      })
-    ).json();
-
-    const orderNos = [...new Set(salesRows.map((r) => r.order_no).filter(Boolean))];
-    let checkoutByOrder = new Map();
-    if (orderNos.length) {
-      const checkoutRows = await (
-        await client.query({
+    // Orders by Method — a plain operational count straight from
+    // xv3.mart_xv3_order_report's checkout_method, NOT joined to sales —
+    // deliberately a different, simpler population than "Real Orders
+    // Received" below (that one already has its own locked True-
+    // Cancellation-aware definition elsewhere; duplicating that
+    // classification here just for a method split isn't worth the
+    // complexity, so this is every order with each checkout_method in the
+    // window, full stop).
+    const [ordersByMethodRows, lifecycle, pickedOrdersRows, ops] = await Promise.all([
+      client
+        .query({
           query: `
-            SELECT order_number, any(checkout_method) AS checkout_method, any(payment_type) AS payment_type
+            SELECT checkout_method, count() AS orders
             FROM xv3.mart_xv3_order_report
-            WHERE order_number IN ({ids:Array(String)})
-            GROUP BY order_number
+            WHERE store_name = {store:String}
+              AND checkout_method IN ('Pickup', 'Delivery')
+              AND created_at >= {fromDt:String} AND created_at < {toExclusiveDt:String}
+            GROUP BY checkout_method
           `,
-          query_params: { ids: orderNos },
+          query_params: { store: HRH_STORE, fromDt: `${range_.from} 00:00:00`, toExclusiveDt: `${addDaysISO(range_.to, 1)} 00:00:00` },
           format: "JSONEachRow",
         })
-      ).json();
-      checkoutByOrder = new Map(checkoutRows.map((r) => [r.order_number, { method: r.checkout_method || "Unknown", paymentType: r.payment_type }]));
-    }
+        .then((r) => r.json()),
+      // Real Orders Received — the SAME locked definition (True
+      // Cancellation-aware) used dashboard-wide, as Pick Rate's
+      // denominator (see computeHmrphOnlineLifecycle in
+      // api/_hrh-orders-fulfillment.js).
+      computeHmrphOnlineLifecycle(range_.from, range_.to),
+      // Pick Rate's numerator — distinct HRH Online orders with ANY
+      // fulfillment journey record (picking_started_at is never null on
+      // this table, verified, so a row's mere existence means picking
+      // began). Joined to order_report for the store filter — this table
+      // has no store_name of its own and spans ~27 other stores/
+      // warehouses (verified), so an unjoined count here would silently
+      // include their fulfillment activity too.
+      client
+        .query({
+          query: `
+            SELECT uniqExact(j.order_id) AS picked_orders
+            FROM xv3.mart_order_fulfilment_journey j
+            INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
+            WHERE o.store_name = {store:String}
+              AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+          `,
+          query_params: { store: HRH_STORE, from: range_.from, to: range_.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      computeFulfillmentOperations(range_.from, range_.to),
+    ]);
 
-    const normalizePaymentType = makePaymentTypeNormalizer();
-    const byMethod = new Map(METHODS.map((m) => [m, { orders: new Set(), gmv: 0 }]));
-    const byMethodPaymentType = new Map(METHODS.map((m) => [m, new Map()]));
-    const byMethodCategory = new Map(METHODS.map((m) => [m, new Map()]));
-    const byDate = new Map();
+    const ordersByMethod = new Map(ordersByMethodRows.map((r) => [r.checkout_method, toNum(r.orders)]));
+    const methodSummary = METHODS.map((m) => ({ method: m, orders: ordersByMethod.get(m) || 0 }));
 
-    for (const r of salesRows) {
-      const match = checkoutByOrder.get(r.order_no);
-      const method = match?.method && METHODS.includes(match.method) ? match.method : "Unknown";
-      const amount = toNum(r.net_sales_amount);
-      const invoiceKey = r.invoice_id ?? `no-invoice-${r.order_no}`;
+    const pickedOrders = toNum(pickedOrdersRows[0]?.picked_orders);
+    const pickRate = {
+      value: safeDivide(pickedOrders, lifecycle.realOrdersReceived) * 100,
+      pickedOrders,
+      realOrdersReceived: lifecycle.realOrdersReceived,
+    };
 
-      const bucket = byMethod.get(method);
-      bucket.orders.add(invoiceKey);
-      bucket.gmv += amount;
-
-      const paymentType = normalizePaymentType(match?.paymentType);
-      const ptMap = byMethodPaymentType.get(method);
-      ptMap.set(paymentType, (ptMap.get(paymentType) || 0) + amount);
-
-      const category = r.category_name || "Uncategorized";
-      const catMap = byMethodCategory.get(method);
-      catMap.set(category, (catMap.get(category) || 0) + amount);
-
-      const date = r.transaction_date ? String(r.transaction_date).slice(0, 10) : null;
-      if (date) {
-        if (!byDate.has(date)) byDate.set(date, { date, pickupGmv: 0, deliveryGmv: 0, pickupOrders: new Set(), deliveryOrders: new Set() });
-        const dBucket = byDate.get(date);
-        if (method === "Pickup") {
-          dBucket.pickupGmv += amount;
-          dBucket.pickupOrders.add(invoiceKey);
-        } else if (method === "Delivery") {
-          dBucket.deliveryGmv += amount;
-          dBucket.deliveryOrders.add(invoiceKey);
-        }
-      }
-    }
-
-    const totalGmv = METHODS.reduce((s, m) => s + byMethod.get(m).gmv, 0);
-    const totalOrders = METHODS.reduce((s, m) => s + byMethod.get(m).orders.size, 0);
-
-    const methodSummary = METHODS.map((m) => {
-      const b = byMethod.get(m);
-      return {
-        method: m,
-        orders: b.orders.size,
-        gmv: b.gmv,
-        aov: safeDivide(b.gmv, b.orders.size),
-        sharePct: safeDivide(b.gmv, totalGmv) * 100,
-      };
-    });
-
-    const paymentTypeByMethod = {};
-    for (const m of METHODS) {
-      paymentTypeByMethod[m] = Array.from(byMethodPaymentType.get(m), ([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-    }
-    const categoryByMethod = {};
-    for (const m of METHODS) {
-      categoryByMethod[m] = Array.from(byMethodCategory.get(m), ([label, value]) => ({ label, value }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 10);
-    }
-
-    const trend = Array.from(byDate.values())
-      .map((d) => ({
-        date: d.date,
-        pickupGmv: d.pickupGmv,
-        deliveryGmv: d.deliveryGmv,
-        pickupOrders: d.pickupOrders.size,
-        deliveryOrders: d.deliveryOrders.size,
-      }))
-      .sort((a, b) => (a.date < b.date ? -1 : 1));
-
-    const pickup = methodSummary.find((m) => m.method === "Pickup");
-    const delivery = methodSummary.find((m) => m.method === "Delivery");
-    const unknown = methodSummary.find((m) => m.method === "Unknown");
+    const { stageSummary, timeline, pickerProductivity } = ops;
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
-        channel,
         range,
         current: { from: range_.from, to: range_.to },
         methodologyNote:
-          "Pickup vs Delivery is checkout_method on xv3.mart_xv3_order_report, joined to sales in xv3.mart_net_sales by order_no (direct match only). Sales with no matching order (mostly TikTok/Shopee, which never populate that table) show as Unknown, not guessed.",
+          "Pickup vs Delivery is checkout_method on xv3.mart_xv3_order_report. Fulfillment stages (pick/QC/waybill/pack/dispatch/ship) come from xv3.mart_order_fulfilment_journey, joined by order_id -> order_number (direct match only). This page is HMRPH Online's own fulfillment operations — not affected by the dashboard's Channel filter, since TikTok/Shopee orders never populate either of these tables.",
         generatedAt: new Date().toISOString(),
       },
       kpis: {
-        pickupOrders: { value: pickup.orders },
-        deliveryOrders: { value: delivery.orders },
-        pickupGmv: { value: pickup.gmv },
-        deliveryGmv: { value: delivery.gmv },
-        pickupAov: { value: pickup.aov },
-        deliveryAov: { value: delivery.aov },
+        pickupOrders: { value: methodSummary.find((m) => m.method === "Pickup")?.orders || 0 },
+        deliveryOrders: { value: methodSummary.find((m) => m.method === "Delivery")?.orders || 0 },
+        pickRate: pickRate,
       },
       methodSummary,
-      paymentTypeByMethod,
-      categoryByMethod,
-      trend,
-      timing,
+      stageSummary,
+      pickerProductivity,
+      timeline,
       dataQuality: [
-        `${unknown.orders} of ${totalOrders} orders (${safeDivide(unknown.orders, totalOrders) * 100 < 1 ? "<1" : (safeDivide(unknown.orders, totalOrders) * 100).toFixed(1)}%) couldn't be matched to a checkout_method — mostly TikTok/Shopee sales, which don't flow through xv3.mart_xv3_order_report at all (verified elsewhere), plus a small number of HMRPH Online invoices with no order_no populated. Shown as "Unknown", not guessed as Pickup or Delivery.`,
-        "This uses direct order_no matching only (no probable/fuzzy matching), unlike Orders & Fulfillment's completion-rate logic — Pickup/Delivery is a reporting split here, not a fulfillment-completion determination, so the stricter direct match is enough and keeps this page independent of that page's methodology.",
-        "Payment type case variants (e.g. \"GCash\" / \"Gcash\") are merged case-insensitively, displayed using whichever casing appeared first.",
-        "Fulfillment Timing has no \"delivered to customer\" timestamp — the last real milestone is \"Shipped\", which the raw data confirms means handed off to the courier for Delivery orders (it lands seconds after Dispatched, alongside a real courier_service). For Pickup orders there's no courier at all, so \"Shipped\" there most likely means marked ready/collected in-store, not a delivery event — inferred from the timestamp pattern, not a documented field definition.",
+        `Pick Rate = orders with any fulfillment journey record (${pickRate.pickedOrders}) ÷ Real Orders Received (${pickRate.realOrdersReceived}, the same True-Cancellation-aware definition used dashboard-wide) for this window — catches orders that never entered the pick/pack pipeline at all (e.g. cancelled before picking started), not just slow ones.`,
+        "Stage completion rates (Pack/Ship/QC rate) are computed WITHIN the fulfillment journey table itself — of orders that have a journey record (i.e. picking started), what % reached each later stage.",
+        "Waybill coverage is shown for Delivery only — verified 0% for Pickup in every window checked (in-store pickups don't get a shipping waybill), so it's reported as N/A there rather than a misleading 0%.",
+        "Fulfillment stages have no \"delivered to customer\" timestamp — the last real milestone is \"Shipped\", which the raw data confirms means handed off to the courier for Delivery orders (it lands seconds after Dispatched, alongside a real courier_service). For Pickup orders there's no courier at all, so \"Shipped\" there most likely means marked ready/collected in-store, not a delivery event — inferred from the timestamp pattern, not a documented field definition.",
+        "Orders by Method (the KPI counts above) is a plain count of checkout_method on xv3.mart_xv3_order_report for the window — a different, simpler population than Real Orders Received (which nets out True Cancellations); the two won't always match exactly.",
       ],
     });
   } catch (err) {

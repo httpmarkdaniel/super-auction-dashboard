@@ -3,14 +3,12 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import SubTabNav from "../components/SubTabNav";
-import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { DonutChart, BarComparisonChart } from "../components/Charts";
-import { bucketRows } from "../trendBucket";
+import { DonutChart } from "../components/Charts";
 import { hrh } from "../theme";
-import { formatPct, formatNum, formatPeso, formatCompactPeso } from "../format";
+import { formatPct, formatNum } from "../format";
 
-const METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2], Unknown: hrh.muted };
+const METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2] };
 
 // Small hand-drawn stroke icons, same feather-style convention as
 // Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons.
@@ -36,16 +34,17 @@ const ICONS = {
       <circle cx="18.5" cy="18.5" r="2.5" />
     </Icon>
   ),
-  peso: (
-    <Icon>
-      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
-    </Icon>
-  ),
   percent: (
     <Icon>
       <line x1="19" y1="5" x2="5" y2="19" />
       <circle cx="6.5" cy="6.5" r="2.5" />
       <circle cx="17.5" cy="17.5" r="2.5" />
+    </Icon>
+  ),
+  checkCircle: (
+    <Icon>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="M22 4 12 14.01l-3-3" />
     </Icon>
   ),
 };
@@ -56,17 +55,18 @@ const SUB_TABS = [
   { key: "delivery", label: "Delivery" },
 ];
 
-const METHOD_TABLE_COLUMNS = [
-  { key: "method", label: "Method" },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
-  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
-  { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
-];
+function formatRate(value) {
+  return value === null || value === undefined ? "N/A" : formatPct(value);
+}
 
-const CATEGORY_COLUMNS = [
-  { key: "label", label: "Category" },
-  { key: "value", label: "GMV", render: (r) => formatPeso(r.value) },
+const RATE_COLUMNS_BOTH = [
+  { key: "metric", label: "Stage" },
+  { key: "pickup", label: "Pickup", render: (r) => formatRate(r.pickup) },
+  { key: "delivery", label: "Delivery", render: (r) => formatRate(r.delivery) },
+];
+const RATE_COLUMNS_SINGLE = [
+  { key: "metric", label: "Stage" },
+  { key: "value", label: "Rate", render: (r) => formatRate(r.value) },
 ];
 
 function formatDuration(seconds) {
@@ -94,17 +94,27 @@ const TIMING_STAGE_COLUMNS_SINGLE = [
   { key: "value", label: "Avg Duration", render: (r) => formatDuration(r.value) },
 ];
 
+const PICKER_COLUMNS = [
+  { key: "picker", label: "Picker" },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "avgPickSeconds", label: "Avg Pick Time (Order → Packed)", render: (r) => formatDuration(r.avgPickSeconds) },
+  { key: "avgTotalSeconds", label: "Avg Total Time (Order → Shipped)", render: (r) => formatDuration(r.avgTotalSeconds) },
+];
+
 const TIMELINE_COLUMNS_BOTH = [
   { key: "orderId", label: "Order #" },
   { key: "method", label: "Method" },
   { key: "orderPlacedAt", label: "Order Placed", render: (r) => formatTimestamp(r.orderPlacedAt) },
   { key: "pickedAt", label: "Picked", render: (r) => formatTimestamp(r.pickedAt) },
+  { key: "qcAt", label: "QC", render: (r) => formatTimestamp(r.qcAt) },
+  { key: "waybillAt", label: "Waybill", render: (r) => formatTimestamp(r.waybillAt) },
   { key: "packedAt", label: "Packed", render: (r) => formatTimestamp(r.packedAt) },
   { key: "dispatchedAt", label: "Dispatched", render: (r) => formatTimestamp(r.dispatchedAt) },
   { key: "shippedAt", label: "Shipped / Ready", render: (r) => formatTimestamp(r.shippedAt) },
+  { key: "picker", label: "Picker", render: (r) => r.picker || "—" },
   { key: "courier", label: "Courier", render: (r) => r.courier || "—" },
 ];
-const TIMELINE_COLUMNS_PICKUP = TIMELINE_COLUMNS_BOTH.filter((c) => c.key !== "method" && c.key !== "courier");
+const TIMELINE_COLUMNS_PICKUP = TIMELINE_COLUMNS_BOTH.filter((c) => !["method", "waybillAt", "courier"].includes(c.key));
 const TIMELINE_COLUMNS_DELIVERY = TIMELINE_COLUMNS_BOTH.filter((c) => c.key !== "method");
 
 function dateRangeParams(dateRange) {
@@ -120,36 +130,29 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-// Real ClickHouse-backed Pickup and Delivery — see
-// api/_hrh-pickup-delivery.js (dispatched from api/hrh-sales-analytics.js
-// via ?report=pickupDelivery) for the queries. Pickup vs Delivery is
-// checkout_method on xv3.mart_xv3_order_report, joined to sales in
-// xv3.mart_net_sales by order_no (direct match only) — orders that don't
-// match (mostly TikTok/Shopee, which never populate that table) show as
-// Unknown rather than a guess. xv3.mart_order_fulfilment_journey (real
-// pick/pack/dispatch timestamps) was investigated and confirmed usable
-// for timing, but has no "delivered to customer" event — see Data
-// Quality on the Pickup/Delivery tabs.
-//
-// Three sub-tabs, same pattern as Orders & Fulfillment: Overview (the
-// side-by-side comparison) plus a dedicated Pickup and Delivery tab each
-// focused on just that method's own numbers.
+// Real ClickHouse-backed Pickup and Delivery — fulfillment/operations only
+// (see api/_hrh-pickup-delivery.js, dispatched from api/hrh-sales-
+// analytics.js via ?report=pickupDelivery). Re-scoped 2026-09-16, per
+// explicit request, away from sales data (GMV/AOV/payment type/category)
+// toward the real pick -> QC -> waybill -> pack -> dispatch -> ship
+// pipeline in xv3.mart_order_fulfilment_journey. Not affected by the
+// dashboard's Channel filter — TikTok/Shopee orders never populate either
+// source table, so this page is implicitly HMRPH Online only.
 export default function PickupAndDelivery({ filters }) {
-  const { channel, dateRange } = filters;
+  const { dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [subTab, setSubTab] = useState("overview");
-  const [trendBucket, setTrendBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
 
-  const load = useCallback(async (ch, p, signal) => {
+  const load = useCallback(async (p, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p, report: "pickupDelivery" });
+      const qs = new URLSearchParams({ ...p, report: "pickupDelivery" });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -166,41 +169,44 @@ export default function PickupAndDelivery({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    load(channel, params, controller.signal);
+    load(params, controller.signal);
     return () => controller.abort();
-  }, [channel, params, ready, load]);
+  }, [params, ready, load]);
 
-  const methodSegments = data?.methodSummary?.map((m) => ({ label: m.method, value: m.gmv, color: METHOD_COLOR[m.method] || hrh.muted })) || [];
-  const trendRows = bucketRows(data?.trend, trendBucket, ["pickupGmv", "deliveryGmv", "pickupOrders", "deliveryOrders"]);
+  const methodSegments = data?.methodSummary?.map((m) => ({ label: m.method, value: m.orders, color: METHOD_COLOR[m.method] || hrh.muted })) || [];
+  const totalMethodOrders = (data?.methodSummary || []).reduce((s, m) => s + m.orders, 0);
 
-  const pickupSummary = data?.methodSummary?.find((m) => m.method === "Pickup");
-  const deliverySummary = data?.methodSummary?.find((m) => m.method === "Delivery");
+  const pickupStage = data?.stageSummary?.find((s) => s.method === "Pickup");
+  const deliveryStage = data?.stageSummary?.find((s) => s.method === "Delivery");
 
-  const pickupPaymentSegments =
-    data?.paymentTypeByMethod?.Pickup?.map((p, i) => ({ label: p.label, value: p.value, color: hrh.series[i % hrh.series.length] })) || [];
-  const deliveryPaymentSegments =
-    data?.paymentTypeByMethod?.Delivery?.map((p, i) => ({ label: p.label, value: p.value, color: hrh.series[i % hrh.series.length] })) || [];
+  const RATE_LABELS = ["Pack Rate", "Ship Rate", "QC Rate", "Waybill Coverage"];
+  const RATE_KEYS = ["packRate", "shipRate", "qcRate", "waybillRate"];
+  const rateRowsBoth = RATE_LABELS.map((metric, i) => ({ metric, pickup: pickupStage?.[RATE_KEYS[i]], delivery: deliveryStage?.[RATE_KEYS[i]] }));
+  const rateRowsPickup = RATE_LABELS.map((metric, i) => ({ metric, value: pickupStage?.[RATE_KEYS[i]] })).filter((r) => r.metric !== "Waybill Coverage");
+  const rateRowsDelivery = RATE_LABELS.map((metric, i) => ({ metric, value: deliveryStage?.[RATE_KEYS[i]] }));
 
-  const pickupStage = data?.timing?.stageSummary?.find((s) => s.method === "Pickup");
-  const deliveryStage = data?.timing?.stageSummary?.find((s) => s.method === "Delivery");
-  const STAGE_LABELS = ["Order Placed → Packed", "Packed → Dispatched", "Dispatched → Shipped / Ready", "Order Placed → Shipped / Ready (Total)"];
-  const STAGE_KEYS = ["avgOrderToPackSeconds", "avgPackToDispatchSeconds", "avgDispatchToShipSeconds", "avgOrderToShipSeconds"];
+  const STAGE_LABELS = [
+    "Order Placed → Picked",
+    "Picked → QC",
+    "QC → Waybill Printed",
+    "Packed → Dispatched",
+    "Dispatched → Shipped / Ready",
+    "Order Placed → Shipped / Ready (Total)",
+  ];
+  const STAGE_KEYS = [
+    "avgOrderToPackSeconds",
+    "avgPickToQcSeconds",
+    "avgQcToWaybillSeconds",
+    "avgPackToDispatchSeconds",
+    "avgDispatchToShipSeconds",
+    "avgOrderToShipSeconds",
+  ];
   const timingStageRowsBoth = STAGE_LABELS.map((stage, i) => ({ stage, pickup: pickupStage?.[STAGE_KEYS[i]], delivery: deliveryStage?.[STAGE_KEYS[i]] }));
-  const timingStageRowsPickup = STAGE_LABELS.map((stage, i) => ({ stage, value: pickupStage?.[STAGE_KEYS[i]] }));
+  const timingStageRowsPickup = STAGE_LABELS.map((stage, i) => ({ stage, value: pickupStage?.[STAGE_KEYS[i]] })).filter((r) => r.stage !== "QC → Waybill Printed");
   const timingStageRowsDelivery = STAGE_LABELS.map((stage, i) => ({ stage, value: deliveryStage?.[STAGE_KEYS[i]] }));
 
-  const pickupTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Pickup");
-  const deliveryTimeline = (data?.timing?.timeline || []).filter((t) => t.method === "Delivery");
-
-  // Real daily sparklines — straight off `data.trend` (already date-sorted
-  // ascending), no bucketing needed since a card just needs the shape of
-  // the trend. AOV/Share have no daily breakdown anywhere in the API
-  // response (whole-window ratios), so those KPI cards get an icon only.
-  const trendAsc = data?.trend || [];
-  const pickupOrdersSpark = trendAsc.map((d) => d.pickupOrders);
-  const deliveryOrdersSpark = trendAsc.map((d) => d.deliveryOrders);
-  const pickupGmvSpark = trendAsc.map((d) => d.pickupGmv);
-  const deliveryGmvSpark = trendAsc.map((d) => d.deliveryGmv);
+  const pickupTimeline = (data?.timeline || []).filter((t) => t.method === "Pickup");
+  const deliveryTimeline = (data?.timeline || []).filter((t) => t.method === "Delivery");
 
   return (
     <div>
@@ -224,44 +230,37 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "overview" && (
         <>
           <KpiRow>
-            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(data.kpis.pickupOrders.value)} sparkline={pickupOrdersSpark} />
-            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(data.kpis.deliveryOrders.value)} sparkline={deliveryOrdersSpark} />
-            <KpiCard label="Pickup GMV" icon={ICONS.peso} value={formatPeso(data.kpis.pickupGmv.value)} sparkline={pickupGmvSpark} />
-            <KpiCard label="Delivery GMV" icon={ICONS.peso} value={formatPeso(data.kpis.deliveryGmv.value)} sparkline={deliveryGmvSpark} />
-            <KpiCard label="Pickup AOV" icon={ICONS.peso} value={formatPeso(data.kpis.pickupAov.value)} />
-            <KpiCard label="Delivery AOV" icon={ICONS.peso} value={formatPeso(data.kpis.deliveryAov.value)} />
+            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(data.kpis.pickupOrders.value)} />
+            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(data.kpis.deliveryOrders.value)} />
+            <KpiCard
+              label="Pick Rate"
+              icon={ICONS.percent}
+              value={formatPct(data.kpis.pickRate.value)}
+              sub={`${formatNum(data.kpis.pickRate.pickedOrders)} of ${formatNum(data.kpis.pickRate.realOrdersReceived)} Real Orders Received`}
+            />
           </KpiRow>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Fulfillment Method Split" subtitle="GMV share — Pickup vs Delivery vs Unknown">
-              <DonutChart segments={methodSegments} centerValue={formatCompactPeso(data.kpis.pickupGmv.value + data.kpis.deliveryGmv.value)} centerLabel="Pickup + Delivery GMV" />
-              <div className="mt-3">
-                <DataTable columns={METHOD_TABLE_COLUMNS} rows={data.methodSummary} emptyLabel="No sales in this period." />
-              </div>
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
+            <Panel title="Orders by Method" subtitle="Share of orders — Pickup vs Delivery">
+              <DonutChart segments={methodSegments} centerValue={formatNum(totalMethodOrders)} centerLabel="Pickup + Delivery Orders" />
             </Panel>
-            <Panel
-              title="Pickup vs Delivery Trend"
-              subtitle="GMV by transaction date"
-              action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
-            >
-              <BarComparisonChart
-                data={trendRows}
-                xKey="dateLabel"
-                valueFormatter={formatCompactPeso}
-                series={[
-                  { key: "pickupGmv", name: "Pickup", color: METHOD_COLOR.Pickup },
-                  { key: "deliveryGmv", name: "Delivery", color: METHOD_COLOR.Delivery },
-                ]}
-              />
-            </Panel>
+            <div className="xl:col-span-2">
+              <Panel title="Stage Completion Rates" subtitle="Of orders that started picking, % that reached each later stage">
+                <DataTable columns={RATE_COLUMNS_BOTH} rows={rateRowsBoth} />
+              </Panel>
+            </div>
           </div>
 
           <Panel
             title="Fulfillment Timing"
-            subtitle={'Real pick/pack/dispatch timestamps — no confirmed "delivered to customer" event exists in this data; see Data Quality on the Pickup/Delivery tabs'}
+            subtitle={'Real pick/QC/waybill/pack/dispatch timestamps — no confirmed "delivered to customer" event exists in this data; see Data Quality on the Pickup/Delivery tabs'}
             className="mb-4"
           >
             <DataTable columns={TIMING_STAGE_COLUMNS_BOTH} rows={timingStageRowsBoth} />
+          </Panel>
+
+          <Panel title="Picker Productivity" subtitle="Not split by Pickup/Delivery — a picker works both">
+            <DataTable columns={PICKER_COLUMNS} rows={data.pickerProductivity} emptyLabel="No picker records in this period." />
           </Panel>
         </>
       )}
@@ -270,22 +269,17 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "pickup" && (
         <>
           <KpiRow>
-            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(pickupSummary?.orders)} sparkline={pickupOrdersSpark} />
-            <KpiCard label="Pickup GMV" icon={ICONS.peso} value={formatPeso(pickupSummary?.gmv)} sparkline={pickupGmvSpark} />
-            <KpiCard label="Pickup AOV" icon={ICONS.peso} value={formatPeso(pickupSummary?.aov)} />
-            <KpiCard label="Share of GMV" icon={ICONS.percent} value={formatPct(pickupSummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+            <KpiCard label="Pickup Orders" icon={ICONS.pickup} value={formatNum(pickupStage?.orders)} sub="with a fulfillment journey record" />
+            <KpiCard label="Pack Rate" icon={ICONS.checkCircle} value={formatRate(pickupStage?.packRate)} />
+            <KpiCard label="Ship Rate" icon={ICONS.checkCircle} value={formatRate(pickupStage?.shipRate)} />
+            <KpiCard label="QC Rate" icon={ICONS.checkCircle} value={formatRate(pickupStage?.qcRate)} />
           </KpiRow>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Payment Type" subtitle="Share of GMV within Pickup">
-              <DonutChart segments={pickupPaymentSegments} centerValue={formatCompactPeso(pickupSummary?.gmv)} centerLabel="Pickup GMV" />
-            </Panel>
-            <Panel title="Category Mix" subtitle="Top categories by GMV within Pickup">
-              <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Pickup || []} emptyLabel="No pickup sales in this period." />
-            </Panel>
-          </div>
+          <Panel title="Stage Completion Rates" subtitle="Pack/Ship/QC — Pickup has no Waybill step (in-store, no shipping label)" className="mb-4">
+            <DataTable columns={RATE_COLUMNS_SINGLE} rows={rateRowsPickup} />
+          </Panel>
 
-          <Panel title="Fulfillment Timing" subtitle="Real pick/pack/dispatch timestamps for Pickup orders" className="mb-4">
+          <Panel title="Fulfillment Timing" subtitle="Real pick/QC/pack/dispatch timestamps for Pickup orders" className="mb-4">
             <DataTable columns={TIMING_STAGE_COLUMNS_SINGLE} rows={timingStageRowsPickup} />
           </Panel>
 
@@ -309,22 +303,17 @@ export default function PickupAndDelivery({ filters }) {
       {data && !error && subTab === "delivery" && (
         <>
           <KpiRow>
-            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(deliverySummary?.orders)} sparkline={deliveryOrdersSpark} />
-            <KpiCard label="Delivery GMV" icon={ICONS.peso} value={formatPeso(deliverySummary?.gmv)} sparkline={deliveryGmvSpark} />
-            <KpiCard label="Delivery AOV" icon={ICONS.peso} value={formatPeso(deliverySummary?.aov)} />
-            <KpiCard label="Share of GMV" icon={ICONS.percent} value={formatPct(deliverySummary?.sharePct)} sub="of Pickup + Delivery + Unknown" />
+            <KpiCard label="Delivery Orders" icon={ICONS.delivery} value={formatNum(deliveryStage?.orders)} sub="with a fulfillment journey record" />
+            <KpiCard label="Pack Rate" icon={ICONS.checkCircle} value={formatRate(deliveryStage?.packRate)} />
+            <KpiCard label="Ship Rate" icon={ICONS.checkCircle} value={formatRate(deliveryStage?.shipRate)} />
+            <KpiCard label="Waybill Coverage" icon={ICONS.checkCircle} value={formatRate(deliveryStage?.waybillRate)} />
           </KpiRow>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Payment Type" subtitle="Share of GMV within Delivery">
-              <DonutChart segments={deliveryPaymentSegments} centerValue={formatCompactPeso(deliverySummary?.gmv)} centerLabel="Delivery GMV" />
-            </Panel>
-            <Panel title="Category Mix" subtitle="Top categories by GMV within Delivery">
-              <DataTable columns={CATEGORY_COLUMNS} rows={data.categoryByMethod?.Delivery || []} emptyLabel="No delivery sales in this period." />
-            </Panel>
-          </div>
+          <Panel title="Stage Completion Rates" subtitle="Pack/Ship/QC/Waybill" className="mb-4">
+            <DataTable columns={RATE_COLUMNS_SINGLE} rows={rateRowsDelivery} />
+          </Panel>
 
-          <Panel title="Fulfillment Timing" subtitle="Real pick/pack/dispatch timestamps for Delivery orders" className="mb-4">
+          <Panel title="Fulfillment Timing" subtitle="Real pick/QC/waybill/pack/dispatch timestamps for Delivery orders" className="mb-4">
             <DataTable columns={TIMING_STAGE_COLUMNS_SINGLE} rows={timingStageRowsDelivery} />
           </Panel>
 
