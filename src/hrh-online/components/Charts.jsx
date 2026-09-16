@@ -17,7 +17,7 @@ import {
   Cell,
 } from "recharts";
 import { hrh } from "../theme";
-import { formatCompactPeso } from "../format";
+import { formatCompactPeso, formatNum } from "../format";
 
 // Plain-DOM axis titles, laid out entirely outside the chart's SVG — avoids
 // recharts' in-SVG axis `label` prop, which shares drawing space with tick
@@ -259,6 +259,80 @@ export function RateTrendComboChart({ data, bars, rateKey, rateName, height = 26
           <Bar key={b.key} yAxisId="count" dataKey={b.key} name={b.name} fill={b.color} radius={[2, 2, 0, 0]} maxBarSize={24} />
         ))}
         <Line yAxisId="rate" type="monotone" dataKey={rateKey} name={rateName} stroke={hrh.accent} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+function PairedComboTooltip({ active, payload, label, barValueFormatter, lineValueFormatter }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px] max-w-[300px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5 truncate" style={{ color: "#a3adba" }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+            <span className="truncate">{p.name}:</span>
+          </span>
+          <span className="font-semibold shrink-0">{p.dataKey.endsWith("__line") ? lineValueFormatter(p.value) : barValueFormatter(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Every series gets BOTH a grouped bar (left axis) and a line (right axis),
+// same color for both — for when two genuinely different-unit metrics
+// (e.g. a peso value + a count) need comparing per-category on ONE chart
+// rather than two side-by-side ones. Deliberately dense (used with up to
+// ~7 series, per explicit request) — the line has no legend entry of its
+// own (`legendType="none"`) since its color already matches its bar, and
+// the tooltip labels it "(Orders)"-style to stay distinguishable there.
+// `series`: [{key, name, color}] — `data` rows must carry `${key}__bar`
+// and `${key}__line` fields (see SalesAnalytics.jsx's per-voucher merge).
+export function PairedBarLineChart({
+  data,
+  series,
+  xKey = "label",
+  height = 280,
+  barValueFormatter = formatCompactPeso,
+  lineValueFormatter = formatNum,
+  lineName = (name) => `${name} (Orders)`,
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={hrh.border} vertical={false} />
+        <XAxis dataKey={xKey} tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={{ stroke: hrh.border }} tickLine={false} />
+        <YAxis yAxisId="bar" tick={{ fontSize: 11, fill: hrh.ink2 }} axisLine={false} tickLine={false} tickFormatter={barValueFormatter} width={60} />
+        <YAxis
+          yAxisId="line"
+          orientation="right"
+          tick={{ fontSize: 11, fill: hrh.ink2 }}
+          axisLine={false}
+          tickLine={false}
+          tickFormatter={lineValueFormatter}
+          allowDecimals={false}
+          width={44}
+        />
+        <Tooltip content={<PairedComboTooltip barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} />} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        {series.map((s) => (
+          <Bar key={`${s.key}__bar`} yAxisId="bar" dataKey={`${s.key}__bar`} name={s.name} fill={s.color} radius={[2, 2, 0, 0]} maxBarSize={18} />
+        ))}
+        {series.map((s) => (
+          <Line
+            key={`${s.key}__line`}
+            yAxisId="line"
+            dataKey={`${s.key}__line`}
+            name={lineName(s.name)}
+            stroke={s.color}
+            strokeWidth={2}
+            dot={false}
+            legendType="none"
+          />
+        ))}
       </ComposedChart>
     </ResponsiveContainer>
   );

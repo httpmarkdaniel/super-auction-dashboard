@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { KpiCard, KpiRow } from "../components/Kpi";
-import { DonutChart, BarComparisonChart, TrendChart } from "../components/Charts";
+import { DonutChart, BarComparisonChart, PairedBarLineChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows } from "../trendBucket";
@@ -140,10 +140,13 @@ function isDateRangeReady(dateRange) {
 // it can't be correctly summed per bucket). Unlike Sales Trend above, this
 // stays tied to the page's Date Range filter — not a fixed trailing window.
 //
-// The two trend charts emphasize WHICH specific vouchers are getting used
-// (top 6 by orders + "Other", same series/colors in both — see
-// api/hrh-sales-analytics.js's buildVoucherSeriesTrend) rather than the
-// combined Order Value/Discount Value total this panel showed before.
+// The combo chart emphasizes WHICH specific vouchers are getting used (top
+// 6 by orders + "Other", same series/colors as both bar and line for a
+// given voucher — see api/hrh-sales-analytics.js's buildVoucherSeriesTrend)
+// rather than the combined Order Value/Discount Value total this panel
+// showed before. Discount Value (₱) is the bar (left axis), Orders (count)
+// is the line (right axis), one dense combo chart per explicit request
+// rather than two side-by-side ones.
 function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChange }) {
   const totals = voucherAssistedSales?.totals;
   const byVoucherTrend = voucherAssistedSales?.byVoucherTrend;
@@ -151,6 +154,18 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
   const seriesKeys = voucherSeries.map((s) => s.key);
   const ordersByVoucher = bucketRows(byVoucherTrend?.ordersData, bucket, seriesKeys);
   const discountByVoucher = bucketRows(byVoucherTrend?.discountData, bucket, seriesKeys);
+  // Merge the two same-length, same-order bucketed arrays into one combo
+  // dataset — `${key}__bar` (Discount Value) and `${key}__line` (Orders)
+  // per voucher, per bucket (see PairedBarLineChart in Charts.jsx).
+  const voucherComboData = discountByVoucher.map((discountRow, i) => {
+    const ordersRow = ordersByVoucher[i] || {};
+    const row = { dateLabel: discountRow.dateLabel };
+    for (const key of seriesKeys) {
+      row[`${key}__bar`] = discountRow[key] || 0;
+      row[`${key}__line`] = ordersRow[key] || 0;
+    }
+    return row;
+  });
   return (
     <Panel
       title="Voucher Assisted Sales"
@@ -177,19 +192,16 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
         {/* Average Order Value: a derived ratio (orderPrice/orders), not a real per-day summable quantity, so icon only, no sparkline. */}
         <KpiCard label="Average Order Value" icon={ICONS.peso} value={formatPeso(totals?.aov)} />
       </KpiRow>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-            Orders by Voucher
+      <div>
+        <div className="flex items-baseline justify-between gap-3 mb-2">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
+            Discount Value &amp; Orders by Voucher
           </div>
-          <TrendChart data={ordersByVoucher} series={voucherSeries} xKey="dateLabel" valueFormatter={formatNum} />
-        </div>
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-            Discount Value by Voucher
+          <div className="text-[10.5px]" style={{ color: hrh.muted }}>
+            Bars = Discount Value (₱, left axis) · Lines = Orders (count, right axis)
           </div>
-          <BarComparisonChart data={discountByVoucher} series={voucherSeries} xKey="dateLabel" valueFormatter={formatCompactPeso} />
         </div>
+        <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" />
       </div>
       <TopSalesDriversPanel topSalesDrivers={voucherAssistedSales?.topSalesDrivers} />
     </Panel>
