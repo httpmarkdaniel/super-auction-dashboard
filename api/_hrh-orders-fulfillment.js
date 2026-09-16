@@ -359,6 +359,18 @@ export async function computeHmrphOnlineLifecycle(from, to) {
   // then reordered" — excluded from Real Orders Received again.
   const realOrdersReceived = realNonCancelled.length + stayingCancelled.length;
 
+  // Same population as realOrdersReceived, just split by checkout_method
+  // (present on every orderRows row, see the `any(checkout_method)` above)
+  // -- added so a caller like Pickup & Delivery can show a real, method-
+  // scoped Orders Received instead of silently reusing the combined total
+  // for every method filter (verified bug: switching the page's Pickup/
+  // Delivery pill left this number unchanged).
+  const realOrdersReceivedByMethod = {};
+  for (const o of [...realNonCancelled, ...stayingCancelled]) {
+    const m = o.checkout_method || "Unknown";
+    realOrdersReceivedByMethod[m] = (realOrdersReceivedByMethod[m] || 0) + 1;
+  }
+
   // directMatchedSet/candidatesByName already computed above from the
   // parallel-fetched directMatchRows/blankOrderInvoiceRows.
   const directFulfilled = [];
@@ -405,6 +417,7 @@ export async function computeHmrphOnlineLifecycle(from, to) {
     stayingCancelled,
     allRealCancelled,
     realOrdersReceived,
+    realOrdersReceivedByMethod,
     directFulfilled,
     probableFulfilled,
     fulfilled,

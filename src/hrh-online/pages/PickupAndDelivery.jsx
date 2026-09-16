@@ -580,7 +580,11 @@ export default function PickupAndDelivery({ filters }) {
     };
   }, [data]);
 
-  const kpis = useMemo(() => (data ? computeKpis(filteredOrders, data.ordersReceived, referenceByMethod) : null), [data, filteredOrders, referenceByMethod]);
+  const ordersReceivedForFilter = data ? data.ordersReceived[method] ?? data.ordersReceived.all : 0;
+  const kpis = useMemo(
+    () => (data ? computeKpis(filteredOrders, ordersReceivedForFilter, referenceByMethod) : null),
+    [data, filteredOrders, ordersReceivedForFilter, referenceByMethod]
+  );
   const methodComparison = useMemo(() => computeMethodComparison(filteredOrders, referenceByMethod), [filteredOrders, referenceByMethod]);
   const trend = useMemo(() => computeTrend(filteredOrders), [filteredOrders]);
   const journeyBreakdown = useMemo(() => computeJourneyBreakdown(filteredOrders), [filteredOrders]);
@@ -684,7 +688,12 @@ export default function PickupAndDelivery({ filters }) {
 
           {/* ------------------------------ Top KPIs ----------------------------- */}
           <KpiRow>
-            <KpiCard label="Orders Received" icon={ICONS.cart} value={formatNum(kpis.ordersReceived)} />
+            <KpiCard
+              label="Orders Received"
+              icon={ICONS.cart}
+              value={formatNum(kpis.ordersReceived)}
+              sub={picker !== "all" || qcStation !== "all" ? "Scoped to method only -- source has no Picker/QC Station field" : undefined}
+            />
             <KpiCard
               label="Completed Orders"
               icon={ICONS.checkCircle}

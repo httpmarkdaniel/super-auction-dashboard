@@ -226,12 +226,20 @@ export async function handlePickupDelivery(req, res) {
           "Pickup vs Delivery is checkout_method on xv3.mart_xv3_order_report. Every fulfillment metric comes from xv3.mart_order_fulfilment_journey's real pick -> QC -> waybill -> pack -> dispatch -> ship timestamps, joined by order_id -> order_number (direct match only). This page is HMRPH Online's own fulfillment operations -- not affected by the dashboard's Channel filter, since TikTok/Shopee orders never populate either of these tables.",
         generatedAt: new Date().toISOString(),
       },
-      ordersReceived: lifecycle.realOrdersReceived,
+      // Split by method so the page's All/Pickup/Delivery pill actually
+      // changes this number -- verified bug: it used to always show the
+      // combined total regardless of which method was selected.
+      ordersReceived: {
+        all: lifecycle.realOrdersReceived,
+        Pickup: lifecycle.realOrdersReceivedByMethod?.Pickup || 0,
+        Delivery: lifecycle.realOrdersReceivedByMethod?.Delivery || 0,
+      },
       orders,
       inProgress: liveInProgress,
       recentOrders,
       dataQuality: [
         "Orders Received uses the same True-Cancellation-aware definition used dashboard-wide; every other figure on this page comes from the fulfillment journey table's own (slightly different, simpler) population -- an order that got a pick/pack record. The two populations won't always match exactly.",
+        "Orders Received only splits by the page's method pill (All/Pickup/Delivery) -- xv3.mart_xv3_order_report, its source table, has no picker or QC station column, so it can't also narrow when a Picker or QC Station filter is applied. \"% of Orders Received\" will read low in that case since the numerator (this picker's orders) is being compared to the whole method's total.",
         "Medians and percentiles filter out non-positive and implausibly long (>3 day) stage durations as data artifacts -- a handful of journey rows have clearly-wrong timestamps that would otherwise distort every average they touch.",
         "There's no official SLA policy field anywhere in this data, so \"Reference Time\" / \"Within Reference Time\" is a self-derived pace benchmark -- each method's own trailing-90-day median Order-Placed-to-Shipped time -- never an official target.",
         "Orders Requiring Attention flags an order only when its current wait is more than 2x the typical (trailing-90-day median) wait for its next stage; a flat 2-hour fallback applies only where a stage has no historical baseline to compare against at all.",
