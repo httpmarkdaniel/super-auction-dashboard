@@ -138,71 +138,6 @@ function enumerateDatesISO(from, to) {
   return dates;
 }
 
-// Builds a grouped-bar-chart-ready { series, data } shape from raw
-// { d, label, gmv } rows: picks the top N labels by total window GMV as
-// their own series (color-assigned), collapses every remaining label into
-// one "Other" series (so a long tail of hundreds of categories/subcategories
-// doesn't produce hundreds of bars), then zero-fills every day in the
-// window for every series key — same zero-fill convention as
-// api/hrh-executive-overview.js's Sales Trend, so a day with no sales in a
-// given category doesn't create a gap.
-// How many individual labels to name inline for the "Other" bucket's
-// compact breakdown — the rest collapse into a "+N more" tail rather than
-// listing every one of a potential 1,000+-label long tail.
-const OTHER_BREAKDOWN_SHOWN = 5;
-
-function buildTopSeriesTrend(rows, from, to, topN) {
-  const totalsByLabel = new Map();
-  for (const r of rows) totalsByLabel.set(r.label, (totalsByLabel.get(r.label) || 0) + toNum(r.gmv));
-  const sortedLabels = Array.from(totalsByLabel.entries()).sort((a, b) => b[1] - a[1]);
-  const topLabels = sortedLabels.slice(0, topN).map(([label]) => label);
-  const restLabels = sortedLabels.slice(topN);
-  const hasOther = restLabels.length > 0;
-  const grandTotal = sortedLabels.reduce((s, [, gmv]) => s + gmv, 0);
-
-  const labelToKey = new Map(topLabels.map((label) => [label, label]));
-  const series = topLabels.map((label, i) => ({ key: label, name: label, color: SERIES_COLORS[i % SERIES_COLORS.length] }));
-  if (hasOther) series.push({ key: "Other", name: "Other", color: OTHER_COLOR });
-
-  const byDate = new Map();
-  for (const r of rows) {
-    const key = labelToKey.get(r.label) || "Other";
-    const bucket = byDate.get(r.d) || { totals: {}, otherDetail: new Map() };
-    const gmv = toNum(r.gmv);
-    bucket.totals[key] = (bucket.totals[key] || 0) + gmv;
-    if (key === "Other" && gmv > 0) bucket.otherDetail.set(r.label, (bucket.otherDetail.get(r.label) || 0) + gmv);
-    byDate.set(r.d, bucket);
-  }
-  const seriesKeys = series.map((s) => s.key);
-  const data = enumerateDatesISO(from, to).map((date) => {
-    const bucket = byDate.get(date);
-    const out = { date };
-    for (const key of seriesKeys) out[key] = bucket?.totals[key] || 0;
-    // Per-day breakdown of exactly which labels fed into "Other" that day —
-    // lets the chart's tooltip name real categories/subcategories instead
-    // of leaving "Other" an unexplained number when hovered.
-    if (hasOther) {
-      out.otherDetail = bucket ? Array.from(bucket.otherDetail, ([label, gmv]) => ({ label, gmv })).sort((a, b) => b.gmv - a.gmv) : [];
-    }
-    return out;
-  });
-
-  // Names what's actually inside the gray "Other" bar — the biggest
-  // contributors by GMV, plus a remainder count — so "Other" isn't a black
-  // box on the chart. Zero/negative-net labels (fully offset by returns
-  // across the window) are excluded from the named list — nothing useful
-  // to call out about a category with no net sales.
-  const restLabelsPositive = restLabels.filter(([, gmv]) => gmv > 0);
-  const otherBreakdown = restLabelsPositive.slice(0, OTHER_BREAKDOWN_SHOWN).map(([label, gmv]) => ({
-    label,
-    gmv,
-    pct: grandTotal > 0 ? (gmv / grandTotal) * 100 : 0,
-  }));
-  const otherMoreCount = Math.max(0, restLabelsPositive.length - OTHER_BREAKDOWN_SHOWN);
-
-  return { series, data, otherBreakdown, otherMoreCount };
-}
-
 // `?report=traffic` / `?report=customers` dispatch to Traffic & Conversion's
 // and Customer Analytics' completely separate handlers (api/_hrh-traffic-
 // analytics.js, api/_hrh-customer-analytics.js) BEFORE any of this file's own
@@ -468,97 +403,51 @@ export default async function handler(req, res) {
       topSalesDrivers[CHANNEL_DISPLAY[ch] || ch] = topSalesDriversFor(rows);
     }
 
-    // Category / Subcategory Contribution — GMV per day, per category (or
-    // sub_category_name), for the CURRENT window and the page's selected
-    // channel filter (unlike the table above, these two respect it — each
-    // is a single distribution, not a channel-by-channel comparison).
-    // category_name/sub_category_name are 100% populated on this store's
-    // population (verified: sub_category_name has 1,087 distinct values
-    // YTD), so every row gets a real bucket, never an "Unknown" catch-all.
-    // Rendered as a grouped bar chart bucketable by Day/Week/Month client-
-    // side (same bucketRows/TrendBucketPills pattern as Executive
-    // Overview's Sales Trend) rather than a single-period share, so this
-    // returns a full daily series per top category, not one aggregate.
-    const [categoryRows, subcategoryRows] = await Promise.all([
-      (
-        await client.query({
-          query: `
-            SELECT transaction_date AS d, category_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0
-            GROUP BY transaction_date, category_name
-          `,
-          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-          format: "JSONEachRow",
-        })
-      ).json(),
-      (
-        await client.query({
-          query: `
-            SELECT transaction_date AS d, sub_category_name AS label, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0
-            GROUP BY transaction_date, sub_category_name
-          `,
-          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-          format: "JSONEachRow",
-        })
-      ).json(),
-    ]);
-    const categoryContribution = buildTopSeriesTrend(categoryRows, current.from, current.to, 6);
-    const subcategoryContribution = buildTopSeriesTrend(subcategoryRows, current.from, current.to, 6);
-
-    // Top 3 items/SKUs per top category/subcategory — the contribution
-    // chart's bars only say "Clothing did ₱X today", not which specific
-    // products drove it. Queried only for the top N labels each panel
-    // actually shows (never "Other", which isn't one real category), for
-    // the whole current window (a single period ranking, not per-day —
-    // the chart is already per-day, this is the supporting "what's inside
-    // this bar's whole-period total" breakdown).
-    async function topItemsByLabel(labelColumn, topLabels) {
-      if (topLabels.length === 0) return {};
-      const rows = await (
-        await client.query({
-          query: `
-            SELECT
-              ${labelColumn} AS label,
-              \`ct.item_id\` AS item_id,
-              argMax(product_name, transaction_date) AS product_name,
-              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-            FROM xv3.mart_net_sales
-            WHERE store_name = {store:String}
-              AND sales_channel IN {channels:Array(String)}
-              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-              AND net_sales_amount > 0
-              AND ${labelColumn} IN {labels:Array(String)}
-              AND \`ct.item_id\` IS NOT NULL
-            GROUP BY label, item_id
-          `,
-          query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to, labels: topLabels },
-          format: "JSONEachRow",
-        })
-      ).json();
-      const byLabel = new Map();
-      for (const r of rows) {
-        if (!byLabel.has(r.label)) byLabel.set(r.label, []);
-        byLabel.get(r.label).push({ product: r.product_name, gmv: toNum(r.gmv) });
-      }
-      const out = {};
-      for (const [label, items] of byLabel) {
-        out[label] = items.sort((a, b) => b.gmv - a.gmv).slice(0, 3);
-      }
-      return out;
+    // Sales Trend — same fixed trailing window + per-channel breakdown
+    // pattern as Executive Overview's Sales Trend (api/hrh-executive-
+    // overview.js): 6 months of daily GMV/Orders/Units back from today,
+    // completely independent of this page's Date Range filter, grouped by
+    // (date, channel) so the frontend's hover tooltip can show HMRPH
+    // Online/TikTok/Shopee breakdown regardless of the page's Channel
+    // filter (same "always all 3" convention Channel Comparison already
+    // uses on this page). ~183 days is a plain day-count approximation of
+    // "6 months back", not calendar-exact — fine for a trailing trend
+    // view, unlike MTD/YTD where exact month boundaries matter.
+    const trailingTo = manilaTodayISODate();
+    const trailingFrom = addDaysISO(trailingTo, -183);
+    const trailingTrendRows = await (
+      await client.query({
+        query: `
+          SELECT
+            transaction_date AS d,
+            sales_channel AS ch,
+            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+            sumIf(net_quantity, net_sales_amount > 0) AS units
+          FROM xv3.mart_net_sales
+          WHERE store_name = {store:String}
+            AND sales_channel IN {allChannels:Array(String)}
+            AND transaction_date BETWEEN {trailingFrom:String} AND {trailingTo:String}
+          GROUP BY transaction_date, sales_channel
+        `,
+        query_params: { store: HRH_STORE, allChannels, trailingFrom, trailingTo },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const trailingByDate = new Map();
+    for (const r of trailingTrendRows) {
+      const bucket = trailingByDate.get(r.d) || { gmv: 0, orders: 0, units: 0, channels: [] };
+      const chGmv = toNum(r.gmv);
+      bucket.gmv += chGmv;
+      bucket.orders += toNum(r.orders);
+      bucket.units += toNum(r.units);
+      if (chGmv > 0) bucket.channels.push({ label: CHANNEL_DISPLAY[r.ch] || r.ch, gmv: chGmv });
+      trailingByDate.set(r.d, bucket);
     }
-    const categoryTopLabels = categoryContribution.series.filter((s) => s.key !== "Other").map((s) => s.key);
-    const subcategoryTopLabels = subcategoryContribution.series.filter((s) => s.key !== "Other").map((s) => s.key);
-    const [categoryTopItems, subcategoryTopItems] = await Promise.all([
-      topItemsByLabel("category_name", categoryTopLabels),
-      topItemsByLabel("sub_category_name", subcategoryTopLabels),
-    ]);
-    categoryContribution.topItems = categoryTopItems;
-    subcategoryContribution.topItems = subcategoryTopItems;
+    const salesTrendTrailing = enumerateDatesISO(trailingFrom, trailingTo).map((d) => {
+      const b = trailingByDate.get(d);
+      return { date: d, gmv: b?.gmv ?? 0, orders: b?.orders ?? 0, units: b?.units ?? 0, channelBreakdown: b?.channels || [] };
+    });
 
     // Payment Type / Checkout-Fulfillment Method — same canonical-population
     // + LEFT JOIN pattern as Cancellation Rate above (xv3.mart_xv3_order_report,
@@ -761,8 +650,7 @@ export default async function handler(req, res) {
       },
       channelComparison,
       topSalesDrivers,
-      categoryContribution,
-      subcategoryContribution,
+      salesTrendTrailing,
       paymentType,
       fulfillmentMethod,
       voucherAssistedSales,

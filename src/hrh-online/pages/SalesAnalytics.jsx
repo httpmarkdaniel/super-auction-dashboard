@@ -2,73 +2,53 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { KpiCard, KpiRow } from "../components/Kpi";
-import { BarComparisonChart, StackedAreaChart, DonutChart } from "../components/Charts";
+import { StackedAreaChart, DonutChart, SalesTrendComboChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows, bucketArrayField } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
 
-// How many individual labels to name in the "Other" bar's hover tooltip
-// before collapsing the rest into a "+N more" tail — a specific bucket
-// (one day, or one week/month once summed) rarely has more than a handful
-// of non-top categories actually selling, so this is a display cap, not a
-// data cap (the full per-bucket list is already computed server-side).
-const OTHER_TOOLTIP_SHOWN = 5;
+// Sales Trend is a fixed trailing window (last 30 days/4 weeks/6 months,
+// always ending today), independent of the page's Date Range filter — same
+// pattern as Executive Overview's Sales Trend (see api/hrh-sales-
+// analytics.js's trailingFrom/trailingTo). These counts are how many of
+// bucketRows' most-recent buckets to keep after re-bucketing.
+const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
 
-// Default ChartTooltip only shows each series' own number — for the
-// "Other" bar specifically, that's an unexplained lump sum. This variant
-// additionally names the real categories/subcategories collapsed into it
-// for the SPECIFIC bucket being hovered (using the otherDetail array
-// ContributionTrendPanel attaches to each data row via bucketArrayField),
-// not just the whole-period breakdown shown as a footnote under the chart.
-// Rows are re-sorted by THIS bucket's own value (largest first) rather than
-// the chart's fixed whole-period series order — a category that's #1 across
-// the whole window can easily be small (or zero) on any one day, so the
-// series order and a given day's actual ranking often disagree. A Total row
-// at the bottom sums every series for the bucket, so the full picture is
-// visible even though only the top items are listed above it.
-function OtherBreakdownTooltip({ active, payload, label, valueFormatter }) {
+// Adds a per-channel GMV breakdown (HMRPH Online/TikTok/Shopee) under the
+// default GMV/Orders/Units rows — channelBreakdown is attached to each
+// bucketed row client-side via bucketArrayField, same as Executive
+// Overview's own Sales Trend tooltip. The backend already returns
+// display-ready channel names (CHANNEL_DISPLAY), so no local remap is
+// needed here. Channels with 0 GMV that bucket aren't listed.
+function SalesTrendChannelTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
-  const sorted = [...payload].sort((a, b) => b.value - a.value);
-  const total = payload.reduce((s, p) => s + (p.value || 0), 0);
+  const row = payload[0]?.payload;
+  const channelBreakdown = row?.channelBreakdown || [];
   return (
-    <div
-      className="rounded-md px-3 py-2 text-[12px] max-w-[280px]"
-      style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}
-    >
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
       <div className="font-semibold mb-1">{label}</div>
-      {sorted.map((p) => {
-        const otherDetail = p.dataKey === "Other" ? (p.payload?.otherDetail || []).filter((o) => o.gmv > 0) : null;
-        return (
-          <div key={p.dataKey} className="mb-1 last:mb-0">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
-              <span style={{ color: "#a3adba" }}>{p.name}:</span>
-              <span className="font-semibold">{valueFormatter(p.value)}</span>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5" style={{ color: "#a3adba" }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+            {p.name}:
+          </span>
+          <span className="font-semibold">{p.dataKey === "gmv" ? formatCompactPeso(p.value) : formatNum(p.value)}</span>
+        </div>
+      ))}
+      {channelBreakdown.length > 0 && (
+        <div className="mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${hrh.navyBorder}` }}>
+          <div style={{ color: "#a3adba" }}>GMV by channel:</div>
+          {channelBreakdown.map((c) => (
+            <div key={c.label} className="flex items-center justify-between gap-4">
+              <span style={{ color: "#a3adba" }}>{c.label}</span>
+              <span className="font-semibold">{formatCompactPeso(c.gmv)}</span>
             </div>
-            {otherDetail && otherDetail.length > 0 && (
-              <div className="ml-4 mt-1 pl-2 space-y-0.5" style={{ borderLeft: `1px solid ${hrh.navyBorder}` }}>
-                {otherDetail.slice(0, OTHER_TOOLTIP_SHOWN).map((o) => (
-                  <div key={o.label} className="flex items-center justify-between gap-3" style={{ color: "#a3adba" }}>
-                    <span className="truncate">{o.label}</span>
-                    <span className="shrink-0" style={{ color: "#fff" }}>
-                      {valueFormatter(o.gmv)}
-                    </span>
-                  </div>
-                ))}
-                {otherDetail.length > OTHER_TOOLTIP_SHOWN && (
-                  <div style={{ color: "#a3adba" }}>+{otherDetail.length - OTHER_TOOLTIP_SHOWN} more</div>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      <div className="flex items-center justify-between gap-3 mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${hrh.navyBorder}` }}>
-        <span style={{ color: "#a3adba" }}>Total:</span>
-        <span className="font-semibold">{valueFormatter(total)}</span>
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -189,92 +169,6 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-// A top-N-by-GMV + "Other" { series, data } contribution trend (see
-// api/hrh-sales-analytics.js's buildTopSeriesTrend) rendered as a grouped
-// bar chart, re-bucketable Day/Week/Month client-side — same pattern as
-// Executive Overview's Sales Trend, just with a dynamic per-category series
-// list instead of a fixed GMV/Orders pair. `otherBreakdown` names what's
-// actually inside the gray "Other" bar (its biggest real contributors, by
-// GMV share) as a single compact line, rather than leaving it a black box.
-function ContributionTrendPanel({ title, subtitle, contribution, bucket, onBucketChange }) {
-  const series = contribution?.series || [];
-  const otherDetailByBucket = bucketArrayField(contribution?.data, bucket, "otherDetail");
-  const data = bucketRows(
-    contribution?.data,
-    bucket,
-    series.map((s) => s.key),
-  ).map((row) => ({ ...row, otherDetail: otherDetailByBucket.get(row.dateLabel) || [] }));
-  const otherBreakdown = contribution?.otherBreakdown || [];
-  const otherMoreCount = contribution?.otherMoreCount || 0;
-  return (
-    <Panel title={title} subtitle={subtitle} action={<TrendBucketPills value={bucket} onChange={onBucketChange} />} className="mb-4">
-      <BarComparisonChart
-        data={data}
-        series={series}
-        xKey="dateLabel"
-        valueFormatter={formatCompactPeso}
-        tooltipContent={OtherBreakdownTooltip}
-      />
-      {otherBreakdown.length > 0 && (
-        <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
-          <span style={{ color: "#5b6573", fontWeight: 600 }}>Other</span> includes:{" "}
-          {otherBreakdown.map((o, i) => (
-            <span key={o.label}>
-              {i > 0 && ", "}
-              {o.label} ({formatPct(o.pct, 0)})
-            </span>
-          ))}
-          {otherMoreCount > 0 && `, +${otherMoreCount} more`}
-        </p>
-      )}
-      <ContributionTopItems series={series} topItems={contribution?.topItems} />
-    </Panel>
-  );
-}
-
-// Top 3 items/SKUs behind each top category/subcategory, for the whole
-// current window (not per-day like the chart above it) — the chart's bars
-// only say a category's total GMV, not which specific products drove it.
-// "Other" is skipped — it's a collapsed bucket of several real categories,
-// not one category with its own top items.
-function ContributionTopItems({ series, topItems }) {
-  const named = series.filter((s) => s.key !== "Other");
-  if (named.length === 0) return null;
-  return (
-    <div className="mt-3.5 pt-3.5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3" style={{ borderTop: `1px solid ${hrh.border}` }}>
-      {named.map((s) => {
-        const items = topItems?.[s.key] || [];
-        return (
-          <div key={s.key} className="rounded-md p-2.5" style={{ border: `1px solid ${hrh.border}` }}>
-            <div className="flex items-center gap-1.5 text-[11.5px] font-semibold mb-1.5" style={{ color: hrh.ink }}>
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
-              <span className="truncate">{s.name}</span>
-            </div>
-            {items.length === 0 ? (
-              <div className="text-[11px]" style={{ color: hrh.muted }}>
-                No item-level data
-              </div>
-            ) : (
-              <ul className="space-y-0.5">
-                {items.map((item, i) => (
-                  <li key={i} className="flex items-center justify-between gap-2 text-[11px]" style={{ color: hrh.ink2 }}>
-                    <span className="truncate">
-                      {i + 1}. {item.product}
-                    </span>
-                    <span className="shrink-0 tabular-nums" style={{ color: hrh.muted }}>
-                      {formatCompactPeso(item.gmv)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 // Hovering any point shows Orders/Order Value/Discount Value/AOV for that
 // exact bucket — reads off the underlying data row (payload[0].payload)
 // rather than each Area series' own value, so the same 4 metrics show
@@ -320,7 +214,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
   const trendData = bucketRows(voucherAssistedSales?.trend, bucket, ["orders", "orderPrice", "discountPrice"]);
   return (
     <Panel
-      title="Voucher / Discount-Assisted Sales"
+      title="Voucher Assisted Sales"
       subtitle="HMRPH Online only — not affected by the Channel filter above"
       action={<TrendBucketPills value={bucket} onChange={onBucketChange} />}
       className="mb-4"
@@ -375,8 +269,7 @@ export default function SalesAnalytics({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [categoryBucket, setCategoryBucket] = useState("day");
-  const [subcategoryBucket, setSubcategoryBucket] = useState("day");
+  const [trendBucket, setTrendBucket] = useState("day");
   const [voucherBucket, setVoucherBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
@@ -406,6 +299,16 @@ export default function SalesAnalytics({ filters }) {
     return () => controller.abort();
   }, [channel, dateRange, ready, load]);
 
+  // Fixed trailing window, independent of the Date Range filter — see
+  // TRAILING_BUCKET_COUNT comment. Same bucketRows/bucketArrayField pattern
+  // Executive Overview's own Sales Trend uses.
+  const salesTrendBuckets = bucketRows(data?.salesTrendTrailing, trendBucket, ["gmv", "orders", "units"]);
+  const salesTrendChannelByBucket = bucketArrayField(data?.salesTrendTrailing, trendBucket, "channelBreakdown");
+  const salesTrend = salesTrendBuckets.slice(-TRAILING_BUCKET_COUNT[trendBucket]).map((row) => ({
+    ...row,
+    channelBreakdown: salesTrendChannelByBucket.get(row.dateLabel) || [],
+  }));
+
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
@@ -418,6 +321,15 @@ export default function SalesAnalytics({ filters }) {
 
       {data && !error && (
         <>
+          <Panel
+            title="Sales Trend"
+            subtitle={`Last ${TRAILING_BUCKET_COUNT[trendBucket]} ${trendBucket === "day" ? "days" : trendBucket + "s"}, ending today — independent of the Date Range filter above. Hover a bar for the HMRPH Online/TikTok/Shopee breakdown.`}
+            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
+            className="mb-4"
+          >
+            <SalesTrendComboChart data={salesTrend} tooltipContent={SalesTrendChannelTooltip} />
+          </Panel>
+
           <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
@@ -461,22 +373,6 @@ export default function SalesAnalytics({ filters }) {
               </Panel>
             </div>
           </div>
-
-          <ContributionTrendPanel
-            title="Category Contribution"
-            subtitle="Top categories by GMV, bucketed by day/week/month"
-            contribution={data.categoryContribution}
-            bucket={categoryBucket}
-            onBucketChange={setCategoryBucket}
-          />
-
-          <ContributionTrendPanel
-            title="Subcategory Contribution"
-            subtitle="Top subcategories by GMV, bucketed by day/week/month"
-            contribution={data.subcategoryContribution}
-            bucket={subcategoryBucket}
-            onBucketChange={setSubcategoryBucket}
-          />
         </>
       )}
     </div>
