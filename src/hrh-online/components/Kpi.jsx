@@ -1,23 +1,62 @@
 import { Children } from "react";
 import { hrh } from "../theme";
 
+// Tiny inline trend line — no axes/tooltip/library, just a shape-of-the-
+// trend cue in the corner of a KpiCard. Colored to match the card's own
+// delta direction (or neutral muted if there's no delta) rather than
+// always-green/red, since a rising line reads as "good" or "bad" only
+// relative to what the metric means, which the card's own arrow already
+// states. `values`: plain array of numbers, oldest first.
+function Sparkline({ values, color, width = 56, height = 22 }) {
+  if (!values || values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = values
+    .map((v, i) => {
+      const x = (i / (values.length - 1)) * width;
+      const y = height - ((v - min) / range) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0">
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // Compact executive KPI card — thin orange top accent, room for a future
 // comparison delta and a short contextual label, per the Phase 2 brief.
 // `previousLabel` (an already-formatted string, e.g. formatPeso(previous))
 // renders a "vs {previousLabel}" comparison line at the bottom of the card
 // alongside the delta badge — used by Executive Overview, whose "Compare
 // to" pill selector (Day/Week/Month) changes what "previous" means.
-export function KpiCard({ label, value, delta, sub, previousLabel }) {
+// `icon`/`sparkline` are optional (only Traffic & Conversion passes them
+// today) — every other existing caller renders exactly as before.
+export function KpiCard({ label, value, delta, sub, previousLabel, icon, sparkline }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
     <div className="relative overflow-hidden rounded-md p-3.5" style={{ background: hrh.surface, border: `1px solid ${hrh.border}` }}>
       <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: hrh.accent }} />
-      <div className="text-[11px] uppercase tracking-[0.06em] font-semibold mb-1.5" style={{ color: hrh.ink2 }}>
-        {label}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        {icon && (
+          <span className="shrink-0" style={{ color: hrh.accent }}>
+            {icon}
+          </span>
+        )}
+        <div className="text-[11px] uppercase tracking-[0.06em] font-semibold" style={{ color: hrh.ink2 }}>
+          {label}
+        </div>
       </div>
-      <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
-        {value}
+      <div className="flex items-end justify-between gap-2">
+        <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
+          {value}
+        </div>
+        {sparkline && sparkline.length > 1 && (
+          <Sparkline values={sparkline} color={hasDelta ? (positive ? hrh.good : hrh.bad) : hrh.muted} />
+        )}
       </div>
       {(hasDelta || sub) && (
         <div className="mt-1.5 flex items-center gap-1.5 text-[12px] flex-wrap">

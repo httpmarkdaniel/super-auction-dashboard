@@ -295,6 +295,7 @@ export async function handleTrafficAnalytics(req, res) {
     let prevOrders = 0;
     let prevGmv = 0;
     const ordersByDate = new Map(); // date (ISO) -> orders (current window only)
+    const gmvByDate = new Map(); // date (ISO) -> gmv (current window only)
     for (const r of salesRows) {
       const orders = toNum(r.orders);
       const gmv = toNum(r.gmv);
@@ -302,6 +303,7 @@ export async function handleTrafficAnalytics(req, res) {
         curOrders += orders;
         curGmv += gmv;
         ordersByDate.set(r.d, (ordersByDate.get(r.d) || 0) + orders);
+        gmvByDate.set(r.d, (gmvByDate.get(r.d) || 0) + gmv);
       } else if (r.d >= previous.from && r.d <= previous.to) {
         prevOrders += orders;
         prevGmv += gmv;
@@ -339,17 +341,24 @@ export async function handleTrafficAnalytics(req, res) {
       { label: "Returning Users", value: curReturningUsers },
     ];
 
-    // --- Traffic Trend (daily Users + Page Views, current window, zero-filled) ---
-    const trafficTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
+    // --- Daily trend (current window, zero-filled) — single source for both
+    // trend charts and every KPI card's sparkline, rather than two
+    // near-duplicate per-chart arrays. ---
+    const dailyTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
       const key = isoToYyyymmdd(iso);
-      return { date: iso, users: usersByDate.get(key) || 0, pageViews: pageViewsByDate.get(key) || 0 };
-    });
-
-    // --- Purchases & Conversion Trend (daily, current window, zero-filled) ---
-    const conversionTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
-      const pageViews = pageViewsByDate.get(isoToYyyymmdd(iso)) || 0;
+      const users = usersByDate.get(key) || 0;
+      const pageViews = pageViewsByDate.get(key) || 0;
       const purchases = ordersByDate.get(iso) || 0;
-      return { date: iso, pageViews, purchases, conversionRate: safeDivide(purchases, pageViews) * 100 };
+      const gmv = gmvByDate.get(iso) || 0;
+      return {
+        date: iso,
+        users,
+        pageViews,
+        purchases,
+        conversionRate: safeDivide(purchases, pageViews) * 100,
+        revenuePerView: safeDivide(gmv, pageViews),
+        pageViewsPerUser: safeDivide(pageViews, users),
+      };
     });
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
@@ -366,8 +375,7 @@ export async function handleTrafficAnalytics(req, res) {
       kpis,
       funnel,
       newVsReturning,
-      trafficTrend,
-      conversionTrend,
+      dailyTrend,
     });
   } catch (err) {
     console.error("HRH Traffic & Conversion API error:", err);
