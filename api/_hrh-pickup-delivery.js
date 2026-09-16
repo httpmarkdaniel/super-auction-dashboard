@@ -108,6 +108,18 @@ function resolveRange(range, fromParam, toParam) {
 // Pickup in every window checked — Pickup orders don't get a shipping
 // waybill), so it's reported for Delivery only, not shown as a misleading
 // 0% "failure" for Pickup.
+// xv3.mart_xv3_order_report has a handful of duplicate order_number rows
+// (verified: 4 for HRH ONLINE — e.g. order 251228 has 2 identical rows).
+// A plain INNER JOIN on order_number fans those out into 2 result rows,
+// which silently doubled that order's contribution to every count/avg in
+// this file (verified: caught it live-testing the Fulfillment Tracker,
+// which showed order 251228 twice). Every join here goes through this
+// pre-collapsed one-row-per-order_number subquery instead of the raw
+// table, so that can never happen again — `any()` picks an arbitrary but
+// consistent value per order_number, fine here since checkout_method is
+// the only column ever read off it.
+const ORDER_REPORT_DEDUPED = `(SELECT order_number, any(checkout_method) AS checkout_method FROM xv3.mart_xv3_order_report WHERE store_name = {store:String} GROUP BY order_number)`;
+
 async function computeFulfillmentOperations(from, to) {
   const [stageRows, detailRows, pickerRows] = await Promise.all([
     client
@@ -127,9 +139,8 @@ async function computeFulfillmentOperations(from, to) {
           countIf(j.qc_session_start_at IS NOT NULL) AS n_qc,
           countIf(j.waybill_printed_at IS NOT NULL) AS n_waybill
         FROM xv3.mart_order_fulfilment_journey j
-        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-        WHERE o.store_name = {store:String}
-          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+        INNER JOIN ${ORDER_REPORT_DEDUPED} o ON toString(j.order_id) = o.order_number
+        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           AND o.checkout_method IN ('Pickup', 'Delivery')
         GROUP BY o.checkout_method
       `,
@@ -155,9 +166,8 @@ async function computeFulfillmentOperations(from, to) {
           j.courier_service,
           j.picker_name
         FROM xv3.mart_order_fulfilment_journey j
-        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-        WHERE o.store_name = {store:String}
-          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+        INNER JOIN ${ORDER_REPORT_DEDUPED} o ON toString(j.order_id) = o.order_number
+        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           AND o.checkout_method IN ('Pickup', 'Delivery')
         ORDER BY j.order_placed_at DESC
         LIMIT 200
@@ -182,9 +192,8 @@ async function computeFulfillmentOperations(from, to) {
           avgIf(j.order_to_pack_seconds, j.order_to_pack_seconds IS NOT NULL) AS avg_pick_seconds,
           avgIf(j.total_duration_seconds, j.total_duration_seconds IS NOT NULL) AS avg_total_seconds
         FROM xv3.mart_order_fulfilment_journey j
-        INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-        WHERE o.store_name = {store:String}
-          AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+        INNER JOIN ${ORDER_REPORT_DEDUPED} o ON toString(j.order_id) = o.order_number
+        WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           AND j.picker_name IS NOT NULL AND trim(j.picker_name) != ''
         GROUP BY j.picker_name
         ORDER BY orders DESC
@@ -264,7 +273,7 @@ export async function handlePickupDelivery(req, res) {
     // classification here just for a method split isn't worth the
     // complexity, so this is every order with each checkout_method in the
     // window, full stop).
-    const [ordersByMethodRows, lifecycle, pickedOrdersRows, ops] = await Promise.all([
+    const [ordersByMethodRows, lifecycle, pickedOrdersRows, ops, inProgressRows] = await Promise.all([
       client
         .query({
           query: `
@@ -296,15 +305,46 @@ export async function handlePickupDelivery(req, res) {
           query: `
             SELECT uniqExact(j.order_id) AS picked_orders
             FROM xv3.mart_order_fulfilment_journey j
-            INNER JOIN xv3.mart_xv3_order_report o ON toString(j.order_id) = o.order_number
-            WHERE o.store_name = {store:String}
-              AND toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
+            INNER JOIN ${ORDER_REPORT_DEDUPED} o ON toString(j.order_id) = o.order_number
+            WHERE toDate(j.order_placed_at) BETWEEN {from:String} AND {to:String}
           `,
           query_params: { store: HRH_STORE, from: range_.from, to: range_.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       computeFulfillmentOperations(range_.from, range_.to),
+      // Live Fulfillment Tracker — orders CURRENTLY in the pick/pack/ship
+      // pipeline (picking started, not yet shipped_at), independent of the
+      // page's Date Range filter — same "always current, not filtered"
+      // spirit as Auction Dashboard's Active Auctions. Capped at 50 as a
+      // safety net, not a real limit (verified: only ~3 orders are ever
+      // actually in this state at once in this data).
+      client
+        .query({
+          query: `
+            SELECT
+              j.order_id,
+              o.checkout_method,
+              j.order_placed_at,
+              j.picking_started_at,
+              j.qc_session_start_at,
+              j.waybill_printed_at,
+              j.packing_finished_at,
+              j.dispatch_finalized_at,
+              j.shipped_at,
+              j.courier_service,
+              j.picker_name
+            FROM xv3.mart_order_fulfilment_journey j
+            INNER JOIN ${ORDER_REPORT_DEDUPED} o ON toString(j.order_id) = o.order_number
+            WHERE j.shipped_at IS NULL
+              AND o.checkout_method IN ('Pickup', 'Delivery')
+            ORDER BY j.order_placed_at ASC
+            LIMIT 50
+          `,
+          query_params: { store: HRH_STORE },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
     ]);
 
     const ordersByMethod = new Map(ordersByMethodRows.map((r) => [r.checkout_method, toNum(r.orders)]));
@@ -318,6 +358,25 @@ export async function handlePickupDelivery(req, res) {
     };
 
     const { stageSummary, timeline, pickerProductivity } = ops;
+    const avgOrderToShipSecondsByMethod = new Map(stageSummary.map((s) => [s.method, s.avgOrderToShipSeconds]));
+    const inProgress = inProgressRows.map((r) => ({
+      orderId: r.order_id,
+      method: r.checkout_method,
+      orderPlacedAt: r.order_placed_at,
+      pickedAt: r.picking_started_at,
+      qcAt: r.qc_session_start_at,
+      waybillAt: r.waybill_printed_at,
+      packedAt: r.packing_finished_at,
+      dispatchedAt: r.dispatch_finalized_at,
+      shippedAt: r.shipped_at,
+      courier: r.courier_service,
+      picker: r.picker_name,
+      // This method's own average total time (Order Placed -> Shipped),
+      // for the tracker's progress bar to use as a pace reference — a
+      // real benchmark, never a promised deadline (labeled as such on the
+      // frontend).
+      avgOrderToShipSeconds: avgOrderToShipSecondsByMethod.get(r.checkout_method) || 0,
+    }));
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
@@ -336,6 +395,7 @@ export async function handlePickupDelivery(req, res) {
       methodSummary,
       stageSummary,
       pickerProductivity,
+      inProgress,
       timeline,
       dataQuality: [
         `Pick Rate = orders with any fulfillment journey record (${pickRate.pickedOrders}) ÷ Real Orders Received (${pickRate.realOrdersReceived}, the same True-Cancellation-aware definition used dashboard-wide) for this window — catches orders that never entered the pick/pack pipeline at all (e.g. cancelled before picking started), not just slow ones.`,
@@ -343,6 +403,7 @@ export async function handlePickupDelivery(req, res) {
         "Waybill coverage is shown for Delivery only — verified 0% for Pickup in every window checked (in-store pickups don't get a shipping waybill), so it's reported as N/A there rather than a misleading 0%.",
         "Fulfillment stages have no \"delivered to customer\" timestamp — the last real milestone is \"Shipped\", which the raw data confirms means handed off to the courier for Delivery orders (it lands seconds after Dispatched, alongside a real courier_service). For Pickup orders there's no courier at all, so \"Shipped\" there most likely means marked ready/collected in-store, not a delivery event — inferred from the timestamp pattern, not a documented field definition.",
         "Orders by Method (the KPI counts above) is a plain count of checkout_method on xv3.mart_xv3_order_report for the window — a different, simpler population than Real Orders Received (which nets out True Cancellations); the two won't always match exactly.",
+        "Live Fulfillment Tracker shows every order currently in the pipeline (picking started, not yet shipped) — independent of the Date Range filter, same as Auction Dashboard's Active Auctions. Its progress bar's right edge is this method's own average Order-Placed-to-Shipped time, shown as a pace reference only, never a promised completion time.",
       ],
     });
   } catch (err) {
