@@ -128,8 +128,12 @@ function ComboTooltip({ active, payload, label }) {
 // genuinely different unit (pesos) from the other two, so it keeps its own
 // left axis rather than forcing one scale; Orders and Units are both
 // "count" so they share the right axis and stack into one bar per bucket.
-// `data`: [{ dateLabel, gmv, orders, units }].
-export function SalesTrendComboChart({ data, height = 260 }) {
+// `data`: [{ dateLabel, gmv, orders, units }]. `tooltipContent` lets a
+// caller override the default ComboTooltip (e.g. ExecutiveOverview.jsx's
+// SalesTrendChannelTooltip, which adds a per-channel GMV breakdown) —
+// every other existing caller is unaffected by the default.
+export function SalesTrendComboChart({ data, height = 260, tooltipContent }) {
+  const TooltipContent = tooltipContent || ComboTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
@@ -145,7 +149,7 @@ export function SalesTrendComboChart({ data, height = 260 }) {
           allowDecimals={false}
           width={36}
         />
-        <Tooltip content={<ComboTooltip />} />
+        <Tooltip content={<TooltipContent />} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         {/* Grouped (not stacked) bars — Orders and Units Sold are each their
             own whole count, not parts of one total, so stacking them would

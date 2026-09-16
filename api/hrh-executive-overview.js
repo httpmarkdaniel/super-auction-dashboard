@@ -161,7 +161,17 @@ export default async function handler(req, res) {
     // formula/shape to hrh-product-analytics.js) — different tables/date
     // windows, nothing depends on another's result — fired together via
     // Promise.all instead of one round-trip at a time.
-    const [kpiRows, trendRows, channelRows, prevChannelRows, customerSegmentRows, lifecycleData] = await Promise.all([
+    // Sales Trend's own trailing window — fixed 6 months back from today,
+    // completely independent of the page's Date Range filter (`current`/
+    // `previous` above). Day/Week/Month bucket views are all client-side
+    // re-buckets of this SAME daily data (see ExecutiveOverview.jsx), then
+    // sliced to their own fixed count of most-recent buckets (30 days /
+    // 4 weeks / 6 months) — so this query only needs to be wide enough to
+    // cover the widest of the three (6 months), not re-fetched per bucket.
+    const trailingTo = manilaTodayISODate();
+    const trailingFrom = shiftMonthsClampedISO(trailingTo, -6);
+
+    const [kpiRows, trendRows, channelRows, prevChannelRows, customerSegmentRows, lifecycleData, trailingTrendRows] = await Promise.all([
       client
         .query({
           query: `
@@ -360,6 +370,30 @@ export default async function handler(req, res) {
       // reconcile for HMRPH Online. Fixed to HMRPH Online regardless of the
       // page's Channel filter — same reasoning as Customer Segments above.
       computeHmrphOnlineLifecycle(current.from, current.to),
+      // Sales Trend's trailing data — daily GMV/Orders/Units PER CHANNEL
+      // (see trailingFrom/trailingTo above), always all 3 real channels
+      // regardless of the page's Channel filter — same "ignore the filter"
+      // convention as Sales by Channel/Avg Sales/Day by Channel elsewhere
+      // on this page, so the hover breakdown always has something to show.
+      client
+        .query({
+          query: `
+            SELECT
+              transaction_date AS d,
+              sales_channel AS ch,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+              uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+              sumIf(net_quantity, net_sales_amount > 0) AS units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {allChannels:Array(String)}
+              AND transaction_date BETWEEN {trailingFrom:String} AND {trailingTo:String}
+            GROUP BY transaction_date, sales_channel
+          `,
+          query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], trailingFrom, trailingTo },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
     ]);
     const k = kpiRows[0] || {};
     const curGmv = toNum(k.cur_gmv);
@@ -389,6 +423,31 @@ export default async function handler(req, res) {
       orders: trendByDate.get(d)?.orders ?? 0,
       units: trendByDate.get(d)?.units ?? 0,
     }));
+    // --- Sales Trend's trailing (filter-independent) data, per day, with a
+    // per-channel GMV breakdown attached to each day for the chart's hover
+    // tooltip (channelBreakdown only lists channels with real sales that
+    // day — a channel with 0 GMV isn't listed, same convention as
+    // api/hrh-sales-analytics.js's per-day otherDetail arrays). ---
+    const trailingByDate = new Map();
+    for (const r of trailingTrendRows) {
+      const bucket = trailingByDate.get(r.d) || { gmv: 0, orders: 0, units: 0, channels: [] };
+      const chGmv = toNum(r.gmv);
+      bucket.gmv += chGmv;
+      bucket.orders += toNum(r.orders);
+      bucket.units += toNum(r.units);
+      if (chGmv > 0) bucket.channels.push({ label: r.ch, gmv: chGmv });
+      trailingByDate.set(r.d, bucket);
+    }
+    const salesTrendTrailing = enumerateDatesISO(trailingFrom, trailingTo).map((d) => {
+      const b = trailingByDate.get(d);
+      return {
+        date: d,
+        gmv: b?.gmv ?? 0,
+        orders: b?.orders ?? 0,
+        units: b?.units ?? 0,
+        channelBreakdown: b?.channels || [],
+      };
+    });
     const channelGmv = new Map(channelRows.map((r) => [r.ch, toNum(r.gmv)]));
     const prevChannelGmv = new Map(prevChannelRows.map((r) => [r.ch, toNum(r.gmv)]));
     const avgSalesPerDayByChannel = CHANNEL_MAP["All Channels"].map((ch) => {
@@ -441,6 +500,7 @@ export default async function handler(req, res) {
         units: { value: curUnits, previous: prevUnits, delta: pctDelta(curUnits, prevUnits) },
       },
       salesTrend,
+      salesTrendTrailing,
       avgSalesPerDayByChannel,
       channelMix,
       orderLifecycle,

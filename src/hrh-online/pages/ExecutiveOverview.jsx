@@ -4,7 +4,7 @@ import Panel from "../components/Panel";
 import { LoadingState, ErrorState } from "../components/States";
 import { SalesTrendComboChart, DonutChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { bucketRows } from "../trendBucket";
+import { bucketRows, bucketArrayField } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
 
@@ -91,6 +91,52 @@ const CHANNEL_LABEL = {
   SHOPEE: "Shopee",
 };
 
+// Sales Trend is now a fixed trailing window (see api/hrh-executive-
+// overview.js's trailingFrom/trailingTo), independent of the page's Date
+// Range filter — Day shows the last 30 days, Week the last 4 weeks, Month
+// the last 6 months, always ending today, regardless of what's selected
+// above. These counts are how many of bucketRows' most-recent buckets to
+// keep after re-bucketing the same underlying daily data.
+const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
+
+// Adds a per-channel GMV breakdown (HMRPH Online/TikTok/Shopee) under the
+// default GMV/Orders/Units rows — `channelBreakdown` is attached to each
+// bucketed row client-side (see the salesTrend construction below) via
+// bucketArrayField, same pattern SalesAnalytics.jsx's OtherBreakdownTooltip
+// uses for its "Other" bar. Channels with 0 GMV that bucket aren't listed
+// (never a fabricated 0 row) since the backend only ever includes real,
+// positive per-channel GMV in this array.
+function SalesTrendChannelTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  const channelBreakdown = row?.channelBreakdown || [];
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5" style={{ color: "#a3adba" }}>
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+            {p.name}:
+          </span>
+          <span className="font-semibold">{p.dataKey === "gmv" ? formatCompactPeso(p.value) : formatNum(p.value)}</span>
+        </div>
+      ))}
+      {channelBreakdown.length > 0 && (
+        <div className="mt-1.5 pt-1.5" style={{ borderTop: `1px solid ${hrh.navyBorder}` }}>
+          <div style={{ color: "#a3adba" }}>GMV by channel:</div>
+          {channelBreakdown.map((c) => (
+            <div key={c.label} className="flex items-center justify-between gap-4">
+              <span style={{ color: "#a3adba" }}>{CHANNEL_LABEL[c.label] || c.label}</span>
+              <span className="font-semibold">{formatCompactPeso(c.gmv)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // HMRPH Online only — verified every TikTok/Shopee order carries
 // customer_name = 'WALK IN' (no real buyer identity captured on HMR's
 // side for marketplace orders), so this panel is fixed to HMRPH Online
@@ -171,7 +217,17 @@ export default function ExecutiveOverview({ filters }) {
     return () => controller.abort();
   }, [channel, params, compareTo, ready, load]);
 
-  const salesTrend = bucketRows(data?.salesTrend, trendBucket, ["gmv", "orders", "units"]);
+  // Fixed trailing window, independent of the Date Range filter — see
+  // TRAILING_BUCKET_COUNT comment. bucketArrayField merges the per-day
+  // channelBreakdown array into whichever bucket each day lands in, keyed
+  // by the same dateLabel bucketRows produces, so it can be attached back
+  // onto each row for the hover tooltip.
+  const salesTrendBuckets = bucketRows(data?.salesTrendTrailing, trendBucket, ["gmv", "orders", "units"]);
+  const salesTrendChannelByBucket = bucketArrayField(data?.salesTrendTrailing, trendBucket, "channelBreakdown");
+  const salesTrend = salesTrendBuckets.slice(-TRAILING_BUCKET_COUNT[trendBucket]).map((row) => ({
+    ...row,
+    channelBreakdown: salesTrendChannelByBucket.get(row.dateLabel) || [],
+  }));
   const channelSegments =
     data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
   const orderLifecycleSegments =
@@ -235,11 +291,11 @@ export default function ExecutiveOverview({ filters }) {
 
           <Panel
             title="Sales Trend"
-            subtitle={`GMV, Orders, and Units Sold for the selected period, bucketed by ${trendBucket}`}
+            subtitle={`Last ${TRAILING_BUCKET_COUNT[trendBucket]} ${trendBucket === "day" ? "days" : trendBucket + "s"}, ending today — independent of the Date Range filter above. Hover a bar for the HMRPH Online/TikTok/Shopee breakdown.`}
             action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
             className="mb-4"
           >
-            <SalesTrendComboChart data={salesTrend} />
+            <SalesTrendComboChart data={salesTrend} tooltipContent={SalesTrendChannelTooltip} />
           </Panel>
 
           <Panel
