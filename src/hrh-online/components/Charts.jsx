@@ -15,6 +15,9 @@ import {
   PieChart,
   Pie,
   Cell,
+  ScatterChart,
+  Scatter,
+  ZAxis,
 } from "recharts";
 import { hrh } from "../theme";
 import { formatCompactPeso, formatNum } from "../format";
@@ -460,6 +463,84 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function BubbleTooltip({ active, payload, xLabel, yLabel, xValueFormatter, yValueFormatter }) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0]?.payload;
+  if (!p) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px] min-w-[160px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1 flex items-center gap-1.5">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color || hrh.accent }} />
+        {p.label}
+      </div>
+      <div className="flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+        <span>{xLabel}:</span>
+        <span className="font-semibold" style={{ color: "#fff" }}>
+          {xValueFormatter ? xValueFormatter(p.x) : p.x}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+        <span>{yLabel}:</span>
+        <span className="font-semibold" style={{ color: "#fff" }}>
+          {yValueFormatter ? yValueFormatter(p.y) : p.y}
+        </span>
+      </div>
+      {p.sizeLabel && (
+        <div className="flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+          <span>{p.sizeLabel}:</span>
+          <span className="font-semibold" style={{ color: "#fff" }}>
+            {p.z}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Bubble/scatter chart -- x/y position plus bubble size (z), each point
+// individually colored (e.g. a relative performance tier) rather than one
+// series color. `data`: [{ x, y, z, label, color, sizeLabel? }].
+export function BubbleChart({ data, xLabel, yLabel, xValueFormatter, yValueFormatter, height = 280 }) {
+  return (
+    <ChartWithAxisTitles xAxisLabel={xLabel} yAxisLabel={yLabel}>
+      <ResponsiveContainer width="100%" height={height}>
+        <ScatterChart margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={hrh.border} />
+          <XAxis
+            type="number"
+            dataKey="x"
+            tick={{ fontSize: 11, fill: hrh.ink2 }}
+            axisLine={{ stroke: hrh.border }}
+            tickLine={false}
+            tickFormatter={xValueFormatter}
+            name={xLabel}
+          />
+          <YAxis
+            type="number"
+            dataKey="y"
+            tick={{ fontSize: 11, fill: hrh.ink2 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={yValueFormatter}
+            width={44}
+            name={yLabel}
+          />
+          <ZAxis type="number" dataKey="z" range={[80, 500]} />
+          <Tooltip
+            content={<BubbleTooltip xLabel={xLabel} yLabel={yLabel} xValueFormatter={xValueFormatter} yValueFormatter={yValueFormatter} />}
+            cursor={{ strokeDasharray: "3 3" }}
+          />
+          <Scatter data={data} fill={hrh.accent}>
+            {data.map((d, i) => (
+              <Cell key={i} fill={d.color || hrh.accent} fillOpacity={0.75} />
+            ))}
+          </Scatter>
+        </ScatterChart>
+      </ResponsiveContainer>
+    </ChartWithAxisTitles>
   );
 }
 
