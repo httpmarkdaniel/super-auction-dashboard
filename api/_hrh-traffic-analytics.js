@@ -9,39 +9,60 @@ const client = createClient({
 
 // Underscore-prefixed (like _bidderIdentity.js, _bucketing.js, etc. on the
 // Auction side) so Vercel does NOT deploy this as its own Serverless
-// Function — the project's Hobby plan caps deployments at 12 functions and
-// was already exactly at that cap (Auction's 9 + HRH's 3 existing
-// endpoints), so a genuinely separate /api/hrh-traffic-analytics route
-// would have pushed it to 13 and been rejected at deploy time (verified:
-// it was). api/hrh-sales-analytics.js imports and dispatches to
-// `handleTrafficAnalytics` here when `?report=traffic` is present,
-// otherwise running its own original Sales Analytics logic completely
-// unchanged — see that file's top-of-handler branch.
+// Function — the project's Hobby plan caps deployments at 12 functions.
+// api/hrh-sales-analytics.js imports and dispatches to
+// `handleTrafficAnalytics` here when `?report=traffic` is present.
 //
-// GA4 discovery (this session): HMR's GA4 exports are already ETL'd (via
-// Airbyte) into ClickHouse's `ga4` database — no separate Google service
-// account / Data API call needed, this file just reuses the SAME
-// CLICKHOUSE_* credentials every other api/hrh-*.js file already uses.
-// Only ONE GA4 property exists in that data: 314716873 (verified via
-// `SELECT DISTINCT property_id` across every ga4.* table — no ambiguity to
-// resolve). Two tables cover everything this page needs:
-//   - ga4_traffic_acquisition_session_default_channel_grouping_report:
-//     plain MergeTree, verified zero duplicate (date, channel) rows across
-//     its whole history — safe to query directly, no dedup needed. Has
-//     sessions/totalUsers/engagedSessions/totalRevenue per
-//     (date, sessionDefaultChannelGrouping).
-//   - ga4_events_report: ReplacingMergeTree keyed on
-//     (property_id, date, eventName), versioned by _airbyte_extracted_at —
-//     the daily re-sync re-extracts recent dates as GA4 finalizes them, so
-//     OLDER versions of a (date, eventName) row are NOT physically removed
-//     until a background merge runs. Querying without FINAL silently
-//     double/triple-counts recent days (verified: 2026-09-07 returned 2 raw
-//     versions, non-FINAL summed to 40 purchases when the true FINAL value
-//     was 20). EVERY query against this table in this file uses FINAL.
-// Confirmed ecommerce events all present with real volume (2025-01-01 to
-// today): session_start, view_item, add_to_cart, begin_checkout, purchase
-// (13,675 purchases). No funnel stage is fabricated.
+// --- Scoping history (read before touching this file) ---
+// This page was originally wired to GA4 (via ClickHouse's `ga4` database,
+// itself ETL'd from the SAME GA4 property every other whole-site table
+// uses) at the (date, eventName) and (date, channel) grain — Sessions,
+// Users, and the Add to Cart/Begin Checkout/Purchase funnel. That was
+// reverted because those tables track HMR's WHOLE website, not HRH Online
+// specifically, with no dimension to scope them down.
+//
+// Re-investigated 2026-09-16: HRH Online's storefront is
+// https://hmr.ph/shop/ONP#/ — a client-side (hash-routed) SPA, and GA4
+// records a real, clean pagePath for its landing/listing views:
+//   - /shop/ONP        (203 distinct days seen, 2026-02-25 to present)
+//   - /search/stores/ONP
+// Verified these are genuine (not substring noise — a broad `%ONP%` search
+// also matches unrelated slugs like "...uoonp"/"...onps5"/"donper" that
+// happen to contain those letters; only these two exact paths are real).
+// So Users/Page Views on THIS page ARE legitimately HRH-Online-scoped.
+//
+// What is still NOT scopable, and why this page does not show it:
+//   - "Sessions": ga4_pages_path_report (GA4's "Pages and screens" report)
+//     has no sessions metric, only totalUsers/screenPageViews/eventCount —
+//     Page Views is used as the traffic KPI instead.
+//   - Add to Cart / Begin Checkout: these live only in ga4_events_report,
+//     which is aggregated by (date, eventName) with NO page dimension at
+//     all — there is no column to join it back to pagePath by. No GA4
+//     table anywhere in this warehouse carries page + event together.
+// Given that, "Purchases" and "Revenue" below are NOT GA4 purchase events —
+// they're the real, already-correctly-scoped HRH Online website order data
+// (xv3.mart_net_sales, store_name = HRH ONLINE, sales_channel = HMRPH
+// ONLINE — the same channel/store scope Executive Overview and Sales
+// Analytics already use for this store's own website channel, as opposed
+// to TikTok/Shopee which don't drive traffic to hmr.ph). The funnel is
+// therefore 2 stages (Page Views -> Purchases), not the original 5 — the
+// middle stages have no honest scoped source and are omitted rather than
+// shown as unscoped whole-site numbers or fabricated placeholders.
+//
+// ga4_pages_path_report is a ReplacingMergeTree keyed on
+// (property_id, date, pagePath), versioned by _airbyte_extracted_at — same
+// re-sync/versioning behavior as ga4_events_report (see that table's other
+// callers). Querying without FINAL double/triple-counts recent days
+// (verified: 2026-09-08 returned totalUsers=72 non-FINAL vs 36 FINAL, a
+// clean 2x). Every query against it here uses FINAL.
 const GA4_PROPERTY_ID = "314716873";
+const ONP_PAGE_PATHS = ["/shop/ONP", "/search/stores/ONP"];
+
+// Same locked store/channel scope Executive Overview and Sales Analytics
+// use — HRH Online's own website channel only (not TikTok/Shopee, which
+// don't send traffic to hmr.ph and so have nothing to do with this page).
+const HRH_STORE = "HRH ONLINE";
+const HMRPH_ONLINE_CHANNEL = ["HMRPH ONLINE"];
 
 function toNum(v) {
   const n = Number(v);
@@ -169,8 +190,6 @@ function isoToYyyymmdd(iso) {
   return iso.replaceAll("-", "");
 }
 
-const FUNNEL_EVENTS = ["view_item", "add_to_cart", "begin_checkout", "purchase"];
-
 export async function handleTrafficAnalytics(req, res) {
   try {
     const { from = "", to = "" } = req.query;
@@ -183,166 +202,121 @@ export async function handleTrafficAnalytics(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const superFrom = isoToYyyymmdd(previous.from);
-    const superTo = isoToYyyymmdd(current.to);
+    const superFromKey = isoToYyyymmdd(previous.from);
+    const superToKey = isoToYyyymmdd(current.to);
     const curFromKey = isoToYyyymmdd(current.from);
     const curToKey = isoToYyyymmdd(current.to);
     const prevFromKey = isoToYyyymmdd(previous.from);
     const prevToKey = isoToYyyymmdd(previous.to);
 
-    // Sessions/Users/Engaged Sessions/Revenue — ONE query spanning the whole
-    // previous+current super-range, grouped by (date, channel). Everything
-    // else (current/previous totals, per-channel breakdown, daily trend) is
-    // derived from this single result set in JS rather than firing a
-    // separate query per KPI.
-    const channelRows = await (
-      await client.query({
-        query: `
-          SELECT
-            date,
-            sessionDefaultChannelGrouping AS channel,
-            sum(sessions) AS sessions,
-            sum(totalUsers) AS users,
-            sum(engagedSessions) AS engaged,
-            sum(totalRevenue) AS revenue
-          FROM ga4.ga4_traffic_acquisition_session_default_channel_grouping_report
-          WHERE property_id = {propertyId:String}
-            AND date BETWEEN {superFrom:String} AND {superTo:String}
-          GROUP BY date, channel
-        `,
-        query_params: { propertyId: GA4_PROPERTY_ID, superFrom, superTo },
-        format: "JSONEachRow",
-      })
-    ).json();
+    const [pageRows, salesRows] = await Promise.all([
+      // Users + Page Views on HRH Online's own storefront pages only (see
+      // file-header comment) — one query spanning the whole
+      // previous+current super-range, grouped by date.
+      client
+        .query({
+          query: `
+            SELECT
+              date,
+              sum(totalUsers) AS users,
+              sum(screenPageViews) AS pageViews
+            FROM ga4.ga4_pages_path_report FINAL
+            WHERE property_id = {propertyId:String}
+              AND pagePath IN {paths:Array(String)}
+              AND date BETWEEN {superFrom:String} AND {superTo:String}
+            GROUP BY date
+          `,
+          query_params: { propertyId: GA4_PROPERTY_ID, paths: ONP_PAGE_PATHS, superFrom: superFromKey, superTo: superToKey },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Real orders + GMV for HRH Online's own website channel (see
+      // file-header comment on why this replaces GA4 purchase events) — one
+      // query spanning the same super-range, grouped by transaction_date.
+      client
+        .query({
+          query: `
+            SELECT
+              transaction_date AS d,
+              uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+            GROUP BY transaction_date
+          `,
+          query_params: { store: HRH_STORE, channels: HMRPH_ONLINE_CHANNEL, prevFrom: previous.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+    ]);
 
-    // Ecommerce funnel + purchases — ONE query, FINAL (see file-header
-    // comment on why FINAL is load-bearing here), spanning the same
-    // super-range, grouped by (date, eventName).
-    const eventRows = await (
-      await client.query({
-        query: `
-          SELECT date, eventName AS event, sum(eventCount) AS count, sum(totalRevenue) AS revenue
-          FROM ga4.ga4_events_report FINAL
-          WHERE property_id = {propertyId:String}
-            AND date BETWEEN {superFrom:String} AND {superTo:String}
-            AND eventName IN {events:Array(String)}
-          GROUP BY date, event
-        `,
-        query_params: { propertyId: GA4_PROPERTY_ID, superFrom, superTo, events: FUNNEL_EVENTS },
-        format: "JSONEachRow",
-      })
-    ).json();
-
-    // --- Aggregate channelRows into current/previous totals + per-channel/per-day ---
-    let curSessions = 0;
+    // --- Aggregate pageRows into current/previous totals + daily page views ---
     let curUsers = 0;
-    let curEngaged = 0;
-    let curRevenue = 0;
-    let prevSessions = 0;
+    let curPageViews = 0;
     let prevUsers = 0;
-    let prevEngaged = 0;
-    let prevRevenue = 0;
-    const channelTotals = new Map(); // channel -> sessions (current window only)
-    const sessionsByDate = new Map(); // date (yyyymmdd) -> sessions (current window only)
-    for (const r of channelRows) {
-      const sessions = toNum(r.sessions);
+    let prevPageViews = 0;
+    const pageViewsByDate = new Map(); // date (yyyymmdd) -> page views (current window only)
+    for (const r of pageRows) {
       const users = toNum(r.users);
-      const engaged = toNum(r.engaged);
-      const revenue = toNum(r.revenue);
+      const pageViews = toNum(r.pageViews);
       if (r.date >= curFromKey && r.date <= curToKey) {
-        curSessions += sessions;
         curUsers += users;
-        curEngaged += engaged;
-        curRevenue += revenue;
-        channelTotals.set(r.channel, (channelTotals.get(r.channel) || 0) + sessions);
-        sessionsByDate.set(r.date, (sessionsByDate.get(r.date) || 0) + sessions);
+        curPageViews += pageViews;
+        pageViewsByDate.set(r.date, (pageViewsByDate.get(r.date) || 0) + pageViews);
       } else if (r.date >= prevFromKey && r.date <= prevToKey) {
-        prevSessions += sessions;
         prevUsers += users;
-        prevEngaged += engaged;
-        prevRevenue += revenue;
+        prevPageViews += pageViews;
       }
     }
 
-    // --- Aggregate eventRows into current/previous funnel totals + daily purchases ---
-    const curEventTotals = new Map();
-    const prevEventTotals = new Map();
-    const purchasesByDate = new Map(); // date (yyyymmdd) -> purchase count (current window only)
-    for (const r of eventRows) {
-      const count = toNum(r.count);
-      if (r.date >= curFromKey && r.date <= curToKey) {
-        curEventTotals.set(r.event, (curEventTotals.get(r.event) || 0) + count);
-        if (r.event === "purchase") purchasesByDate.set(r.date, (purchasesByDate.get(r.date) || 0) + count);
-      } else if (r.date >= prevFromKey && r.date <= prevToKey) {
-        prevEventTotals.set(r.event, (prevEventTotals.get(r.event) || 0) + count);
+    // --- Aggregate salesRows into current/previous totals + daily orders ---
+    let curOrders = 0;
+    let curGmv = 0;
+    let prevOrders = 0;
+    let prevGmv = 0;
+    const ordersByDate = new Map(); // date (ISO) -> orders (current window only)
+    for (const r of salesRows) {
+      const orders = toNum(r.orders);
+      const gmv = toNum(r.gmv);
+      if (r.d >= current.from && r.d <= current.to) {
+        curOrders += orders;
+        curGmv += gmv;
+        ordersByDate.set(r.d, (ordersByDate.get(r.d) || 0) + orders);
+      } else if (r.d >= previous.from && r.d <= previous.to) {
+        prevOrders += orders;
+        prevGmv += gmv;
       }
     }
-    const curPurchases = curEventTotals.get("purchase") || 0;
-    const prevPurchases = prevEventTotals.get("purchase") || 0;
 
-    // --- KPIs ---
-    // Users: totalUsers, not activeUsers — this ETL'd schema never captured
-    // activeUsers at all (verified: no such column exists on any ga4.*
-    // table), so totalUsers is the only option, not a stylistic choice.
-    // Conversion Rate: purchase EVENT COUNT / sessions. GA4's own
-    // "session key event rate" (sessions that had >=1 key event / total
-    // sessions) isn't available at this grain — the only sessionKeyEventRate
-    // column in this data lives on a first-user ACQUISITION-CHANNEL report
-    // (different attribution model, would silently mix two populations) —
-    // so purchases/sessions is used instead and documented here rather than
-    // silently presented as GA4's native key-event rate.
-    const curConversionRate = safeDivide(curPurchases, curSessions) * 100;
-    const prevConversionRate = safeDivide(prevPurchases, prevSessions) * 100;
-    const curRevPerSession = safeDivide(curRevenue, curSessions);
-    const prevRevPerSession = safeDivide(prevRevenue, prevSessions);
-
-    // This property's ecommerce tracking (purchase events + revenue)
-    // appears to have gone live partway through 2025 — verified: 2025-01-01
-    // to 2025-09-10 has 1.84M real sessions but only 2 purchases and $0
-    // revenue, vs. real, substantial ecommerce activity in the same window
-    // a year later. A YTD-vs-prior-YTD delta against that near-zero
-    // baseline produces a mathematically "correct" but meaningless
-    // 500,000%+ swing — prevPurchases < 10 is treated as "no usable
-    // baseline" (null delta) rather than shown as a fabricated-looking
-    // number, same spirit as pctDelta already returning null for previous=0.
-    const conversionRateDelta = prevPurchases >= 10 ? pctDelta(curConversionRate, prevConversionRate) : null;
+    const curConversionRate = safeDivide(curOrders, curPageViews) * 100;
+    const prevConversionRate = safeDivide(prevOrders, prevPageViews) * 100;
+    const curRevPerView = safeDivide(curGmv, curPageViews);
+    const prevRevPerView = safeDivide(prevGmv, prevPageViews);
 
     const kpis = {
-      sessions: { value: curSessions, delta: pctDelta(curSessions, prevSessions) },
       users: { value: curUsers, delta: pctDelta(curUsers, prevUsers) },
-      engagedSessions: { value: curEngaged, delta: pctDelta(curEngaged, prevEngaged) },
-      conversionRate: { value: curConversionRate, delta: conversionRateDelta },
-      revenuePerSession: { value: curRevPerSession, delta: pctDelta(curRevPerSession, prevRevPerSession) },
+      pageViews: { value: curPageViews, delta: pctDelta(curPageViews, prevPageViews) },
+      purchases: { value: curOrders, delta: pctDelta(curOrders, prevOrders) },
+      conversionRate: { value: curConversionRate, delta: pctDelta(curConversionRate, prevConversionRate) },
+      revenuePerView: { value: curRevPerView, delta: pctDelta(curRevPerView, prevRevPerView) },
     };
 
-    // --- Conversion Funnel (current window only) ---
-    const FUNNEL_LABELS = { view_item: "Product View", add_to_cart: "Add to Cart", begin_checkout: "Begin Checkout", purchase: "Purchase" };
-    const funnelCounts = [curSessions, ...FUNNEL_EVENTS.map((e) => curEventTotals.get(e) || 0)];
-    const funnelLabels = ["Sessions", ...FUNNEL_EVENTS.map((e) => FUNNEL_LABELS[e])];
-    const funnel = funnelLabels.map((stage, i) => {
-      const count = funnelCounts[i];
-      if (i === 0) return { stage, count, dropoffPct: null };
-      const prevCount = funnelCounts[i - 1];
-      return { stage, count, dropoffPct: prevCount > 0 ? ((prevCount - count) / prevCount) * 100 : null };
-    });
+    // --- Conversion Funnel (current window only) — 2 stages, see
+    // file-header comment on why Add to Cart/Begin Checkout are omitted.
+    // Dropoff % is computed client-side by FunnelList, not here. ---
+    const funnel = [
+      { stage: "Page Views", count: curPageViews },
+      { stage: "Purchases", count: curOrders },
+    ];
 
     // --- Conversion Trend (daily, current window, zero-filled) ---
     const conversionTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
-      const key = isoToYyyymmdd(iso);
-      const sessions = sessionsByDate.get(key) || 0;
-      const purchases = purchasesByDate.get(key) || 0;
-      return { date: iso, sessions, purchases, conversionRate: safeDivide(purchases, sessions) * 100 };
+      const pageViews = pageViewsByDate.get(isoToYyyymmdd(iso)) || 0;
+      const orders = ordersByDate.get(iso) || 0;
+      return { date: iso, pageViews, orders, conversionRate: safeDivide(orders, pageViews) * 100 };
     });
-
-    // --- Traffic by Acquisition Channel (current window, real GA4 channel
-    // groups only — never the sales-channel HMRPH Online/TikTok/Shopee
-    // labels, which don't exist in this dimension). All 14 real channels
-    // are small enough in count to list directly, no "Other" bucket needed. ---
-    const acquisitionChannels = Array.from(channelTotals, ([channel, sessions]) => ({
-      channel,
-      sessions,
-      sharePct: curSessions > 0 ? (sessions / curSessions) * 100 : 0,
-    })).sort((a, b) => b.sessions - a.sessions);
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
@@ -351,13 +325,13 @@ export async function handleTrafficAnalytics(req, res) {
         current,
         previous,
         property: GA4_PROPERTY_ID,
-        conversionRateNote: "Purchase events / sessions (session-level key-event rate not available in this data source at the whole-property grain).",
+        scopeNote:
+          "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Purchases/Revenue: real HRH Online website orders (HMRPH Online channel), not GA4 purchase events — those can't be scoped to a single store in this data source. Add to Cart/Begin Checkout are omitted, not zeroed: no scoped source exists for them.",
         generatedAt: new Date().toISOString(),
       },
       kpis,
       funnel,
       conversionTrend,
-      acquisitionChannels,
     });
   } catch (err) {
     console.error("HRH Traffic & Conversion API error:", err);
