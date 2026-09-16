@@ -33,6 +33,22 @@ function PctWithAmount({ pct, previous }) {
   );
 }
 
+// MoM needs both months' actual peso figures shown, not just the prior
+// one beside a %  — a bare "+12.3% (₱41,700)" doesn't say what THIS
+// month's own number is, which was the source of the confusion. Shows
+// "prev → current" then the % change, e.g. "₱41,700 → ₱46,800  +12.3%".
+function MomCell({ previous, current, pct }) {
+  if (pct === null || pct === undefined) return "—";
+  return (
+    <span className="whitespace-nowrap">
+      <span style={{ color: hrh.muted }}>
+        {formatPeso(previous)} → {formatPeso(current)}
+      </span>{" "}
+      {formatPct(pct)}
+    </span>
+  );
+}
+
 function formatDateLabel(iso) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
@@ -87,7 +103,7 @@ const PLATFORM_TABLE_COLUMNS = [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => formatPeso(r.sales) },
   { key: "wowPct", label: "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
-  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <PctWithAmount pct={r.momPct} previous={r.momPrevious} /> },
+  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
   { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },

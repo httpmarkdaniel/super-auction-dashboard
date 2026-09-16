@@ -420,6 +420,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         wowPrevious: wow ? wow.gmv : null,
         momPct: pctDelta(momCur.gmv, momPrev.gmv),
         momPrevious: momPrev.gmv,
+        momCurrent: momCur.gmv,
         orders: cur.orders,
         aov: safeDivide(cur.gmv, cur.orders),
         conversionRate: null, // see dataQuality — no defensible platform-specific denominator
@@ -437,6 +438,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       wowPrevious: wowMap ? wowTotalGmv : null,
       momPct: pctDelta(momCurTotalGmv, momPrevTotalGmv),
       momPrevious: momPrevTotalGmv,
+      momCurrent: momCurTotalGmv,
       orders: curTotalOrders,
       aov: safeDivide(curTotalGmv, curTotalOrders),
       conversionRate: null,
