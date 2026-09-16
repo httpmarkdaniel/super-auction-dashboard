@@ -4,7 +4,7 @@ import Panel from "../components/Panel";
 import FunnelList from "../components/FunnelList";
 import ShareBar from "../components/ShareBar";
 import DemoBadge from "../components/DemoBadge";
-import { TrendChart, RateTrendComboChart } from "../components/Charts";
+import { TrendChart } from "../components/Charts";
 import { LoadingState, ErrorState, EmptyState } from "../components/States";
 import { formatShortDateLabel } from "../trendBucket";
 import { hrh } from "../theme";
@@ -195,52 +195,46 @@ export default function TrafficConversion({ filters }) {
             />
           </KpiRow>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel title="Traffic Trend" subtitle="Daily Users and Page Views (hmr.ph/shop/ONP)">
-              <TrendChart
-                data={trend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
-                series={[
-                  { key: "pageViews", name: "Page Views", color: hrh.accent },
-                  { key: "users", name: "Users", color: hrh.series[0] },
-                ]}
-                xKey="dateLabel"
-                valueFormatter={formatNum}
-              />
-            </Panel>
-            <Panel title="Purchases & Conversion" subtitle="Daily Purchases (real store orders) and Conversion Rate">
-              <RateTrendComboChart
-                data={trend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
-                bars={[{ key: "purchases", name: "Purchases", color: hrh.accent }]}
-                rateKey="conversionRate"
-                rateName="Conversion Rate"
-              />
-            </Panel>
+          <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
+            <div className="xl:col-span-2">
+              <Panel title="Traffic Trend" subtitle="Daily Users and Page Views (hmr.ph/shop/ONP)" className="h-full">
+                <TrendChart
+                  data={trend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
+                  series={[
+                    { key: "pageViews", name: "Page Views", color: hrh.accent },
+                    { key: "users", name: "Users", color: hrh.series[0] },
+                  ]}
+                  xKey="dateLabel"
+                  valueFormatter={formatNum}
+                />
+              </Panel>
+            </div>
+            <div className="xl:col-span-3">
+              <Panel
+                title="Scoped Conversion Funnel"
+                subtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
+                className="h-full"
+              >
+                <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} stageHeight={76} gap={8} />
+                <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
+                    Total Revenue
+                  </span>
+                  <span className="font-display text-[18px] tabular-nums" style={{ color: hrh.ink }}>
+                    {formatPeso(data.totalRevenue)}
+                  </span>
+                </div>
+                <p className="text-[10.5px] mt-1.5" style={{ color: hrh.muted }}>
+                  Not a funnel stage — pesos aren't the same unit as the counts above, so it's shown separately rather than distorting the bar widths.
+                </p>
+              </Panel>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
-            <Panel
-              title="Scoped Conversion Funnel"
-              subtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
-            >
-              <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} />
-              <div className="mt-3.5 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
-                <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
-                  Total Revenue
-                </span>
-                <span className="font-display text-[16px] tabular-nums" style={{ color: hrh.ink }}>
-                  {formatPeso(data.totalRevenue)}
-                </span>
-              </div>
-              <p className="text-[10.5px] mt-1.5" style={{ color: hrh.muted }}>
-                Not a funnel stage — pesos aren't the same unit as the counts above, so it's shown separately rather than distorting the bar widths.
-              </p>
-            </Panel>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
               <EmptyState label="No ClickHouse table crosses this store's pages with device type — would need a direct GA4 Data API query, not yet wired up." />
             </Panel>
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
             <Panel title="Source / Medium" subtitle="Top traffic sources for this store's pages" badge={<DemoBadge text="Needs GA4 Data API" />}>
               <EmptyState label="No ClickHouse table crosses this store's pages with source/medium — whole-site acquisition tables can't be scoped to one store. Needs a direct GA4 Data API query." />
             </Panel>
