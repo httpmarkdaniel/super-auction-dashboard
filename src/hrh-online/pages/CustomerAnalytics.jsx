@@ -3,7 +3,7 @@ import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import TrendBucketPills from "../components/TrendBucketPills";
-import { BarComparisonChart } from "../components/Charts";
+import { BarComparisonChart, DonutChart } from "../components/Charts";
 import PhilippinesMap from "../components/PhilippinesMap";
 import { LoadingState, ErrorState } from "../components/States";
 import { formatShortDateLabel, formatWeekRangeLabel, formatMonthLabel } from "../trendBucket";
@@ -115,15 +115,24 @@ function CustomerTypePill({ type }) {
   );
 }
 
+// Customer Type is a LIFETIME status (any store/channel, not tied to the
+// selected period — see api/_hrh-customer-analytics.js's isOneTimeBuyer
+// note), while Orders/Units/GMV/First Purchase/Last Buy below are only
+// this customer's activity WITHIN the selected period. Lifetime Orders
+// makes that visible directly next to the label: a customer can
+// correctly show as "Returning" with First Purchase = Last Buy (their
+// only purchase in this window) when Lifetime Orders is 2+ — their other
+// order(s) simply fall outside the selected period.
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
   { key: "customerType", label: "Customer Type", render: (r) => <CustomerTypePill type={r.customerType} /> },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
-  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
-  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
-  { key: "firstPurchase", label: "First Purchase" },
-  { key: "lastBuy", label: "Last Buy" },
+  { key: "lifetimeOrders", label: "Lifetime Orders", render: (r) => formatNum(r.lifetimeOrders) },
+  { key: "orders", label: "Orders (Period)", render: (r) => formatNum(r.orders) },
+  { key: "units", label: "Units (Period)", render: (r) => formatNum(r.units) },
+  { key: "gmv", label: "GMV (Period)", render: (r) => formatPeso(r.gmv) },
+  { key: "aov", label: "AOV (Period)", render: (r) => formatPeso(r.aov) },
+  { key: "firstPurchase", label: "First Purchase (Period)" },
+  { key: "lastBuy", label: "Last Buy (Period)" },
 ];
 
 function dateRangeParams(dateRange) {
@@ -204,6 +213,9 @@ export default function CustomerAnalytics({ filters }) {
   const activeProvince = customersByProvince.find((p) => p.province === activeProvinceName) || null;
   const byGender = data?.customerDemographics?.byGender || [];
   const totalGenderCustomers = byGender.reduce((s, g) => s + g.customers, 0);
+  const newVsReturning = data?.newVsReturning || [];
+  const newSegment = newVsReturning.find((s) => s.segment === "New");
+  const returningSegment = newVsReturning.find((s) => s.segment === "Returning");
 
   return (
     <div>
@@ -253,6 +265,39 @@ export default function CustomerAnalytics({ filters }) {
               );
             })}
           </KpiRow>
+
+          {newSegment && returningSegment && (
+            <Panel title="New vs Returning" subtitle="Share of unique customers and revenue, for the selected period" className="mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.04em] mb-2" style={{ color: hrh.muted }}>
+                    By Customers
+                  </div>
+                  <DonutChart
+                    segments={[
+                      { label: "New", value: newSegment.count, color: hrh.blue },
+                      { label: "Returning", value: returningSegment.count, color: hrh.accent },
+                    ]}
+                    centerValue={formatNum(newSegment.count + returningSegment.count)}
+                    centerLabel="Customers"
+                  />
+                </div>
+                <div>
+                  <div className="text-[10.5px] font-semibold uppercase tracking-[0.04em] mb-2" style={{ color: hrh.muted }}>
+                    By Revenue
+                  </div>
+                  <DonutChart
+                    segments={[
+                      { label: "New", value: newSegment.gmv, color: hrh.blue },
+                      { label: "Returning", value: returningSegment.gmv, color: hrh.accent },
+                    ]}
+                    centerValue={formatPeso(newSegment.gmv + returningSegment.gmv)}
+                    centerLabel="Revenue"
+                  />
+                </div>
+              </div>
+            </Panel>
+          )}
 
           <Panel
             title="Customer Trend"
@@ -397,7 +442,10 @@ export default function CustomerAnalytics({ filters }) {
             </Panel>
           </div>
 
-          <Panel title="Top Customers" subtitle="Ranked by GMV for the selected period">
+          <Panel
+            title="Top Customers"
+            subtitle="Ranked by GMV for the selected period · Customer Type/Lifetime Orders are lifetime (any store/channel); every other column is this period only"
+          >
             <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />
           </Panel>
         </>

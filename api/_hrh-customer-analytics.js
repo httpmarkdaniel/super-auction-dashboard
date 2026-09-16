@@ -323,9 +323,11 @@ export async function handleCustomerAnalytics(req, res) {
       salesPerCustomer: { value: curSalesPerCustomer, previous: prevSalesPerCustomer, delta: pctDelta(curSalesPerCustomer, prevSalesPerCustomer) },
     };
 
+    const newGmvTotal = curCustomers.filter((c) => c.isNew).reduce((s, c) => s + c.gmv, 0);
+    const returningGmvTotal = curGmvTotal - newGmvTotal;
     const newVsReturning = [
-      { segment: "New", count: curNew },
-      { segment: "Returning", count: curReturning },
+      { segment: "New", count: curNew, gmv: newGmvTotal },
+      { segment: "Returning", count: curReturning, gmv: returningGmvTotal },
     ];
 
     const valueSegments = { "High Value": 0, "Mid Value": 0, "Low Value": 0 };
@@ -337,12 +339,21 @@ export async function handleCustomerAnalytics(req, res) {
       frequencyBuckets[frequencyBucket(c.orders)] += 1;
     }
 
+    // lifetimeOrders is exposed here (not just the isNew boolean) so the
+    // table is self-explanatory: New/Returning is a LIFETIME status (any
+    // store/channel, not tied to the selected period — see the note
+    // above), while firstPurchase/lastBuy below are only this customer's
+    // activity WITHIN the selected period. A customer can legitimately be
+    // "Returning" with firstPurchase === lastBuy (their only purchase in
+    // THIS window) if their other lifetime order(s) fall outside it —
+    // lifetimeOrders makes that visible instead of looking like a bug.
     const topCustomers = [...curCustomers]
       .sort((a, b) => b.gmv - a.gmv)
       .slice(0, TOP_CUSTOMERS_SHOWN)
       .map((c) => ({
         customer: c.name,
         customerType: c.isNew ? "New" : "Returning",
+        lifetimeOrders: lifetimeMap.get(c.name) || 0,
         orders: c.orders,
         units: c.units,
         gmv: c.gmv,
