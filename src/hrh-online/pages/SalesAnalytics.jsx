@@ -188,7 +188,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
           <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
             Discount Value by Voucher
           </div>
-          <TrendChart data={discountByVoucher} series={voucherSeries} xKey="dateLabel" valueFormatter={formatCompactPeso} />
+          <BarComparisonChart data={discountByVoucher} series={voucherSeries} xKey="dateLabel" valueFormatter={formatCompactPeso} />
         </div>
       </div>
       <TopSalesDriversPanel topSalesDrivers={voucherAssistedSales?.topSalesDrivers} />
