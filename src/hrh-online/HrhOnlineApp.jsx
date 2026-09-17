@@ -9,7 +9,7 @@ import ProductAnalytics from "./pages/ProductAnalytics";
 import MarkdownAnalytics from "./pages/MarkdownAnalytics";
 import OrdersFulfillment from "./pages/OrdersFulfillment";
 import BarcodeAnalytics from "./pages/BarcodeAnalytics";
-import PickupAndDelivery from "./pages/PickupAndDelivery";
+import ReturnsAndCancellation from "./pages/ReturnsAndCancellation";
 import CustomerSuccess from "./pages/CustomerSuccess";
 import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
 import OperationalFlags from "./pages/OperationalFlags";
@@ -26,7 +26,7 @@ const PAGES = {
   markdown: MarkdownAnalytics,
   fulfillment: OrdersFulfillment,
   barcodeAnalytics: BarcodeAnalytics,
-  pickup: PickupAndDelivery,
+  returnsCancellation: ReturnsAndCancellation,
   customerSuccess: CustomerSuccess,
   weeklyBusinessReview: WeeklyBusinessReview,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,

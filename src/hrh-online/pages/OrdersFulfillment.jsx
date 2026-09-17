@@ -10,6 +10,12 @@ import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart, BarCompari
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
+// Pickup and Delivery — MOVED here from its own standalone sidebar page
+// per explicit request (2026-09-17); the component itself is unchanged
+// (own fetch/state/filters, own Pickup/Delivery method toggle preserved),
+// just rendered as a sub-tab instead of a top-level page. See nav.js/
+// HrhOnlineApp.jsx for the sidebar removal.
+import PickupAndDelivery from "./PickupAndDelivery";
 
 // Small hand-drawn stroke icons, same feather-style convention as
 // Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept local
@@ -93,6 +99,7 @@ const YES_NO_PILL = { Yes: { bg: "#e6f4ea", text: hrh.good }, No: { bg: "#f0f1f5
 
 const SUB_TABS = [
   { key: "fulfillment", label: "Fulfillment" },
+  { key: "pickupDelivery", label: "Pickup & Delivery" },
   { key: "warehouseOps", label: "Warehouse Operations" },
   { key: "cancellation", label: "Cancellation (Pre-Fulfillment)" },
   { key: "returns", label: "Returns (Post-Fulfillment)" },
@@ -616,6 +623,9 @@ export default function OrdersFulfillment({ filters }) {
           </div>
         </>
       )}
+
+      {/* ============================== PICKUP & DELIVERY ============================== */}
+      {subTab === "pickupDelivery" && <PickupAndDelivery filters={filters} />}
 
       {/* ============================== WAREHOUSE OPERATIONS ============================== */}
       {subTab === "warehouseOps" && (

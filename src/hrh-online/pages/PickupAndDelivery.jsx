@@ -470,6 +470,15 @@ function FilterSelect({ value, onChange, options, allLabel }) {
 // aggregation story, including the 3 pieces of the mockup that aren't real
 // (Status/Staging Location filters, multi-courier comparison, fixed SLA
 // minutes) and how they were adapted.
+//
+// MOVED 2026-09-17 from its own standalone sidebar page into Orders &
+// Fulfillment's "Pickup & Delivery" sub-tab, per explicit request — see
+// OrdersFulfillment.jsx, which now imports and renders this component
+// directly (unchanged otherwise: own fetch, own Pickup/Delivery method
+// toggle, own filters). No longer reachable as a top-level page — removed
+// from nav.js/HrhOnlineApp.jsx's page-key map. The outer page-title
+// heading this component used to render was dropped since SubTabNav
+// already labels the active tab.
 export default function PickupAndDelivery({ filters }) {
   const { dateRange } = filters;
   const [data, setData] = useState(null);
@@ -562,17 +571,6 @@ export default function PickupAndDelivery({ filters }) {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-1 flex-wrap">
-        <div>
-          <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-            Pickup and Delivery
-          </div>
-          <div className="text-[11.5px] mt-0.5" style={{ color: hrh.muted }}>
-            Picker Performance · Fulfillment Efficiency · Pickup &amp; Delivery
-          </div>
-        </div>
-      </div>
-
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
       {ready && loading && !data && <LoadingState label="Loading Pickup and Delivery…" />}
       {error && <ErrorState label={`Couldn't load Pickup and Delivery: ${error}`} />}
