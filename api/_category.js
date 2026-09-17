@@ -26,6 +26,29 @@ export const CATEGORY_NAMES = [
   "Bulk Auction",
 ];
 
+// '%industrial%' was REMOVED from the Equipment and Industrial branch
+// below per explicit request (2026-09-17) — verified against production
+// it was catching plain consumer items that merely use "industrial" as a
+// marketing adjective or brand name, not actual heavy equipment: "Iron
+// Horse Industrial Fan Heater", "Astron 18" Industrial Stand Fan",
+// "Kincrome Compact Industrial Riveter", and "...MARIGOLD INDUSTRIAL"
+// (a PPE glove brand, not a description). 2,385 of 2,400 settled lots
+// matching '%industrial%' had NO other Equipment/Industrial signal
+// (equipment/generator/backhoe/excavator/construction) — those all now
+// correctly fall through to General Merchandise. The other 15 (e.g.
+// "Assorted Industrial Equipment") still match on '%equipment%' and stay
+// classified correctly.
+//
+// KNOWN RELATED ISSUE, NOT YET FIXED: '%equipment%' has the same kind of
+// false positives — verified "Equipment Storage Cabinet", "Gym Equipment",
+// "Mini Triangular Massaging Equipment", even "Toys Heavy Equipment
+// Transporter" (a toy) all match it today. Left as-is because, unlike
+// '%industrial%', a clean removal isn't possible here — some genuine
+// equipment items (e.g. "Construction Access Hoist Equipment", broadcast/
+// lab equipment) would incorrectly fall to General Merchandise too if the
+// keyword were simply dropped. Needs a real decision on which "equipment"
+// items count, not a blanket keyword removal — flag to the user before
+// touching this.
 export function CATEGORY_CLASSIFICATION_SQL(nameExpr) {
   return `
     CASE
@@ -33,7 +56,7 @@ export function CATEGORY_CLASSIFICATION_SQL(nameExpr) {
       WHEN ${nameExpr} ILIKE '%vehicle%' OR ${nameExpr} ILIKE '%motorcycle%' OR ${nameExpr} ILIKE '%car%'
         OR ${nameExpr} ILIKE '%truck%' OR ${nameExpr} ILIKE '%van%' OR ${nameExpr} ILIKE '%electric vehicle%'
         THEN 'Vehicles and Automotive'
-      WHEN ${nameExpr} ILIKE '%equipment%' OR ${nameExpr} ILIKE '%industrial%' OR ${nameExpr} ILIKE '%generator%'
+      WHEN ${nameExpr} ILIKE '%equipment%' OR ${nameExpr} ILIKE '%generator%'
         OR ${nameExpr} ILIKE '%backhoe%' OR ${nameExpr} ILIKE '%excavator%' OR ${nameExpr} ILIKE '%construction%'
         THEN 'Equipment and Industrial'
       ELSE 'General Merchandise'
