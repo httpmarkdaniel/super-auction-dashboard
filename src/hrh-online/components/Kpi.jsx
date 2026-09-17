@@ -61,6 +61,7 @@ const COLS_BY_COUNT = {
   4: "grid-cols-2 md:grid-cols-4",
   5: "grid-cols-2 md:grid-cols-3 xl:grid-cols-5",
   6: "grid-cols-2 md:grid-cols-3 xl:grid-cols-6",
+  7: "grid-cols-2 md:grid-cols-4 xl:grid-cols-7",
 };
 
 export function KpiRow({ children }) {
