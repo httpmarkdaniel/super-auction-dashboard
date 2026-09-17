@@ -115,15 +115,18 @@ function CustomerTypePill({ type }) {
   );
 }
 
-// Customer Type is a LIFETIME status at HRH Online (any of its 3
-// channels, not other HMR stores; not tied to the selected period — see
-// api/_hrh-customer-analytics.js's isOneTimeBuyer note), while
-// Orders/Units/GMV/First Purchase/Last Buy below are only
-// this customer's activity WITHIN the selected period. Lifetime Orders
-// makes that visible directly next to the label: a customer can
-// correctly show as "Returning" with First Purchase = Last Buy (their
-// only purchase in this window) when Lifetime Orders is 2+ — their other
-// order(s) simply fall outside the selected period.
+// Customer Type/Lifetime Orders/First Purchase/Last Buy are all LIFETIME
+// at HRH Online (any of its 3 channels, not other HMR stores; not tied to
+// the selected period — see api/_hrh-customer-analytics.js's
+// isOneTimeBuyer note and the topCustomers comment above it). Only
+// Orders/Units/GMV/AOV are scoped to the selected period. CHANGED
+// 2026-09-17: First Purchase/Last Buy used to be period-scoped, which let
+// a real Returning customer show First Purchase = Last Buy whenever their
+// other order(s) fell outside the current filter — technically correct
+// (Lifetime Orders showed 2+) but read as a mislabel. Now both dates are
+// the customer's real earliest/most recent order at HRH Online, so a
+// Returning customer will only ever show equal dates if that really is
+// the only order they've ever placed within the window this data covers.
 const TOP_CUSTOMER_COLUMNS = [
   { key: "customer", label: "Customer", maxWidth: 200 },
   { key: "customerType", label: "Customer Type", render: (r) => <CustomerTypePill type={r.customerType} /> },
@@ -132,8 +135,8 @@ const TOP_CUSTOMER_COLUMNS = [
   { key: "units", label: "Units (Period)", render: (r) => formatNum(r.units) },
   { key: "gmv", label: "GMV (Period)", render: (r) => formatPeso(r.gmv) },
   { key: "aov", label: "AOV (Period)", render: (r) => formatPeso(r.aov) },
-  { key: "firstPurchase", label: "First Purchase (Period)" },
-  { key: "lastBuy", label: "Last Buy (Period)" },
+  { key: "firstPurchase", label: "First Purchase (Lifetime)" },
+  { key: "lastBuy", label: "Last Buy (Lifetime)" },
 ];
 
 function dateRangeParams(dateRange) {
@@ -446,7 +449,7 @@ export default function CustomerAnalytics({ filters }) {
 
           <Panel
             title="Top Customers"
-            subtitle="Ranked by GMV for the selected period · Customer Type/Lifetime Orders are lifetime at HRH Online (any of its 3 channels); every other column is this period only"
+            subtitle="Ranked by GMV for the selected period · Customer Type/Lifetime Orders/First Purchase/Last Buy are lifetime at HRH Online (any of its 3 channels); Orders/Units/GMV/AOV are this period only"
           >
             <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />
           </Panel>

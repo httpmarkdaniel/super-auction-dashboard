@@ -273,13 +273,24 @@ export async function handleCustomerAnalytics(req, res) {
     // misclassify some of them as Returning when they're actually
     // first-time buyers — a data-quality ceiling, not something fixable
     // from this table alone.
+    // Also carries lifetime_first_txn/lifetime_last_txn — Top Customers'
+    // First Purchase/Last Buy columns use THESE (the customer's real
+    // earliest/most recent order at HRH Online, ignoring the selected date
+    // range entirely), not the period-scoped cur_first_txn/cur_last_txn
+    // below. Per explicit request: showing First Purchase = Last Buy for a
+    // "Returning" customer just because their other order(s) fall outside
+    // the current filter read as a bug, even with lifetimeOrders exposed
+    // to explain it — true lifetime dates avoid the question entirely.
     const names = [...new Set(rows.map((r) => r.customer_name).filter(Boolean))];
     let lifetimeMap = new Map();
     if (names.length) {
       const lifetimeRows = await (
         await client.query({
           query: `
-            SELECT \`ct.customer_name\` AS name, uniqExactIf(invoice_id, net_sales_amount > 0) AS lifetime_orders
+            SELECT \`ct.customer_name\` AS name,
+              uniqExactIf(invoice_id, net_sales_amount > 0) AS lifetime_orders,
+              minIf(transaction_date, net_sales_amount > 0) AS lifetime_first_txn,
+              maxIf(transaction_date, net_sales_amount > 0) AS lifetime_last_txn
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
               AND sales_channel IN {allChannels:Array(String)}
@@ -290,9 +301,9 @@ export async function handleCustomerAnalytics(req, res) {
           format: "JSONEachRow",
         })
       ).json();
-      lifetimeMap = new Map(lifetimeRows.map((r) => [r.name, toNum(r.lifetime_orders)]));
+      lifetimeMap = new Map(lifetimeRows.map((r) => [r.name, { orders: toNum(r.lifetime_orders), firstTxn: r.lifetime_first_txn, lastTxn: r.lifetime_last_txn }]));
     }
-    const isOneTimeBuyer = (name) => lifetimeMap.get(name) === 1;
+    const isOneTimeBuyer = (name) => lifetimeMap.get(name)?.orders === 1;
 
     const curCustomers = rows
       .filter((r) => toNum(r.cur_orders) > 0)
@@ -349,28 +360,31 @@ export async function handleCustomerAnalytics(req, res) {
       frequencyBuckets[frequencyBucket(c.orders)] += 1;
     }
 
-    // lifetimeOrders is exposed here (not just the isNew boolean) so the
-    // table is self-explanatory: New/Returning is a LIFETIME status at HRH
-    // Online (any of its 3 channels, not tied to the selected period — see
-    // the note above), while firstPurchase/lastBuy below are only this
-    // customer's activity WITHIN the selected period. A customer can
-    // legitimately be "Returning" with firstPurchase === lastBuy (their
-    // only purchase in THIS window) if their other lifetime order(s) at
-    // HRH Online fall outside it — lifetimeOrders makes that visible
-    // instead of looking like a bug.
+    // lifetimeOrders/firstPurchase/lastBuy are all LIFETIME at HRH Online
+    // (any of its 3 channels), completely ignoring the selected date range
+    // — CHANGED 2026-09-17 per explicit request. firstPurchase/lastBuy
+    // used to be scoped to only the selected period, which meant a real
+    // Returning customer (2+ lifetime orders) could show
+    // firstPurchase === lastBuy if their other order(s) fell outside the
+    // current filter — technically explained by lifetimeOrders being 2+,
+    // but it read as a mislabel rather than "there's more history outside
+    // this window." Orders/Units/GMV/AOV remain period-scoped — those are
+    // meant to answer "how did this customer perform in the period I'm
+    // looking at," which is a different question from "when did they first/
+    // last ever buy from HRH Online."
     const topCustomers = [...curCustomers]
       .sort((a, b) => b.gmv - a.gmv)
       .slice(0, TOP_CUSTOMERS_SHOWN)
       .map((c) => ({
         customer: c.name,
         customerType: c.isNew ? "New" : "Returning",
-        lifetimeOrders: lifetimeMap.get(c.name) || 0,
+        lifetimeOrders: lifetimeMap.get(c.name)?.orders || 0,
         orders: c.orders,
         units: c.units,
         gmv: c.gmv,
         aov: safeDivide(c.gmv, c.orders),
-        firstPurchase: c.firstTxn,
-        lastBuy: c.lastTxn,
+        firstPurchase: lifetimeMap.get(c.name)?.firstTxn || c.firstTxn,
+        lastBuy: lifetimeMap.get(c.name)?.lastTxn || c.lastTxn,
       }));
 
     // Customer Trend — New/Returning classified per bucket using the SAME
