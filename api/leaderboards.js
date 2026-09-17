@@ -368,14 +368,7 @@ export default async function handler(req, res) {
           SELECT
             vendor,
             count() AS lots_listed,
-            -- lots_sold: Paid/Released only, per explicit request — tightened
-            -- from an earlier Outstanding/Paid/Unpaid/Released definition
-            -- (which counted a lot as "sold" the moment it won a bid,
-            -- regardless of whether payment was ever collected). Now the
-            -- SAME status population as settled_bid_amount below, so
-            -- Sell-Through Rate (lots_sold / lots_listed) on this tab means
-            -- "fully paid-through", not "won".
-            countIf(status IN ('Paid', 'Released')) AS lots_sold,
+            countIf(status IN ('Outstanding', 'Paid', 'Unpaid', 'Released')) AS lots_sold,
             sumIf(ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS settled_bid_amount,
             sumIf(ifNull(sold_price, 0) - ifNull(bid_amount, 0), status IN ('Paid', 'Released')) AS buyers_premium_income,
             sumIf(ifNull(bid_amount, 0) * ifNull(commission_pct, 0) / 100, status IN ('Paid', 'Released')) AS commission_income,
@@ -433,42 +426,12 @@ export default async function handler(req, res) {
         format: "JSONEachRow",
       });
 
-      // PHONE / EMAIL — mart_auction_vendor_analysis's own `email` column is
-      // ciphertext (Laravel-style encrypted JSON, verified — not usable
-      // without the app's encryption key), so contact info instead comes
-      // from the real operational tables: xv3.vendors (company_name,
-      // vendor_id) joined to xv3.vendor_contacts (plaintext phone/mobile_no/
-      // email) by vendor_id. Joined back to this endpoint's `vendor` string
-      // via UPPER(TRIM(company_name)) — verified 999 of 1,000 distinct
-      // vendor names match this way, and 1,047 of 1,049 vendors have at
-      // least one contact record. A vendor can have multiple contacts on
-      // file; this takes the most recently created one (argMax by
-      // created_at), same "most recent, not arbitrary" convention as
-      // latest_account_executive above. phone falls back to mobile_no when
-      // phone itself is blank.
-      const vendorContactResult = await client.query({
-        query: `
-          SELECT
-            upper(trim(w.company_name)) AS vendor_key,
-            argMax(coalesce(nullIf(c.phone, ''), nullIf(c.mobile_no, '')), c.created_at) AS phone,
-            argMax(nullIf(c.email, ''), c.created_at) AS email
-          FROM xv3.vendors w
-          INNER JOIN xv3.vendor_contacts c ON w.vendor_id = c.vendor_id
-          WHERE w.deleted_at IS NULL AND c.deleted_at IS NULL
-          GROUP BY vendor_key
-        `,
-        query_params: {},
-        format: "JSONEachRow",
-      });
-
       const vendorAllLotsRows = await vendorAllLotsResult.json();
       const vendorFirstSeenRows = await vendorFirstSeenResult.json();
       const vendorAccountExecutiveRows = await vendorAccountExecutiveResult.json();
-      const vendorContactRows = await vendorContactResult.json();
 
       const vendorFirstSeenMap = new Map(vendorFirstSeenRows.map((r) => [r.vendor, r.first_seen]));
       const vendorAccountExecutiveMap = new Map(vendorAccountExecutiveRows.map((r) => [r.vendor, r]));
-      const vendorContactMap = new Map(vendorContactRows.map((r) => [r.vendor_key, r]));
       const activeVendorsCount = vendorAllLotsRows.length;
       const totalVendorBidAmount = vendorAllLotsRows.reduce((s, r) => s + (Number(r.settled_bid_amount) || 0), 0);
       const top5VendorRows = vendorAllLotsRows.slice(0, 5);
@@ -509,10 +472,6 @@ export default async function handler(req, res) {
               // can say "multiple assigned" instead of silently picking one.
               account_executive: ae?.latest_account_executive ?? null,
               all_account_executives: allAEs,
-              // phone/email: null when this vendor has no matching
-              // vendor_contacts record — see vendorContactResult comment.
-              phone: vendorContactMap.get(row.vendor?.toUpperCase().trim())?.phone ?? null,
-              email: vendorContactMap.get(row.vendor?.toUpperCase().trim())?.email ?? null,
             };
           }),
         },

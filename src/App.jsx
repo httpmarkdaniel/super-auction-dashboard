@@ -1880,8 +1880,6 @@ export default function App() {
               dateRange={vendorAnalyticsDateRange}
               store={store === ALL_STORES ? undefined : store}
               category={overviewCategory}
-              categoryOptions={CATEGORY_TABS}
-              onCategoryChange={setOverviewCategory}
               rangeLabel={vendorAnalyticsRangeLabel}
               refreshNonce={manualRefreshNonce}
             />
