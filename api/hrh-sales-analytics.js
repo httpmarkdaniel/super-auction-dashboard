@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { handleExecutiveOverview } from "./_hrh-executive-overview.js";
 import { handleTrafficAnalytics } from "./_hrh-traffic-analytics.js";
 import { handleCustomerAnalytics } from "./_hrh-customer-analytics.js";
 import { handleBarcodeAnalytics } from "./_hrh-barcode-analytics.js";
@@ -195,6 +196,7 @@ function buildVoucherSeriesTrend(rows, from, to, topN) {
 // request without one of those params (i.e. every real Sales Analytics page
 // load) falls through to the original, completely unmodified logic below.
 export default async function handler(req, res) {
+  if (req.query.report === "executiveOverview") return handleExecutiveOverview(req, res);
   if (req.query.report === "traffic") return handleTrafficAnalytics(req, res);
   if (req.query.report === "customers") return handleCustomerAnalytics(req, res);
   if (req.query.report === "barcodeAnalytics") return handleBarcodeAnalytics(req, res);

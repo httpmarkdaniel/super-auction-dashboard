@@ -51,7 +51,7 @@ const ICONS = {
 };
 
 // The 5 KPI scorecards, each paired with the formatter its value/previous
-// need. Same shape/order as data.kpis from api/hrh-executive-overview.js.
+// need. Same shape/order as data.kpis from api/_hrh-executive-overview.js.
 // `trendKey`: see ICONS comment above — only gmv/orders/units have a real
 // daily series in data.salesTrend; nmv/aov don't, so they get no sparkline.
 const KPI_CARDS = [
@@ -65,7 +65,7 @@ const KPI_CARDS = [
 // "Compare to" — an explicit, independent choice of comparison basis for
 // every scorecard's bottom-of-card delta, decoupled from the Date Range
 // filter itself (see resolveComparisonWindow in
-// api/hrh-executive-overview.js): Day shifts the whole selected window
+// api/_hrh-executive-overview.js): Day shifts the whole selected window
 // back 1 day, Week back 7 days, Month back 1 calendar month — whatever the
 // window's own length or type (a single day, WTD, MTD, a custom span…).
 const COMPARE_OPTIONS = [
@@ -77,7 +77,7 @@ const COMPARE_OPTIONS = [
 // Canonical lifecycle buckets (Fulfilled/Cancelled/Still Awaiting) — same
 // definitions as Orders & Fulfillment (api/_hrh-orders-fulfillment.js's
 // computeHmrphOnlineLifecycle), never the raw order_status field. See
-// api/hrh-executive-overview.js's comment for why this is fixed to HMRPH
+// api/_hrh-executive-overview.js's comment for why this is fixed to HMRPH
 // Online regardless of the page's Channel filter.
 const ORDER_LIFECYCLE_COLOR = {
   Fulfilled: hrh.good,
@@ -91,8 +91,8 @@ const CHANNEL_LABEL = {
   SHOPEE: "Shopee",
 };
 
-// Sales Trend is now a fixed trailing window (see api/hrh-executive-
-// overview.js's trailingFrom/trailingTo), independent of the page's Date
+// Sales Trend is now a fixed trailing window (see
+// api/_hrh-executive-overview.js's trailingFrom/trailingTo), independent of the page's Date
 // Range filter — Day shows the last 30 days, Week the last 4 weeks, Month
 // the last 6 months, always ending today, regardless of what's selected
 // above. These counts are how many of bucketRows' most-recent buckets to
@@ -141,7 +141,7 @@ function SalesTrendChannelTooltip({ active, payload, label }) {
 // customer_name = 'WALK IN' (no real buyer identity captured on HMR's
 // side for marketplace orders), so this panel is fixed to HMRPH Online
 // regardless of the page's Channel filter — see
-// api/hrh-executive-overview.js's comment for the full reasoning.
+// api/_hrh-executive-overview.js's comment for the full reasoning.
 const SEGMENT_COLOR = {
   New: hrh.good,
   Retained: hrh.series[0],
@@ -177,7 +177,7 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
-// Real ClickHouse-backed Executive Overview — see api/hrh-executive-overview.js
+// Real ClickHouse-backed Executive Overview — see api/_hrh-executive-overview.js
 // for the query/reconciliation (same locked GMV/NMV/Orders/Units/AOV
 // contract as Product Analytics). Uses the dashboard-wide Date Range +
 // Channel filter (Header), refetches on either change; no polling.
@@ -196,8 +196,8 @@ export default function ExecutiveOverview({ filters }) {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p, compareTo: cmp });
-      const res = await fetch(`/api/hrh-executive-overview?${qs.toString()}`, { signal });
+      const qs = new URLSearchParams({ channel: ch, ...p, compareTo: cmp, report: "executiveOverview" });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);

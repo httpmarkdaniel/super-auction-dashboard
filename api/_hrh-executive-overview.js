@@ -141,7 +141,7 @@ function daysInRange(from, to) {
   return enumerateDatesISO(from, to).filter((d) => !isSundayISO(d)).length;
 }
 
-export default async function handler(req, res) {
+export async function handleExecutiveOverview(req, res) {
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
