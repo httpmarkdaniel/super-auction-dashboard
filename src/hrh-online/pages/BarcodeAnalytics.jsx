@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Panel from "../components/Panel";
+import Modal from "../components/Modal";
+import DataTable from "../components/DataTable";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
-import { formatNum, formatPct } from "../format";
+import { formatNum, formatPct, formatPeso } from "../format";
+
+// Columns for a funnel stage's click-through modal — barcode/item name/
+// amount(unit price)/qty(current stock on hand)/stock value, per explicit
+// request. amount = current_srp, qty = item_qty, stockValue =
+// total_current_srp (verified server-side to equal item_qty * amount, so
+// it's sent as-is rather than recomputed here).
+const STAGE_ITEM_COLUMNS = [
+  { key: "barcode", label: "Barcode", width: 110 },
+  { key: "product", label: "Item Name", maxWidth: 320 },
+  { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
+  { key: "qty", label: "Qty (Stock)", render: (r) => formatNum(r.qty) },
+  { key: "stockValue", label: "Stock Value", render: (r) => formatPeso(r.stockValue) },
+];
 
 function formatDays(days) {
   if (days === null || days === undefined) return "—";
@@ -52,7 +67,14 @@ function funnelColor(i, n) {
   return lerpColor(hrh.blue, hrh.navy, n > 1 ? i / (n - 1) : 0);
 }
 
+// Click a stage's block to open its item-level breakdown (barcode/item
+// name/amount/qty/stock value) — a bare count doesn't say WHICH units are
+// in that stage. Own modal state here (not lifted to the parent) since
+// this funnel is the only consumer. `title="Click for item details"`
+// gives a visible hint since the click affordance isn't otherwise obvious
+// on a plain colored block.
 function LifecycleFunnel({ stages }) {
+  const [openStage, setOpenStage] = useState(null);
   const firstQty = stages[0]?.qty || 0;
   const widthPct = (qty) => (firstQty > 0 ? Math.max(MIN_WIDTH_PCT, Math.min(100, (qty / firstQty) * 100)) : MIN_WIDTH_PCT);
 
@@ -61,7 +83,9 @@ function LifecycleFunnel({ stages }) {
       {stages.map((s, i) => (
         <div key={s.key} className={i > 0 ? "mt-3" : ""}>
           <div
-            className="mx-auto flex items-center justify-center text-white font-bold"
+            className="mx-auto flex items-center justify-center text-white font-bold cursor-pointer"
+            title="Click for item details"
+            onClick={() => setOpenStage(s)}
             style={{
               width: `${widthPct(s.qty)}%`,
               minWidth: 92,
@@ -88,6 +112,22 @@ function LifecycleFunnel({ stages }) {
           </div>
         </div>
       ))}
+
+      <Modal
+        open={!!openStage}
+        onClose={() => setOpenStage(null)}
+        title={openStage ? `${openStage.label} — Item Details` : ""}
+        subtitle={openStage ? `${formatNum(openStage.qty)} item(s) in this stage` : ""}
+        wide
+      >
+        <DataTable
+          columns={STAGE_ITEM_COLUMNS}
+          rows={openStage?.items || []}
+          paginate
+          pageSize={10}
+          emptyLabel="No items in this stage."
+        />
+      </Modal>
     </div>
   );
 }

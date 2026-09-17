@@ -224,7 +224,8 @@ async function computeLifecycleFunnel(from, to) {
     client
       .query({
         query: `
-          SELECT barcode, toString(product_id) AS product_id, created_time
+          SELECT barcode, toString(product_id) AS product_id, created_time,
+            product_name, item_qty, current_srp, total_current_srp
           FROM xv3.mart_level_of_inventory
           WHERE store_name = {store:String}
             AND created_time IS NOT NULL
@@ -291,6 +292,25 @@ async function computeLifecycleFunnel(from, to) {
   let soldQty = 0;
   let soldNotPosted = 0;
 
+  // Per-stage item detail lists — for the funnel's click-through modal
+  // (barcode/item name/amount/qty/stock value per unit, so a stage's count
+  // isn't just a number with no way to see WHICH units it covers, same
+  // idea as Weekly Business Review's SKU Movement modal). current_srp is
+  // the unit's current selling price ("amount"); item_qty is its current
+  // on-hand stock; total_current_srp is stock value — verified 100% equal
+  // to item_qty * current_srp, so the stored field is used as-is rather
+  // than recomputed.
+  const stageItems = { barcoded: [], asn: [], received: [], posted: [], sold: [] };
+  function toItemDetail(r) {
+    return {
+      barcode: r.barcode,
+      product: r.product_name || r.barcode,
+      amount: toNum(r.current_srp),
+      qty: toNum(r.item_qty),
+      stockValue: toNum(r.total_current_srp),
+    };
+  }
+
   let barcodedToAsnHoursSum = 0;
   let barcodedToAsnHoursN = 0;
   let asnToReceivedDaysSum = 0;
@@ -301,20 +321,34 @@ async function computeLifecycleFunnel(from, to) {
   let postedToSoldDaysN = 0;
 
   for (const r of cohortRows) {
+    stageItems.barcoded.push(toItemDetail(r));
+
     const asn = asnMap.get(r.barcode);
     const isAsn = !!asn;
-    if (isAsn) asnQty++;
+    if (isAsn) {
+      asnQty++;
+      stageItems.asn.push(toItemDetail(r));
+    }
 
     const isReceived = isAsn && asn.latest_status === "RECEIVED";
-    if (isReceived) receivedQty++;
+    if (isReceived) {
+      receivedQty++;
+      stageItems.received.push(toItemDetail(r));
+    }
 
     const firstPublished = postedMap.get(r.barcode);
     const isPosted = !!firstPublished;
-    if (isPosted) postedQty++;
+    if (isPosted) {
+      postedQty++;
+      stageItems.posted.push(toItemDetail(r));
+    }
 
     const firstSale = soldMap.get(r.product_id);
     const isSold = !!firstSale;
-    if (isSold) soldQty++;
+    if (isSold) {
+      soldQty++;
+      stageItems.sold.push(toItemDetail(r));
+    }
     if (isSold && !isPosted) soldNotPosted++;
 
     if (isAsn && r.created_time) {
@@ -359,11 +393,11 @@ async function computeLifecycleFunnel(from, to) {
     grain: "1 row = 1 barcoded unit (xv3.mart_level_of_inventory, store_name = 'HRH ONLINE')",
     cohort: { from, to, basis: "created_time (Barcoded) within range; ASN/Received/Posted/Sold measured as-of-now for this cohort" },
     stages: [
-      { key: "barcoded", label: "Barcoded", qty: barcodedQty },
-      { key: "asn", label: "ASN Raised", qty: asnQty, conversionFromPrev: safeDiv(asnQty, barcodedQty) },
-      { key: "received", label: "Received / Put-away", qty: receivedQty, conversionFromPrev: safeDiv(receivedQty, asnQty) },
-      { key: "posted", label: "Posted (Listed for Sale)", qty: postedQty, conversionFromPrev: safeDiv(postedQty, receivedQty) },
-      { key: "sold", label: "Sold", qty: soldQty, conversionFromPrev: safeDiv(soldQty, postedQty) },
+      { key: "barcoded", label: "Barcoded", qty: barcodedQty, items: stageItems.barcoded },
+      { key: "asn", label: "ASN Raised", qty: asnQty, conversionFromPrev: safeDiv(asnQty, barcodedQty), items: stageItems.asn },
+      { key: "received", label: "Received / Put-away", qty: receivedQty, conversionFromPrev: safeDiv(receivedQty, asnQty), items: stageItems.received },
+      { key: "posted", label: "Posted (Listed for Sale)", qty: postedQty, conversionFromPrev: safeDiv(postedQty, receivedQty), items: stageItems.posted },
+      { key: "sold", label: "Sold", qty: soldQty, conversionFromPrev: safeDiv(soldQty, postedQty), items: stageItems.sold },
     ],
     cycleTimeDays: {
       barcodedToAsnHours: barcodedToAsnHoursN > 0 ? barcodedToAsnHoursSum / barcodedToAsnHoursN : null,
