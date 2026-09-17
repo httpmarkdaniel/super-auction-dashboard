@@ -6,7 +6,7 @@ import Modal, { ModalRow } from "../components/Modal";
 import SubTabNav from "../components/SubTabNav";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
-import { DonutChart, FulfillmentTrendComboChart, RateTrendComboChart, BarComparisonChart } from "../components/Charts";
+import { FulfillmentTrendComboChart, BarComparisonChart } from "../components/Charts";
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
@@ -60,22 +60,11 @@ const ICONS = {
       <path d="M12 6v6l4 2" />
     </Icon>
   ),
-  flag: (
-    <Icon>
-      <path d="M4 22V4a1 1 0 0 1 1-1h13l-2 5 2 5H5" />
-    </Icon>
-  ),
   cart: (
     <Icon>
       <circle cx="9" cy="21" r="1" />
       <circle cx="20" cy="21" r="1" />
       <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-    </Icon>
-  ),
-  rotateCcw: (
-    <Icon>
-      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-      <path d="M3 3v5h5" />
     </Icon>
   ),
 };
@@ -85,7 +74,6 @@ const LIFECYCLE_COLOR = {
   Cancelled: hrh.bad,
   "Still Awaiting Fulfillment / No Invoice": hrh.muted,
 };
-const CHECKOUT_METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2], Unknown: hrh.muted };
 const ORDER_STATUS_PILL = {
   Paid: { bg: hrh.accentSoft, text: hrh.accentText },
   Processing: { bg: hrh.blueSoft, text: hrh.blueText },
@@ -95,14 +83,11 @@ const PAYMENT_STATUS_PILL = {
   Paid: { bg: "#e6f4ea", text: hrh.good },
   Pending: { bg: "#f0f1f5", text: hrh.ink2 },
 };
-const YES_NO_PILL = { Yes: { bg: "#e6f4ea", text: hrh.good }, No: { bg: "#f0f1f5", text: hrh.ink2 } };
 
 const SUB_TABS = [
   { key: "fulfillment", label: "Fulfillment" },
   { key: "pickupDelivery", label: "Pickup & Delivery" },
   { key: "warehouseOps", label: "Warehouse Operations" },
-  { key: "cancellation", label: "Cancellation (Pre-Fulfillment)" },
-  { key: "returns", label: "Returns (Post-Fulfillment)" },
   { key: "methodology", label: "Methodology" },
 ];
 
@@ -160,77 +145,6 @@ function effectivePeriodLabel(period) {
   return from === to ? from : `${from} – ${to}`;
 }
 
-// Auto granularity for "Cancelled Orders by Period" — WTD/MTD/YTD map
-// directly to day/week/month (their own typical span always falls in
-// that bucket anyway); Custom derives it from the actual selected span
-// so a short custom range still reads day-by-day and a long one doesn't
-// render hundreds of daily rows.
-function daysBetweenISO(fromIso, toIso) {
-  return Math.round((new Date(`${toIso}T00:00:00Z`) - new Date(`${fromIso}T00:00:00Z`)) / 86400000) + 1;
-}
-function autoGranularity(dateRange) {
-  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
-    const days = daysBetweenISO(dateRange.from, dateRange.to);
-    if (days <= 14) return "day";
-    if (days <= 90) return "week";
-    return "month";
-  }
-  if (dateRange === "mtd" || dateRange === "prevMonth") return "week";
-  if (dateRange === "ytd" || dateRange === "prevYear") return "month";
-  return "day"; // wtd / prevWeek (default) — both ~7-day spans
-}
-
-// Report-style table (uppercase headers, right-aligned numeric columns,
-// a bold Total row with a stronger top border) — matches the reference
-// methodology report's own table styling more closely than the shared
-// DataTable component (which has no bold-total-row concept), used only
-// for the two small report tables that explicitly need it.
-function ReportTable({ columns, rows, totalRow }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-[13px] border-collapse">
-        <thead>
-          <tr style={{ borderBottom: `1px solid ${hrh.border}` }}>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                className={`px-3 py-2 text-[10.5px] font-semibold uppercase tracking-[0.04em] whitespace-nowrap ${c.align === "right" ? "text-right" : "text-left"}`}
-                style={{ color: hrh.ink2 }}
-              >
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} style={{ borderBottom: `1px solid ${hrh.border}` }}>
-              {columns.map((c) => (
-                <td key={c.key} className={`px-3 py-2 tabular-nums whitespace-nowrap ${c.align === "right" ? "text-right" : "text-left"}`} style={{ color: hrh.ink }}>
-                  {c.render ? c.render(r) : r[c.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
-          {totalRow && (
-            <tr style={{ borderTop: `2px solid ${hrh.ink}` }}>
-              {columns.map((c) => (
-                <td
-                  key={c.key}
-                  className={`px-3 py-2 tabular-nums whitespace-nowrap font-bold ${c.align === "right" ? "text-right" : "text-left"}`}
-                  style={{ color: hrh.ink }}
-                >
-                  {c.render ? c.render(totalRow) : totalRow[c.key]}
-                </td>
-              ))}
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function Pill({ text, map }) {
   const c = map[text] || { bg: "#f0f1f5", text: hrh.ink2 };
   return (
@@ -262,55 +176,6 @@ function LifecycleBarRow({ label, value, total, color }) {
 }
 
 
-const PERIOD_CANCEL_COLUMNS = [
-  { key: "dateLabel", label: "Period", align: "left" },
-  { key: "rawOrdersPlaced", label: "Raw Orders Placed", align: "right", render: (r) => formatNum(r.rawOrdersPlaced) },
-  { key: "cancelledReal", label: "Cancelled (Real)", align: "right", render: (r) => `${formatNum(r.cancelledCount)} (${formatPeso(r.cancelledValue)})` },
-  { key: "cancellationRate", label: "Cancellation Rate", align: "right", render: (r) => formatPct(r.cancellationRate) },
-];
-
-const METHOD_TABLE_COLUMNS = [
-  { key: "method", label: "Fulfillment Method", align: "left" },
-  { key: "count", label: "Cancelled Orders", align: "right", render: (r) => formatNum(r.count) },
-  { key: "value", label: "Cancelled Value", align: "right", render: (r) => formatPeso(r.value) },
-  { key: "sharePct", label: "Share", align: "right", render: (r) => formatPct(r.sharePct) },
-];
-
-// Compact "GCash 5, COD 3, Card 1" breakdown for a reason category's
-// payment types — same "figure + detail inline" density as the rest of
-// this page's cells, rather than a whole separate column per payment type.
-const PAYMENT_TYPES_SHOWN = 3;
-function paymentTypesCell(paymentTypes) {
-  if (!paymentTypes || paymentTypes.length === 0) return "—";
-  const shown = paymentTypes.slice(0, PAYMENT_TYPES_SHOWN);
-  const moreCount = paymentTypes.length - shown.length;
-  return (
-    <span className="whitespace-nowrap">
-      {shown.map((p, i) => (
-        <span key={p.type}>
-          {i > 0 && ", "}
-          {p.type} ({formatNum(p.count)})
-        </span>
-      ))}
-      {moreCount > 0 && <span style={{ color: hrh.muted }}>, +{moreCount} more</span>}
-    </span>
-  );
-}
-
-const CANCEL_REASON_COLUMNS = [
-  { key: "category", label: "Category" },
-  { key: "count", label: "Orders", render: (r) => formatNum(r.count) },
-  { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
-  { key: "paymentTypes", label: "Payment Type", render: (r) => paymentTypesCell(r.paymentTypes) },
-];
-
-const RETURN_REASON_COLUMNS = [
-  { key: "category", label: "Category" },
-  { key: "count", label: "Returns", render: (r) => formatNum(r.count) },
-  { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
-  { key: "paymentTypes", label: "Payment Type", render: (r) => paymentTypesCell(r.paymentTypes) },
-];
-
 const UNRESOLVED_COLUMNS = [
   { key: "orderNumber", label: "Order #" },
   { key: "orderStatus", label: "Order Status", render: (r) => <Pill text={r.orderStatus} map={ORDER_STATUS_PILL} /> },
@@ -320,28 +185,6 @@ const UNRESOLVED_COLUMNS = [
   { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
   { key: "probableInvoice", label: "Probable Invoice", render: (r) => r.probableInvoice || "—" },
   { key: "reason", label: "Reason / Flag" },
-];
-
-const CANCEL_DRILLDOWN_COLUMNS = [
-  { key: "orderNumber", label: "Order #" },
-  { key: "customer", label: "Customer" },
-  { key: "orderDate", label: "Order Date" },
-  { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
-  { key: "items", label: "Item(s)", maxWidth: 260, render: (r) => (r.items?.length ? r.items.join(", ") : "—") },
-  { key: "checkoutMethod", label: "Checkout" },
-  { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
-  { key: "cancellationReason", label: "Reason", render: (r) => r.cancellationReason || "—" },
-];
-
-const RETURN_DRILLDOWN_COLUMNS = [
-  { key: "invoiceNo", label: "Invoice #" },
-  { key: "customer", label: "Customer" },
-  { key: "productName", label: "Product", maxWidth: 220 },
-  { key: "returnDate", label: "Return Date" },
-  { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
-  { key: "checkoutMethod", label: "Checkout" },
-  { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
-  { key: "replaced", label: "Replaced?", render: (r) => <Pill text={r.replaced ? "Yes" : "No"} map={YES_NO_PILL} /> },
 ];
 
 function dateRangeParams(dateRange) {
@@ -360,15 +203,14 @@ function isDateRangeReady(dateRange) {
 // Real ClickHouse-backed Orders & Fulfillment — see
 // api/_hrh-orders-fulfillment.js (dispatched from api/hrh-sales-analytics.js
 // via ?report=ordersFulfillment) for the full methodology, ported from the
-// HMR MART / HMRPH ONLINE report. Reproduces that report's own 4-tab
-// structure (Fulfillment / Cancellation / Returns / Methodology) inside
-// the existing HRH Online shell — every number is live from the API,
-// never the report's own frozen Sep 1-10 (Fulfillment/Cancellation) or
-// Jun-Sep (Returns) figures. HMRPH Online only for the Fulfillment/
-// Cancellation tabs (TikTok/Shopee orders don't flow through the same
-// order/cancellation source table); Returns uses mart_net_sales directly
-// so it isn't channel-limited the same way. No Pick Rate anywhere — HMR
-// MART runs its own WMS, PickApp picking_status isn't meaningful here.
+// HMR MART / HMRPH ONLINE report. Fulfillment / Pickup & Delivery /
+// Warehouse Operations / Methodology live here; Cancellation and Returns
+// moved to the standalone Returns and Cancellation page (see nav.js) —
+// every number is live from the API, never the report's own frozen
+// figures. HMRPH Online only for the Fulfillment tab (TikTok/Shopee
+// orders don't flow through the same order source table). No Pick Rate
+// anywhere — HMR MART runs its own WMS, PickApp picking_status isn't
+// meaningful here.
 export default function OrdersFulfillment({ filters }) {
   const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
@@ -377,11 +219,8 @@ export default function OrdersFulfillment({ filters }) {
   const [subTab, setSubTab] = useState("fulfillment");
   const [compareTo, setCompareTo] = useState("week");
   const [fulfillmentBucket, setFulfillmentBucket] = useState("day");
-  const [cancellationBucket, setCancellationBucket] = useState("day");
-  const [returnsBucket, setReturnsBucket] = useState("day");
   const [warehouseOpsBucket, setWarehouseOpsBucket] = useState("day");
   const [activeModal, setActiveModal] = useState(null); // "received" | "completion" | "cancelled" | "awaiting" | null
-  const [drilldown, setDrilldown] = useState(null); // { kind: "cancellation" | "return", category } | null
 
   // Warehouse Operations — separate fetch/state: a different report
   // (?report=barcodeAnalytics, moved here from the old standalone Barcode
@@ -454,49 +293,10 @@ export default function OrdersFulfillment({ filters }) {
   // selected, which would make a sparkline jump around independent of the
   // number it's next to.
   const rawFulfillmentTrend = data?.fulfillmentTrend || [];
-  const rawReturnsTrend = data?.returns?.trend || [];
   const rawDailyVolume = whData?.dailyVolume || [];
   const completionRateSpark = rawFulfillmentTrend.map((r) => safeDivide(r.fulfilled, r.received) * 100);
-  const cancellationRateSpark = rawFulfillmentTrend.map((r) => safeDivide(r.cancelled, r.received) * 100);
-  const returnRateByCountSpark = rawReturnsTrend.map((r) => safeDivide(r.returns, r.salesCount) * 100);
-  const returnRateByValueSpark = rawReturnsTrend.map((r) => safeDivide(r.returnsValue, r.salesValue) * 100);
   const whDailyVolume = bucketRows(whData?.dailyVolume, warehouseOpsBucket, ["orders", "picked", "packed", "shipped"]);
-  const cancellationPerf = bucketRows(data?.fulfillmentTrend, cancellationBucket, ["received", "cancelled"]).map((r) => ({
-    ...r,
-    cancellationRate: safeDivide(r.cancelled, r.received) * 100,
-  }));
-  const cancellationPeriodGranularity = autoGranularity(dateRange);
-  const cancellationPeriodRows = bucketRows(data?.cancellationByPeriodDaily, cancellationPeriodGranularity, [
-    "rawOrdersPlaced",
-    "cancelledCount",
-    "cancelledValue",
-  ]).map((r) => ({ ...r, cancellationRate: safeDivide(r.cancelledCount, r.rawOrdersPlaced) * 100 }));
-  const cancellationPeriodTotals = (data?.cancellationByPeriodDaily || []).reduce(
-    (acc, r) => ({
-      rawOrdersPlaced: acc.rawOrdersPlaced + r.rawOrdersPlaced,
-      cancelledCount: acc.cancelledCount + r.cancelledCount,
-      cancelledValue: acc.cancelledValue + r.cancelledValue,
-    }),
-    { rawOrdersPlaced: 0, cancelledCount: 0, cancelledValue: 0 }
-  );
-  const returnsPerf = bucketRows(data?.returns?.trend, returnsBucket, ["salesCount", "salesValue", "returns", "returnsValue"]).map((r) => ({
-    ...r,
-    returnRateCount: safeDivide(r.returns, r.salesCount) * 100,
-    returnRateValue: safeDivide(r.returnsValue, r.salesValue) * 100,
-  }));
-
-  const cancelledByMethodSegments =
-    data?.cancellations?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
-  const cancelledMethodTotals = (data?.cancellations?.byFulfillmentMethod || []).reduce(
-    (acc, m) => ({ count: acc.count + m.count, value: acc.value + m.value }),
-    { count: 0, value: 0 }
-  );
-  const returnsByMethodSegments =
-    data?.returns?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
   const lifecycleCancelledInDenominator = data?.lifecycle?.find((l) => l.label === "Cancelled")?.value ?? 0;
-
-  const cancelDrilldownOrders = drilldown?.kind === "cancellation" ? (data?.cancellations?.orders || []).filter((o) => o.category === drilldown.category) : [];
-  const returnDrilldownOrders = drilldown?.kind === "return" ? (data?.returns?.orders || []).filter((o) => o.category === drilldown.category) : [];
   const periodLabel = data?.meta?.current ? `${data.meta.current.from} – ${data.meta.current.to}` : "";
 
   return (
@@ -532,7 +332,7 @@ export default function OrdersFulfillment({ filters }) {
         <SubTabNav tabs={SUB_TABS} value={subTab} onChange={setSubTab} />
       )}
 
-      {data && !error && (subTab === "fulfillment" || subTab === "cancellation") && data.meta?.unsupportedChannel && (
+      {data && !error && subTab === "fulfillment" && data.meta?.unsupportedChannel && (
         <ErrorState label={data.meta.limitationNote} />
       )}
 
@@ -732,205 +532,6 @@ export default function OrdersFulfillment({ filters }) {
         </>
       )}
 
-      {/* ============================== CANCELLATION ============================== */}
-      {data && !error && subTab === "cancellation" && !data.meta?.unsupportedChannel && (
-        <>
-          <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            Source: xv3.mart_xv3_order_report (cancellation_reason) — pre-fulfillment order cancellations, before any invoice/sale exists. See Returns for post-fulfillment sales reversals.
-          </div>
-
-          <KpiRow>
-            <button type="button" className="text-left w-full appearance-none bg-transparent border-0 p-0 cursor-pointer" onClick={() => setActiveModal("cancelled")}>
-              <KpiCard
-                label="Total Cancelled (Real)"
-                icon={ICONS.alertTriangle}
-                value={formatNum(data.kpis.cancelledOrders.value)}
-                delta={data.kpis.cancelledOrders.delta}
-                previousLabel={formatNum(data.kpis.cancelledOrders.previous)}
-                sparkline={rawFulfillmentTrend.map((r) => r.cancelled)}
-              />
-            </button>
-            <KpiCard
-              label="Cancellation Rate"
-              icon={ICONS.percent}
-              value={formatPct(data.kpis.cancellationRate.value)}
-              delta={data.kpis.cancellationRate.delta}
-              previousLabel={formatPct(data.kpis.cancellationRate.previous)}
-              sub="of Real Orders Received"
-              sparkline={cancellationRateSpark}
-            />
-            <KpiCard
-              label="System-Initiated Share"
-              icon={ICONS.flag}
-              value={formatPct(data.kpis.systemInitiatedShare.value)}
-              delta={data.kpis.systemInitiatedShare.delta}
-              previousLabel={formatPct(data.kpis.systemInitiatedShare.previous)}
-              sub="expired, not customer choice"
-            />
-            <KpiCard
-              label="No Reason Logged"
-              icon={ICONS.flag}
-              value={formatNum(data.kpis.cancelNoReasonCount.value)}
-              delta={data.kpis.cancelNoReasonCount.delta}
-              previousLabel={formatNum(data.kpis.cancelNoReasonCount.previous)}
-            />
-          </KpiRow>
-
-          <Panel
-            title="Cancelled Orders by Period"
-            subtitle="Real cancelled orders vs all real orders received, by order date"
-            action={<TrendBucketPills value={cancellationBucket} onChange={setCancellationBucket} />}
-            className="mb-4"
-          >
-            <RateTrendComboChart
-              data={cancellationPerf}
-              bars={[
-                { key: "received", name: "Orders Received", color: hrh.blue },
-                { key: "cancelled", name: "Cancelled", color: hrh.bad },
-              ]}
-              rateKey="cancellationRate"
-              rateName="Cancellation Rate"
-            />
-            <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.05em] mb-2" style={{ color: hrh.ink2 }}>
-                Detail — granularity auto-selected from the Date Range filter ({cancellationPeriodGranularity})
-              </div>
-              <ReportTable
-                columns={PERIOD_CANCEL_COLUMNS}
-                rows={cancellationPeriodRows}
-                totalRow={{
-                  dateLabel: "Total",
-                  rawOrdersPlaced: cancellationPeriodTotals.rawOrdersPlaced,
-                  cancelledCount: cancellationPeriodTotals.cancelledCount,
-                  cancelledValue: cancellationPeriodTotals.cancelledValue,
-                  cancellationRate: safeDivide(cancellationPeriodTotals.cancelledCount, cancellationPeriodTotals.rawOrdersPlaced) * 100,
-                }}
-              />
-            </div>
-          </Panel>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Cancelled Orders by Fulfillment Method" subtitle="Pickup vs Delivery share of True Cancellations (excludes re-ordered/customer-initiated)">
-              <DonutChart segments={cancelledByMethodSegments} centerValue={formatNum(data.cancellations.total)} centerLabel="Cancelled Orders" />
-              <div className="mt-3">
-                <ReportTable
-                  columns={METHOD_TABLE_COLUMNS}
-                  rows={data.cancellations?.byFulfillmentMethod || []}
-                  totalRow={{ method: "Total", count: cancelledMethodTotals.count, value: cancelledMethodTotals.value, sharePct: 100 }}
-                />
-              </div>
-            </Panel>
-            <Panel title="Cancellation Reasons" subtitle="True Cancellations only — click a row for the underlying orders, categories with 0 orders hidden">
-              <DataTable
-                columns={CANCEL_REASON_COLUMNS}
-                rows={(data.cancellations?.reasons || []).filter((r) => r.count > 0)}
-                onRowClick={(r) => setDrilldown({ kind: "cancellation", category: r.category })}
-                emptyLabel="No cancellations in this period."
-              />
-            </Panel>
-          </div>
-        </>
-      )}
-
-      {/* ============================== RETURNS ============================== */}
-      {data && !error && subTab === "returns" && data.returns && (
-        <>
-          <div className="text-[11.5px] mb-4" style={{ color: hrh.muted }}>
-            Source: xv3.mart_net_sales (transaction_type = sale/return) — post-fulfillment sales reversals, kept separate from Cancellation (pre-fulfillment) above.
-          </div>
-
-          <KpiRow>
-            <KpiCard
-              label="Total Sales Invoiced"
-              icon={ICONS.receipt}
-              value={formatNum(data.returns.kpis.totalSalesInvoiced.value)}
-              delta={data.returns.kpis.totalSalesInvoiced.delta}
-              previousLabel={formatNum(data.returns.kpis.totalSalesInvoiced.previous)}
-              sub={data.returns.kpis.totalSalesInvoiced.sub}
-              sparkline={rawReturnsTrend.map((r) => r.salesCount)}
-            />
-            <KpiCard
-              label="Total Returns"
-              icon={ICONS.rotateCcw}
-              value={formatNum(data.returns.kpis.totalReturns.value)}
-              delta={data.returns.kpis.totalReturns.delta}
-              previousLabel={formatNum(data.returns.kpis.totalReturns.previous)}
-              sub={data.returns.kpis.totalReturns.sub}
-              sparkline={rawReturnsTrend.map((r) => r.returns)}
-            />
-            <KpiCard
-              label="Return Rate (by count)"
-              icon={ICONS.percent}
-              value={formatPct(data.returns.kpis.returnRateByCount.value)}
-              delta={data.returns.kpis.returnRateByCount.delta}
-              previousLabel={formatPct(data.returns.kpis.returnRateByCount.previous)}
-              sparkline={returnRateByCountSpark}
-            />
-            <KpiCard
-              label="Return Rate (by value)"
-              icon={ICONS.percent}
-              value={formatPct(data.returns.kpis.returnRateByValue.value)}
-              delta={data.returns.kpis.returnRateByValue.delta}
-              previousLabel={formatPct(data.returns.kpis.returnRateByValue.previous)}
-              sparkline={returnRateByValueSpark}
-            />
-          </KpiRow>
-
-          <Panel
-            title="Returns by Period"
-            subtitle="Sales vs Returns, by transaction date"
-            action={<TrendBucketPills value={returnsBucket} onChange={setReturnsBucket} />}
-            className="mb-4"
-          >
-            <RateTrendComboChart
-              data={returnsPerf}
-              bars={[
-                { key: "salesCount", name: "Sales", color: hrh.blue },
-                { key: "returns", name: "Returns", color: hrh.bad },
-              ]}
-              rateKey="returnRateCount"
-              rateName="Return Rate (count)"
-            />
-          </Panel>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-            <Panel title="Returns by Fulfillment Method" subtitle="Pickup vs Delivery, via order_no → checkout_method">
-              <DonutChart segments={returnsByMethodSegments} centerValue={formatNum(data.returns.kpis.totalReturns.value)} centerLabel="Returns" />
-              <div className="mt-3">
-                <DataTable
-                  columns={[
-                    { key: "method", label: "Method" },
-                    { key: "count", label: "Returns", render: (r) => formatNum(r.count) },
-                    { key: "value", label: "Value", render: (r) => formatPeso(r.value) },
-                    { key: "sharePct", label: "Share", render: (r) => formatPct(r.sharePct) },
-                  ]}
-                  rows={data.returns?.byFulfillmentMethod || []}
-                  emptyLabel="No returns in this period."
-                />
-              </div>
-            </Panel>
-            <Panel title="Return Reasons" subtitle="Click a row for the underlying transactions — 10-category grouping, categories with 0 orders hidden">
-              <DataTable
-                columns={RETURN_REASON_COLUMNS}
-                rows={(data.returns.reasons || []).filter((r) => r.count > 0)}
-                onRowClick={(r) => setDrilldown({ kind: "return", category: r.category })}
-                emptyLabel="No returns in this period."
-              />
-            </Panel>
-          </div>
-
-          <Panel title="Did Returned Items Get Replaced?" subtitle="Matched to a later sale by the same customer name, same product, within 30 days">
-            <p className="text-[13px]" style={{ color: hrh.ink }}>
-              <span className="font-semibold">
-                {formatNum(data.returns.replacement.replacedCount)} of {formatNum(data.returns.replacement.totalReturns)} returns (
-                {formatPct(data.returns.replacement.replacedSharePct)})
-              </span>{" "}
-              show a same-item repurchase within 30 days.
-            </p>
-          </Panel>
-        </>
-      )}
-
       {/* ============================== METHODOLOGY ============================== */}
       {data && !error && subTab === "methodology" && (
         <>
@@ -1106,30 +707,7 @@ export default function OrdersFulfillment({ filters }) {
               View orders →
             </button>
           </Modal>
-
-          <Modal
-            open={drilldown?.kind === "cancellation"}
-            onClose={() => setDrilldown(null)}
-            title={drilldown?.category || ""}
-            subtitle={`${cancelDrilldownOrders.length} orders — HMRPH Online, ${periodLabel}`}
-            wide
-          >
-            <DataTable columns={CANCEL_DRILLDOWN_COLUMNS} rows={cancelDrilldownOrders} paginate pageSize={10} emptyLabel="No orders in this category." />
-          </Modal>
-
         </>
-      )}
-
-      {data && (
-        <Modal
-          open={drilldown?.kind === "return"}
-          onClose={() => setDrilldown(null)}
-          title={drilldown?.category || ""}
-          subtitle={`${returnDrilldownOrders.length} returns — ${periodLabel}`}
-          wide
-        >
-          <DataTable columns={RETURN_DRILLDOWN_COLUMNS} rows={returnDrilldownOrders} paginate pageSize={10} emptyLabel="No returns in this category." />
-        </Modal>
       )}
     </div>
   );

@@ -69,6 +69,14 @@ const SUB_TABS = [
 const CHECKOUT_METHOD_COLOR = { Pickup: hrh.blue, Delivery: hrh.series[2], Unknown: hrh.muted };
 const YES_NO_PILL = { Yes: { bg: "#e6f4ea", text: hrh.good }, No: { bg: "#f0f1f5", text: hrh.ink2 } };
 
+// "Cancelled Orders by Period" / "Returns by Period" are now a fixed
+// trailing window (see api/_hrh-orders-fulfillment.js's
+// cancellationTrendTrailing / returns.trendTrailing), independent of the
+// page's Date Range filter — same pattern as Executive Overview's Sales
+// Trend, except Month here is the last 12 months ("every month of the
+// whole year") rather than Executive Overview's 6.
+const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 12 };
+
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
@@ -228,6 +236,7 @@ const RETURN_DRILLDOWN_COLUMNS = [
   { key: "checkoutMethod", label: "Checkout" },
   { key: "paymentType", label: "Payment Type", render: (r) => r.paymentType || "Unknown" },
   { key: "replaced", label: "Replaced?", render: (r) => <Pill text={r.replaced ? "Yes" : "No"} map={YES_NO_PILL} /> },
+  { key: "remarks", label: "Invoice Remarks", maxWidth: 260, render: (r) => r.remarks || "—" },
 ];
 
 function dateRangeParams(dateRange) {
@@ -296,10 +305,12 @@ export default function ReturnsAndCancellation({ filters }) {
   const returnRateByCountSpark = rawReturnsTrend.map((r) => safeDivide(r.returns, r.salesCount) * 100);
   const returnRateByValueSpark = rawReturnsTrend.map((r) => safeDivide(r.returnsValue, r.salesValue) * 100);
 
-  const cancellationPerf = bucketRows(data?.fulfillmentTrend, cancellationBucket, ["received", "cancelled"]).map((r) => ({
-    ...r,
-    cancellationRate: safeDivide(r.cancelled, r.received) * 100,
-  }));
+  const cancellationPerf = bucketRows(data?.cancellationTrendTrailing, cancellationBucket, ["received", "cancelled"])
+    .slice(-TRAILING_BUCKET_COUNT[cancellationBucket])
+    .map((r) => ({
+      ...r,
+      cancellationRate: safeDivide(r.cancelled, r.received) * 100,
+    }));
   const cancellationPeriodGranularity = autoGranularity(dateRange);
   const cancellationPeriodRows = bucketRows(data?.cancellationByPeriodDaily, cancellationPeriodGranularity, [
     "rawOrdersPlaced",
@@ -314,11 +325,13 @@ export default function ReturnsAndCancellation({ filters }) {
     }),
     { rawOrdersPlaced: 0, cancelledCount: 0, cancelledValue: 0 }
   );
-  const returnsPerf = bucketRows(data?.returns?.trend, returnsBucket, ["salesCount", "salesValue", "returns", "returnsValue"]).map((r) => ({
-    ...r,
-    returnRateCount: safeDivide(r.returns, r.salesCount) * 100,
-    returnRateValue: safeDivide(r.returnsValue, r.salesValue) * 100,
-  }));
+  const returnsPerf = bucketRows(data?.returns?.trendTrailing, returnsBucket, ["salesCount", "salesValue", "returns", "returnsValue"])
+    .slice(-TRAILING_BUCKET_COUNT[returnsBucket])
+    .map((r) => ({
+      ...r,
+      returnRateCount: safeDivide(r.returns, r.salesCount) * 100,
+      returnRateValue: safeDivide(r.returnsValue, r.salesValue) * 100,
+    }));
 
   const cancelledByMethodSegments =
     data?.cancellations?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
@@ -329,8 +342,14 @@ export default function ReturnsAndCancellation({ filters }) {
   const returnsByMethodSegments =
     data?.returns?.byFulfillmentMethod?.map((m) => ({ label: m.method, value: m.count, color: CHECKOUT_METHOD_COLOR[m.method] || hrh.muted })) || [];
 
-  const cancelDrilldownOrders = drilldown?.kind === "cancellation" ? (data?.cancellations?.orders || []).filter((o) => o.category === drilldown.category) : [];
-  const returnDrilldownOrders = drilldown?.kind === "return" ? (data?.returns?.orders || []).filter((o) => o.category === drilldown.category) : [];
+  const cancelDrilldownOrders =
+    drilldown?.kind === "cancellation"
+      ? (data?.cancellations?.orders || []).filter((o) => o.category === drilldown.category).sort((a, b) => b.amount - a.amount)
+      : [];
+  const returnDrilldownOrders =
+    drilldown?.kind === "return"
+      ? (data?.returns?.orders || []).filter((o) => o.category === drilldown.category).sort((a, b) => b.amount - a.amount)
+      : [];
   const periodLabel = data?.meta?.current ? `${data.meta.current.from} – ${data.meta.current.to}` : "";
 
   return (
@@ -412,7 +431,7 @@ export default function ReturnsAndCancellation({ filters }) {
 
           <Panel
             title="Cancelled Orders by Period"
-            subtitle="Real cancelled orders vs all real orders received, by order date"
+            subtitle={`Last ${TRAILING_BUCKET_COUNT[cancellationBucket]} ${cancellationBucket === "day" ? "days" : cancellationBucket + "s"}, ending today — independent of the Date Range filter above.`}
             action={<TrendBucketPills value={cancellationBucket} onChange={setCancellationBucket} />}
             className="mb-4"
           >
@@ -512,7 +531,7 @@ export default function ReturnsAndCancellation({ filters }) {
 
           <Panel
             title="Returns by Period"
-            subtitle="Sales vs Returns, by transaction date"
+            subtitle={`Last ${TRAILING_BUCKET_COUNT[returnsBucket]} ${returnsBucket === "day" ? "days" : returnsBucket + "s"}, ending today — independent of the Date Range filter above.`}
             action={<TrendBucketPills value={returnsBucket} onChange={setReturnsBucket} />}
             className="mb-4"
           >

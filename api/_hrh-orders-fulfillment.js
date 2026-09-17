@@ -691,6 +691,31 @@ function formatPesoPlain(n) {
   return `₱${toNum(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Daily Real Received / Fulfilled / Cancelled / Awaiting from a
+// computeHmrphOnlineLifecycle() result — extracted so it can build BOTH
+// the current-period fulfillmentTrend AND the fixed trailing-window
+// cancellationTrendTrailing below from the exact same real classification
+// logic (no separate/approximated trend calculation), rather than
+// duplicating this grouping twice.
+function buildFulfillmentTrend(m) {
+  const allRealOrders = [
+    ...m.directFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
+    ...m.probableFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
+    ...m.noInvoiceUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
+    ...m.ambiguousUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
+    ...m.stayingCancelled.map((o) => ({ ...o, bucket: "cancelled" })),
+  ];
+  const byDate = new Map();
+  for (const o of allRealOrders) {
+    const d = o.created_at;
+    if (!byDate.has(d)) byDate.set(d, { date: d, received: 0, fulfilled: 0, cancelled: 0, awaiting: 0 });
+    const row = byDate.get(d);
+    row.received += 1;
+    row[o.bucket] += 1;
+  }
+  return Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 export async function handleOrdersFulfillment(req, res) {
   try {
     const channel = req.query.channel || "All Channels";
@@ -707,6 +732,18 @@ export async function handleOrdersFulfillment(req, res) {
     }
     const comparison = resolveComparisonWindow(range_, compareTo);
 
+    // Cancelled Orders by Period / Returns by Period trend charts — a
+    // FIXED trailing window (12 months, always ending today), independent
+    // of the page's Date Range filter — same "Sales Trend" pattern as
+    // api/hrh-executive-overview.js's salesTrendTrailing (Day = trailing
+    // 30 days, Week = trailing 4 weeks, Month = trailing 12 months; the
+    // frontend re-buckets this one fetch client-side, see
+    // trendBucket.js's bucketRows), per explicit request. 12 months here
+    // vs Executive Overview's 6 — "every month of the whole year" per
+    // that request, not a mismatch.
+    const trailingTo = manilaTodayISODate();
+    const trailingFrom = shiftMonthsClampedISO(trailingTo, -12);
+
     // CHANNEL SCOPE: the Fulfillment/Cancellation methodology (order_report
     // + net_sales order_no linkage) is verified only for HMRPH Online.
     // TikTok/Shopee orders don't flow through xv3.mart_xv3_order_report at
@@ -722,12 +759,51 @@ export async function handleOrdersFulfillment(req, res) {
     // are plain (from, to) functions already, so the previous period is
     // just a second call with a shifted window, run in the same Promise.all
     // rather than a second round-trip.
-    const [m, returns, mPrev, returnsPrev] = await Promise.all([
+    const [m, returns, mPrev, returnsPrev, mTrailing, returnsTrendTrailingRows] = await Promise.all([
       fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(range_.from, range_.to),
       computeReturnsAnalysis(range_.from, range_.to, channels),
       fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(comparison.from, comparison.to),
       computeReturnsAnalysis(comparison.from, comparison.to, channels),
+      // Cancelled Orders by Period's trailing data — reuses the SAME real
+      // classification logic as the current-period fulfillmentTrend (see
+      // buildFulfillmentTrend), just over the fixed 12-month window above,
+      // rather than a separate/approximated calculation.
+      fulfillmentUnsupported ? Promise.resolve(null) : computeHmrphOnlineLifecycle(trailingFrom, trailingTo),
+      // Returns by Period's trailing data — a dedicated lightweight query
+      // (not a second computeReturnsAnalysis call) since the trend only
+      // needs daily sale/return counts+values, not that function's
+      // heavier reason-categorization/replacement-matching work, which
+      // would be wasted here.
+      client
+        .query({
+          query: `
+            SELECT transaction_date AS d, transaction_type AS tt, uniqExact(invoice_id) AS cnt, sum(net_sales_amount) AS amt
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)} AND transaction_type IN ('sale', 'return')
+              AND transaction_date BETWEEN {from:String} AND {to:String}
+            GROUP BY d, tt
+          `,
+          query_params: { store: HRH_STORE, channels, from: trailingFrom, to: trailingTo },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
     ]);
+
+    const cancellationTrendTrailing = mTrailing ? buildFulfillmentTrend(mTrailing) : [];
+    const returnsTrendTrailingByDate = new Map();
+    for (const r of returnsTrendTrailingRows) {
+      const d = String(r.d).slice(0, 10);
+      if (!returnsTrendTrailingByDate.has(d)) returnsTrendTrailingByDate.set(d, { date: d, salesCount: 0, salesValue: 0, returns: 0, returnsValue: 0 });
+      const row = returnsTrendTrailingByDate.get(d);
+      if (r.tt === "sale") {
+        row.salesCount = toNum(r.cnt);
+        row.salesValue = toNum(r.amt);
+      } else {
+        row.returns = toNum(r.cnt);
+        row.returnsValue = Math.abs(toNum(r.amt));
+      }
+    }
+    const returnsTrendTrailing = Array.from(returnsTrendTrailingByDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
 
     // Returns' KPIs get their previous/delta merged in here so both the
     // early "unsupported channel" return below and the normal response
@@ -777,8 +853,9 @@ export async function handleOrdersFulfillment(req, res) {
         fulfillmentTrend: [],
         cancellations: null,
         cancellationByPeriodDaily: [],
+        cancellationTrendTrailing: [],
         unresolvedOrders: [],
-        returns: returnsWithComparison,
+        returns: { ...returnsWithComparison, trendTrailing: returnsTrendTrailing },
         dataQuality: [],
       });
     }
@@ -980,23 +1057,9 @@ export async function handleOrdersFulfillment(req, res) {
     const pendingUnresolved = allUnresolved.filter((o) => o.payment_status !== "Paid");
 
     // Fulfillment Trend — daily Real Received / Fulfilled / Cancelled,
-    // reusing the same orders already fetched above (no extra query).
-    const allRealOrders = [
-      ...m.directFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
-      ...m.probableFulfilled.map((o) => ({ ...o, bucket: "fulfilled" })),
-      ...m.noInvoiceUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
-      ...m.ambiguousUnresolved.map((o) => ({ ...o, bucket: "awaiting" })),
-      ...m.stayingCancelled.map((o) => ({ ...o, bucket: "cancelled" })),
-    ];
-    const byDate = new Map();
-    for (const o of allRealOrders) {
-      const d = o.created_at;
-      if (!byDate.has(d)) byDate.set(d, { date: d, received: 0, fulfilled: 0, cancelled: 0, awaiting: 0 });
-      const row = byDate.get(d);
-      row.received += 1;
-      row[o.bucket] += 1;
-    }
-    const fulfillmentTrend = Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+    // reusing the same orders already fetched above (no extra query). See
+    // buildFulfillmentTrend()'s own comment above handleOrdersFulfillment.
+    const fulfillmentTrend = buildFulfillmentTrend(m);
 
     // Unresolved Orders — post-reconciliation only (both direct AND
     // probable matching failed); ambiguous multi-candidate cases are
@@ -1103,8 +1166,9 @@ export async function handleOrdersFulfillment(req, res) {
       fulfillmentTrend,
       cancellations,
       cancellationByPeriodDaily,
+      cancellationTrendTrailing,
       unresolvedOrders,
-      returns: returnsWithComparison,
+      returns: { ...returnsWithComparison, trendTrailing: returnsTrendTrailing },
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
         `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 7 categories (everything except System-Initiated (Expired) and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
