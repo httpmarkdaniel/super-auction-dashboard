@@ -435,17 +435,20 @@ export default function ReturnsAndCancellation({ filters }) {
             action={<TrendBucketPills value={cancellationBucket} onChange={setCancellationBucket} />}
             className="mb-4"
           >
-            {/* Cancelled listed/rendered first and kept in the bold "bad"
-                red, Received pushed to a muted gray — Cancelled is the
-                number this panel is about, and it's a small slice of
-                Received by nature, so relying on bar height alone buried
-                it next to the much taller Received bars. */}
+            {/* Orders Received and Cancellation Rate are hidden from the
+                chart itself (Received's much larger scale was dwarfing
+                Cancelled even after the muted-color fix, and the rate
+                line added more visual noise than signal at this zoom) —
+                both are still real, still shown on hover via
+                RateTrendComboChart's tooltip, per explicit request. */}
             <RateTrendComboChart
               data={cancellationPerf}
               bars={[
                 { key: "cancelled", name: "Cancelled", color: hrh.bad },
                 { key: "received", name: "Orders Received", color: hrh.muted },
               ]}
+              hiddenBarKeys={["received"]}
+              showRateLine={false}
               rateKey="cancellationRate"
               rateName="Cancellation Rate"
             />
@@ -540,12 +543,19 @@ export default function ReturnsAndCancellation({ filters }) {
             action={<TrendBucketPills value={returnsBucket} onChange={setReturnsBucket} />}
             className="mb-4"
           >
+            {/* Sales and Return Rate are hidden from the chart itself (Sales'
+                much larger scale was dwarfing Returns, and the rate line
+                added more visual noise than signal at this zoom) — both
+                are still real, still shown on hover via
+                RateTrendComboChart's tooltip, per explicit request. */}
             <RateTrendComboChart
               data={returnsPerf}
               bars={[
                 { key: "salesCount", name: "Sales", color: hrh.blue },
                 { key: "returns", name: "Returns", color: hrh.bad },
               ]}
+              hiddenBarKeys={["salesCount"]}
+              showRateLine={false}
               rateKey="returnRateCount"
               rateName="Return Rate (count)"
             />

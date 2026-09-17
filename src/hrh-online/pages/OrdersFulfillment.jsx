@@ -583,14 +583,20 @@ export default function OrdersFulfillment({ filters }) {
               </div>
               <div>
                 <div className="font-semibold mb-0.5" style={{ color: hrh.ink }}>
-                  Cancellation Reasons — 10 categories
+                  Cancellation Reasons — 11 categories
                 </div>
                 Built from the free-text cancellation_reason field: Expired — No Payment (1 Day), Expired — No
-                Payment (2 Days), Expired — No Customer Confirmation (2 Days), Expired — Other, Payment Issues,
-                Technical / Website Issues, Changed Mind / No Longer Needed, Order Modification, No Reason Logged,
-                Other / Miscellaneous. The 4 Expired sub-categories are still one "System-Initiated" family for
-                every other metric on this page (Cancellation Rate, System-Initiated Share, etc.) — only the
-                Cancellation Reasons table's own display is broken down further.
+                Payment (2 Days), Expired — No Payment (Unspecified Duration), Expired — No Customer Confirmation
+                (2 Days), Expired — Other, Payment Issues, Technical / Website Issues, Changed Mind / No Longer
+                Needed, Order Modification, No Reason Logged, Other / Miscellaneous. The 5 Expired sub-categories
+                are still one "System-Initiated" family for every other metric on this page (Cancellation Rate,
+                System-Initiated Share, etc.) — only the Cancellation Reasons table's own display is broken down
+                further. A blank cancellation_reason ("No Reason Logged") is itself reclassified into one of the
+                two "Unspecified"/"No Customer Confirmation" Expired buckets using payment_type (Cash On
+                Delivery/Onsite Payment → No Customer Confirmation, everything else → No Payment) — a strong
+                inference (100% of explicit "No Customer Confirmation" orders are COD) but not a certainty
+                (~10% of explicit "No Payment" orders are still COD), so "No Reason Logged" itself now only
+                appears for the rare case with no payment_type either.
               </div>
               <div>
                 <div className="font-semibold mb-0.5" style={{ color: hrh.ink }}>
