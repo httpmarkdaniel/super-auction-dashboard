@@ -92,19 +92,22 @@ function LifecycleFunnel({ stages }) {
   );
 }
 
-// Barcode Analytics — scoped to ONLY the ASN -> Barcoded -> Posted -> Sold
-// inventory lifecycle funnel (api/_hrh-barcode-analytics.js's
-// computeLifecycleFunnel). The picker/QC/pick-to-dispatch content that used
-// to live on this page stays on Orders & Fulfillment's "Warehouse
-// Operations" sub-tab only — this page no longer duplicates it.
+// Barcode Analytics — scoped to ONLY the Barcoded -> ASN -> Received/
+// Put-away -> Posted -> Sold inventory lifecycle funnel
+// (api/_hrh-barcode-analytics.js's computeLifecycleFunnel). The picker/QC/
+// pick-to-dispatch content that used to live on this page stays on Orders &
+// Fulfillment's "Warehouse Operations" sub-tab only — this page no longer
+// duplicates it.
 //
 // Still fetches ?report=barcodeAnalytics (same endpoint, unchanged) but
 // only reads the `lifecycleFunnel` field from the response. See
 // computeLifecycleFunnel()'s own comment in that file for the validation
-// this was built on (Put-away omitted as unreliable; "Posted" uses
-// cms.mart_cms_posted_inventory_report, not cms_hmrph_posting_quantity).
-// No Channel dimension exists for this data — the Channel filter is hidden
-// for this page (see HrhOnlineApp.jsx's hideChannelFilter).
+// this was built on (Received/Put-away uses ASN status on
+// xv3.stg_outbound_slip_items, no separate put-away timestamp exists;
+// "Posted" uses cms.mart_cms_posted_inventory_report, not
+// cms_hmrph_posting_quantity). No Channel dimension exists for this data —
+// the Channel filter is hidden for this page (see HrhOnlineApp.jsx's
+// hideChannelFilter).
 export default function BarcodeAnalytics({ filters }) {
   const { dateRange } = filters;
   const [data, setData] = useState(null);
@@ -154,28 +157,36 @@ export default function BarcodeAnalytics({ filters }) {
       {funnel && !error && (
         <Panel
           title="Inventory Lifecycle Funnel"
-          subtitle={`ASN → Barcoded → Posted → Sold — cohort received in this period, tracked to date (${funnel.cohort?.from} to ${funnel.cohort?.to})`}
+          subtitle={`Barcoded → ASN → Received/Put-away → Posted → Sold — cohort barcoded in this period, tracked to date (${funnel.cohort?.from} to ${funnel.cohort?.to})`}
         >
           <LifecycleFunnel stages={funnel.stages} />
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4" style={{ borderTop: `1px solid ${hrh.border}` }}>
             <div>
               <div className="text-[11px]" style={{ color: hrh.muted }}>
-                Received → Barcoded
+                Barcoded → ASN
               </div>
               <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
                 {(() => {
-                  const hrs = funnel.cycleTimeDays?.receivedToBarcodedHours;
+                  const hrs = funnel.cycleTimeDays?.barcodedToAsnHours;
                   return hrs === null || hrs === undefined ? "—" : formatDays(hrs / 24);
                 })()}
               </div>
             </div>
             <div>
               <div className="text-[11px]" style={{ color: hrh.muted }}>
-                Barcoded → Posted
+                ASN → Received/Put-away
               </div>
               <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
-                {formatDays(funnel.cycleTimeDays?.barcodedToPostedDays ?? null)}
+                {formatDays(funnel.cycleTimeDays?.asnToReceivedDays ?? null)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px]" style={{ color: hrh.muted }}>
+                Received/Put-away → Posted
+              </div>
+              <div className="text-[14px] font-semibold" style={{ color: hrh.ink }}>
+                {formatDays(funnel.cycleTimeDays?.receivedToPostedDays ?? null)}
               </div>
             </div>
             <div>
