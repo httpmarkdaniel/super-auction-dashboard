@@ -1,25 +1,46 @@
 import { useState } from "react";
 import { useVendorAnalytics } from "../useVendorAnalytics";
 import { useVendorTop5Year } from "../useVendorTop5Year";
+import { CATEGORY_NAMES } from "../../api/_category.js";
 import StorySection from "./primitives/StorySection";
 import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import VendorDetailModal from "./primitives/VendorDetailModal";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import { exportVendorTop5YearExcel } from "../utils/vendorTop5YearExport";
 
 // Vendor Summary (the Paid/Released-only financial rollup by calendar
 // year) has MOVED to its own dedicated sidebar tab — see
 // src/components/VendorSummaryView.jsx and api/leaderboards.js's
 // type=vendor-financial-summary comment. Not duplicated here.
 
-// TOP VENDORS — 5-YEAR BID VALUE (executive cleanup task) — one row per
-// distinct vendor, one column per calendar year (2022-2026 as of 2026,
-// see api/leaderboards.js's type=vendor-top-5-year for the exact rolling-
+// Bid Value on this table, per explicit request: absolute value (a
+// settled bid amount is never genuinely negative in this data, but this
+// guarantees no stray "-" ever renders) with exactly 2 decimal places —
+// distinct from the shared formatPeso (0 decimals, no abs) and
+// formatCompactPeso (1 decimal, compact notation) used elsewhere in this
+// file, which stay untouched.
+function formatAbsPeso2dp(n) {
+  if (n === null || n === undefined) return "—";
+  return "₱" + Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// TOP VENDORS — 5-YEAR BID VALUE — one row per distinct vendor, one
+// column per calendar year (2022-2026 as of 2026, see
+// api/leaderboards.js's type=vendor-top-5-year for the exact rolling-
 // window rule), Total DESC. Sticky Vendor column + header, horizontal
-// scroll for the year columns — capped at 100 rows server-side (never
-// unbounded).
+// scroll for the year columns. Per explicit request: no longer capped at
+// 100 rows (the table scrolls instead), Account Executive/Phone/Email
+// columns added, Bid Value shown as absolute-value-2dp, an Excel export
+// button, and its own Category filter (General Merchandise/Vehicles and
+// Automotive/Equipment and Industrial/Bulk Auction) — kept as LOCAL state
+// here, deliberately NOT the page-wide category filter used by Overview/
+// Bidder Analytics/the rest of this tab, since this table is explicitly a
+// standing reference view independent of the dashboard's other filters;
+// sharing that state would silently change Overview's category too.
 function VendorTop5YearTable() {
-  const { data, loading, error } = useVendorTop5Year();
+  const [category, setCategory] = useState("");
+  const { data, loading, error } = useVendorTop5Year(category);
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load 5-Year Top Vendors: {error}</div>;
@@ -34,11 +55,41 @@ function VendorTop5YearTable() {
 
   return (
     <div className={loading ? "opacity-60" : ""}>
-      <div className="overflow-x-auto max-h-[480px] overflow-y-auto border border-gridline rounded-lg">
-        <table className="w-full text-[14px] min-w-[720px]">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Category</span>
+          <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[220px]"
+            >
+              <option value="">All Categories</option>
+              {CATEGORY_NAMES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => exportVendorTop5YearExcel({ years, category, rows })}
+          className="text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border border-gridline bg-surface1 text-ink hover:border-navy/40 transition-colors"
+        >
+          Export to Excel
+        </button>
+      </div>
+
+      <div className="overflow-x-auto max-h-[560px] overflow-y-auto border border-gridline rounded-lg">
+        <table className="w-full text-[14px] min-w-[960px]">
           <thead>
             <tr className="text-white text-[12px] uppercase tracking-wide bg-navy sticky top-0 z-20">
               <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy z-30">Vendor</th>
+              <th className="text-left font-medium py-2 px-3">Account Executive</th>
+              <th className="text-left font-medium py-2 px-3">Phone</th>
+              <th className="text-left font-medium py-2 px-3">Email</th>
               {years.map((y) => (
                 <th key={y} className="text-right font-medium py-2 px-3">{y}</th>
               ))}
@@ -49,22 +100,25 @@ function VendorTop5YearTable() {
             {rows.map((r) => (
               <tr key={r.vendor} className="border-t border-gridline hover:bg-plane">
                 <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate" title={r.vendor}>{r.vendor}</td>
+                <td className="py-2 px-3 text-ink max-w-[160px] truncate" title={r.account_executive || ""}>{r.account_executive || "—"}</td>
+                <td className="py-2 px-3 text-ink whitespace-nowrap">{r.phone || "—"}</td>
+                <td className="py-2 px-3 text-ink max-w-[200px] truncate" title={r.email || ""}>{r.email || "—"}</td>
                 {years.map((y) => (
-                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(r.years[y] || 0)}</td>
+                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbsPeso2dp(r.years[y] || 0)}</td>
                 ))}
-                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatCompactPeso(r.total)}</td>
+                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbsPeso2dp(r.total)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={years.length + 2} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
+                <td colSpan={years.length + 5} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
       <div className="text-[11.5px] text-muted mt-2">
-        Settled Bid Value (status Paid/Released, same definition as the rest of Vendor Analytics), grouped by the calendar year each auction ended, top {rows.length} of all active vendors by 5-year total — not filtered by the Store/Category/date controls above.
+        Settled Bid Value (status Paid/Released, same definition as the rest of Vendor Analytics), grouped by the calendar year each auction ended, {rows.length} vendor(s) shown — not filtered by the Store/date controls above, only by the Category selector here.
       </div>
     </div>
   );

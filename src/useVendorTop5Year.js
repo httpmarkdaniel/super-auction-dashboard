@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 
-// TOP VENDORS — 5-YEAR BID VALUE (executive cleanup task) — a fixed,
-// unfiltered reference table, fetched ONCE per Vendor Analytics mount
-// (empty dependency array), never on every Store/Category/date-range
-// filter change — it's a standing "hall of fame" view, not a filtered one
-// (see api/leaderboards.js's type=vendor-top-5-year comment for why).
-export function useVendorTop5Year() {
+// TOP VENDORS — 5-YEAR BID VALUE — a rolling 5-calendar-year reference
+// table, still independent of the dashboard's date-range/Store filters
+// (see api/leaderboards.js's type=vendor-top-5-year comment), but now
+// DOES accept the Category filter — refetches when `category` changes,
+// unlike the old always-empty-dependency-array version.
+export function useVendorTop5Year(category = "") {
   const [state, setState] = useState({ data: null, loading: true, error: null });
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/leaderboards?type=vendor-top-5-year")
+    setState((s) => ({ ...s, loading: true, error: null }));
+    const qs = new URLSearchParams({ type: "vendor-top-5-year", category: category || "" });
+    fetch(`/api/leaderboards?${qs.toString()}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`vendor-top-5-year returned ${res.status}: ${await res.text()}`);
         return res.json();
@@ -24,7 +26,7 @@ export function useVendorTop5Year() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [category]);
 
   return state;
 }

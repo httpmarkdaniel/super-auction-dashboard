@@ -16,21 +16,28 @@ export default async function handler(req, res) {
     const { from, to, store = "", category = "", type = "" } = req.query;
 
     // =========================================================
-    // TOP VENDORS — 5-YEAR BID VALUE (type=vendor-top-5-year) — a fixed,
-    // rolling 5-calendar-year reference table (this server's current year
-    // and the 4 before it — 2022-2026 as of 2026), deliberately NOT scoped
-    // by the dashboard's date-range/Store/Category filters: it's meant to
-    // read as a standing "hall of fame" table inside Vendor Analytics, not
-    // another filtered view. Placed BEFORE the from/to guard below since
-    // it needs neither param.
+    // TOP VENDORS — 5-YEAR BID VALUE (type=vendor-top-5-year) — a rolling
+    // 5-calendar-year reference table (this server's current year and the
+    // 4 before it — 2022-2026 as of 2026). Still NOT scoped by the
+    // dashboard-wide date-range/Store filters (it's meant to read as a
+    // standing "hall of fame" table inside Vendor Analytics spanning its
+    // own fixed 5-year window, not the page's date range) — but DOES now
+    // accept the Category filter and an unbounded row count, per explicit
+    // request (previously capped at 100 rows, no category support at
+    // all). Placed BEFORE the from/to guard below since it needs neither
+    // `from` nor `to`.
     //
     // Reuses Vendor Analytics' OWN existing settled-value definition
     // exactly (verified against vendorAllLotsQuery below): status IN
-    // ('Paid','Released'), and the SAME per-lot dedup CTE (GROUP BY
-    // auction_number, lot_number with argMax(status, STATUS_PRIORITY_SQL)
-    // + any(bid_amount)) — never Auction Result's own different, raw-
-    // fanout-sum convention, since this table lives in Vendor Analytics
-    // and is described as an extension of it, not of Auction Result.
+    // ('Paid','Released') — per explicit "paid and released lang"
+    // confirmation, already true here before this change, unchanged — and
+    // the SAME per-lot dedup CTE (GROUP BY auction_number, lot_number with
+    // argMax(status, STATUS_PRIORITY_SQL) + any(bid_amount)) — never
+    // Auction Result's own different, raw-fanout-sum convention, since this
+    // table lives in Vendor Analytics and is described as an extension of
+    // it, not of Auction Result. Category classification reuses the exact
+    // same CATEGORY_CLASSIFICATION_SQL/HAVING pattern as vendorAllLotsQuery
+    // below, for consistency.
     //
     // Date field: ending_time on xv3.mart_auction_productivity_report —
     // Vendor Analytics' own established "ending_time cohort" convention
@@ -38,7 +45,6 @@ export default async function handler(req, res) {
     // exact same selected_auctions join, NOT vendor_analysis's own
     // end_date column) — kept consistent with the rest of this tab.
     if (type === "vendor-top-5-year") {
-      const VENDOR_5YEAR_CAP = 100;
       const endYear = new Date().getUTCFullYear();
       const startYear = endYear - 4;
 
@@ -50,10 +56,12 @@ export default async function handler(req, res) {
               v.lot_number AS lot_number,
               any(v.vendor) AS vendor,
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
-              any(v.bid_amount) AS bid_amount
+              any(v.bid_amount) AS bid_amount,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
           ),
           auction_year AS (
             SELECT DISTINCT auction_number, toYear(ending_time) AS yr
@@ -69,7 +77,7 @@ export default async function handler(req, res) {
           WHERE l.status IN ('Paid', 'Released') AND l.vendor IS NOT NULL AND trim(l.vendor) != ''
           GROUP BY l.vendor, ay.yr
         `,
-        query_params: { startYear, endYear },
+        query_params: { startYear, endYear, category },
         format: "JSONEachRow",
       });
 
@@ -89,9 +97,55 @@ export default async function handler(req, res) {
         entry.total += amount;
       }
 
+      // ACCOUNT EXECUTIVE / PHONE / EMAIL — same joins/definitions as
+      // vendorAccountExecutiveResult and vendorContactResult below (see
+      // their own comments for why: mart_auction_vendor_analysis's own
+      // `email` column is ciphertext, so real contact info instead comes
+      // from xv3.vendors + xv3.vendor_contacts, joined by
+      // UPPER(TRIM(company_name)); AE comes directly off this same table).
+      // Duplicated here rather than shared — this branch returns early and
+      // is otherwise fully self-contained, same convention as the rest of
+      // this file.
+      const vendorAccountExecutiveResult5yr = await client.query({
+        query: `
+          SELECT
+            ifNull(vendor, 'Unknown Vendor') AS vendor,
+            argMax(account_executive, date_created) AS latest_account_executive
+          FROM xv3.mart_auction_vendor_analysis
+          WHERE vendor IS NOT NULL AND account_executive IS NOT NULL AND trim(account_executive) != ''
+          GROUP BY vendor
+        `,
+        query_params: {},
+        format: "JSONEachRow",
+      });
+      const vendorContactResult5yr = await client.query({
+        query: `
+          SELECT
+            upper(trim(w.company_name)) AS vendor_key,
+            argMax(coalesce(nullIf(c.phone, ''), nullIf(c.mobile_no, '')), c.created_at) AS phone,
+            argMax(nullIf(c.email, ''), c.created_at) AS email
+          FROM xv3.vendors w
+          INNER JOIN xv3.vendor_contacts c ON w.vendor_id = c.vendor_id
+          WHERE w.deleted_at IS NULL AND c.deleted_at IS NULL
+          GROUP BY vendor_key
+        `,
+        query_params: {},
+        format: "JSONEachRow",
+      });
+      const vendorAeMap5yr = new Map((await vendorAccountExecutiveResult5yr.json()).map((r) => [r.vendor, r.latest_account_executive]));
+      const vendorContactMap5yr = new Map((await vendorContactResult5yr.json()).map((r) => [r.vendor_key, r]));
+
       const vendors = [...byVendor.values()]
         .sort((a, b) => b.total - a.total)
-        .slice(0, VENDOR_5YEAR_CAP);
+        .map((v) => {
+          const contact = vendorContactMap5yr.get(v.vendor?.toUpperCase().trim());
+          return {
+            ...v,
+            account_executive: vendorAeMap5yr.get(v.vendor) ?? null,
+            phone: contact?.phone ?? null,
+            email: contact?.email ?? null,
+          };
+        });
 
       res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
 
@@ -99,6 +153,7 @@ export default async function handler(req, res) {
         type: "vendor-top-5-year",
         startYear,
         endYear,
+        category,
         rows: vendors,
       });
     }
