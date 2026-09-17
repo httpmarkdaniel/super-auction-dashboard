@@ -2,12 +2,22 @@ import { useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import ExecutiveOverview from "./pages/ExecutiveOverview";
+import SalesAnalytics from "./pages/SalesAnalytics";
+import StorePerformance from "./pages/StorePerformance";
+import TransactionsBasket from "./pages/TransactionsBasket";
+import CategoryPerformance from "./pages/CategoryPerformance";
+import TopProducts from "./pages/TopProducts";
 import { retail } from "./theme";
 import { defaultDateRange } from "./dateRange";
 import { ALL_STORES_OPTION } from "./stores";
 
 const PAGES = {
   overview: ExecutiveOverview,
+  salesAnalytics: SalesAnalytics,
+  storePerformance: StorePerformance,
+  transactionsBasket: TransactionsBasket,
+  categoryPerformance: CategoryPerformance,
+  topProducts: TopProducts,
 };
 
 // A separate module tree from Auction's App.jsx and HRH Online's

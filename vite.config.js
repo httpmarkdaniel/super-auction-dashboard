@@ -27,8 +27,8 @@ export default defineConfig({
       '/api/upcoming-auctions': 'http://localhost:8080',
       '/api/bidding-pace': 'http://localhost:8080',
       '/api/hrh-product-analytics': 'http://localhost:8080',
-      '/api/hrh-executive-overview': 'http://localhost:8080',
       '/api/hrh-sales-analytics': 'http://localhost:8080',
+      '/api/retail-analytics': 'http://localhost:8080',
     },
   },
 })
