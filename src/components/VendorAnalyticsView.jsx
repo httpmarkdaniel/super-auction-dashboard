@@ -6,6 +6,17 @@ import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import VendorDetailModal from "./primitives/VendorDetailModal";
 import { formatPeso, formatCompactPeso } from "../utils/format";
+import { exportVendorAnalyticsExcel } from "../utils/vendorAnalyticsExport";
+
+// Bid Value on the All Vendors table, per explicit request: absolute value
+// (a settled_bid_amount is never genuinely negative in this data, but this
+// guarantees no stray "-" ever renders) with exactly 2 decimal places —
+// distinct from the shared formatPeso (0 decimals, no abs) used in ~48
+// other places across this dashboard, which stays untouched.
+function formatAbsPeso2dp(n) {
+  if (n === null || n === undefined) return "—";
+  return "₱" + Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 // Vendor Summary (the Paid/Released-only financial rollup by calendar
 // year) has MOVED to its own dedicated sidebar tab — see
@@ -74,7 +85,7 @@ function VendorTop5YearTable() {
 // filters (see useVendorAnalytics.js). All figures below derive from the
 // SAME bounded all-lots-per-vendor aggregate (api/leaderboards.js's
 // vendor_analytics field) — no per-vendor request.
-export default function VendorAnalyticsView({ dateRange, store, category, rangeLabel, refreshNonce }) {
+export default function VendorAnalyticsView({ dateRange, store, category, categoryOptions, onCategoryChange, rangeLabel, refreshNonce }) {
   const { data, loading, error } = useVendorAnalytics(dateRange, store, category, refreshNonce);
   const [vendorRankMode, setVendorRankMode] = useState("value");
   // Click-to-view-details (executive cleanup task) — replaces the old
@@ -95,19 +106,48 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
   const top10ByBidAmount = [...allLots].sort((a, b) => b.settled_bid_amount - a.settled_bid_amount).slice(0, 10);
   const top5 = top10ByBidAmount.slice(0, 5);
 
-  // TOP 10 VENDORS — two ranking modes (PART REORG task), both derived
-  // client-side from the SAME already-loaded, now-enriched allLots array
-  // (buyers_premium_income/commission_income were added to
-  // vendorAllLotsQuery specifically so Service Income is available
-  // regardless of which 10 vendors end up in view) — zero new requests.
-  const topVendorsByValue = [...allLots].sort((a, b) => b.settled_bid_amount - a.settled_bid_amount).slice(0, 10);
-  const topVendorsByLotsSold = [...allLots].sort((a, b) => b.lots_sold - a.lots_sold).slice(0, 10);
+  // ALL VENDORS — two ranking modes, both derived client-side from the
+  // SAME already-loaded, now-enriched allLots array (buyers_premium_income/
+  // commission_income were added to vendorAllLotsQuery specifically so
+  // Service Income is available for every vendor) — zero new requests.
+  // CHANGED from a top-10 cap to the full list per explicit request — the
+  // table itself scrolls (see the panel below) rather than truncating data.
+  const topVendorsByValue = [...allLots].sort((a, b) => b.settled_bid_amount - a.settled_bid_amount);
+  const topVendorsByLotsSold = [...allLots].sort((a, b) => b.lots_sold - a.lots_sold);
   const topVendors = vendorRankMode === "value" ? topVendorsByValue : topVendorsByLotsSold;
 
   return (
     <div>
       {loading && (
         <div className="mb-4 text-[13px] text-muted">Updating Vendor Analytics…</div>
+      )}
+
+      {/* Category filter — this tab already received `category` as a prop
+          (shared state, set from the Overview tab's own selector), but had
+          no visible control of its own here, so changing it required
+          switching tabs. Same shared overviewCategory state, same
+          General Merchandise / Vehicles and Automotive / Equipment and
+          Industrial / Bulk Auction taxonomy (api/_category.js), per
+          explicit request. Re-scopes every figure on this tab, same as it
+          already did silently via the Overview tab. */}
+      {categoryOptions && onCategoryChange && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Category</span>
+          <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+            <select
+              value={category || ""}
+              onChange={(e) => onCategoryChange(e.target.value)}
+              className="font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[220px]"
+            >
+              <option value="">All Categories</option>
+              {categoryOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       )}
 
       <StorySection
@@ -163,32 +203,44 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
       </StorySection>
 
       <StorySection
-        title={`Top 10 Vendors — ${rangeLabel}`}
-        insight="Click a vendor row for their full profile. Switch ranking mode to see the same 10-row limit ranked a different way."
+        title={`All Vendors — ${rangeLabel}`}
+        insight={`${topVendors.length.toLocaleString()} vendor(s) shown. Click a row for their full profile, or export the full list to Excel.`}
       >
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setVendorRankMode("value")}
+              className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "value" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
+            >
+              By Sold Bid Value
+            </button>
+            <button
+              type="button"
+              onClick={() => setVendorRankMode("lots")}
+              className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "lots" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
+            >
+              By Lots Sold
+            </button>
+          </div>
           <button
             type="button"
-            onClick={() => setVendorRankMode("value")}
-            className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "value" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
+            onClick={() => exportVendorAnalyticsExcel({ rangeLabel, rows: topVendors })}
+            className="text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border border-gridline bg-surface1 text-ink hover:border-navy/40 transition-colors"
           >
-            By Sold Bid Value
-          </button>
-          <button
-            type="button"
-            onClick={() => setVendorRankMode("lots")}
-            className={`text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border transition-colors ${vendorRankMode === "lots" ? "bg-navy text-white border-navy" : "bg-surface1 text-ink border-gridline hover:border-navy/40"}`}
-          >
-            By Lots Sold
+            Export to Excel
           </button>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[560px] overflow-y-auto border border-gridline rounded-lg">
           <table className="w-full text-[14.5px]">
             <thead>
               {vendorRankMode === "value" ? (
-                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
+                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy sticky top-0 z-10">
                   <th className="text-left font-medium py-2 px-3">Vendor</th>
+                  <th className="text-left font-medium py-2 px-3">Account Executive</th>
+                  <th className="text-left font-medium py-2 px-3">Phone</th>
+                  <th className="text-left font-medium py-2 px-3">Email</th>
                   <th className="text-right font-medium py-2 px-3">Bid Value</th>
                   <th className="text-right font-medium py-2 px-3">Lots Listed</th>
                   <th className="text-right font-medium py-2 px-3">Lots Sold</th>
@@ -197,8 +249,11 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
                   <th className="text-right font-medium py-2 px-3">Branches</th>
                 </tr>
               ) : (
-                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy">
+                <tr className="text-white text-[12.5px] uppercase tracking-wide bg-navy sticky top-0 z-10">
                   <th className="text-left font-medium py-2 px-3">Vendor</th>
+                  <th className="text-left font-medium py-2 px-3">Account Executive</th>
+                  <th className="text-left font-medium py-2 px-3">Phone</th>
+                  <th className="text-left font-medium py-2 px-3">Email</th>
                   <th className="text-right font-medium py-2 px-3">Lots Sold</th>
                   <th className="text-right font-medium py-2 px-3">Lots Listed</th>
                   <th className="text-right font-medium py-2 px-3">Sell-Through</th>
@@ -222,9 +277,12 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
                       <span className="block truncate" title={v.vendor}>{v.vendor}</span>
                       <span className="text-[11px] text-series1 font-medium">Click to view details</span>
                     </td>
+                    <td className="py-2 px-3 text-ink max-w-[160px] truncate" title={v.account_executive || ""}>{v.account_executive || "—"}</td>
+                    <td className="py-2 px-3 text-ink whitespace-nowrap">{v.phone || "—"}</td>
+                    <td className="py-2 px-3 text-ink max-w-[200px] truncate" title={v.email || ""}>{v.email || "—"}</td>
                     {vendorRankMode === "value" ? (
                       <>
-                        <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatPeso(v.settled_bid_amount)}</td>
+                        <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbsPeso2dp(v.settled_bid_amount)}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{v.lots_sold}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</td>
@@ -236,7 +294,7 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
                         <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{v.lots_sold}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{v.lots_listed}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{sellThroughPct != null ? `${sellThroughPct.toFixed(1)}%` : "—"}</td>
-                        <td className="py-2 px-3 text-right tabular text-ink">{formatPeso(v.settled_bid_amount)}</td>
+                        <td className="py-2 px-3 text-right tabular text-ink">{formatAbsPeso2dp(v.settled_bid_amount)}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{formatCompactPeso(serviceIncome)}</td>
                         <td className="py-2 px-3 text-right tabular text-ink">{v.branches}</td>
                       </>
@@ -246,7 +304,7 @@ export default function VendorAnalyticsView({ dateRange, store, category, rangeL
               })}
               {topVendors.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted text-[14.5px]">
+                  <td colSpan={10} className="py-6 text-center text-muted text-[14.5px]">
                     No settled vendor activity in this scope.
                   </td>
                 </tr>
