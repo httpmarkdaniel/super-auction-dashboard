@@ -39,11 +39,19 @@ export default async function handler(req, res) {
     // same CATEGORY_CLASSIFICATION_SQL/HAVING pattern as vendorAllLotsQuery
     // below, for consistency.
     //
-    // Date field: ending_time on xv3.mart_auction_productivity_report —
-    // Vendor Analytics' own established "ending_time cohort" convention
-    // (verified: vendorAllLotsQuery below scopes by ending_time via this
-    // exact same selected_auctions join, NOT vendor_analysis's own
-    // end_date column) — kept consistent with the rest of this tab.
+    // Date field: end_date on xv3.mart_auction_vendor_analysis, falling
+    // back to ending_time on xv3.mart_auction_productivity_report when
+    // end_date is null — CHANGED 2026-09-17 per explicit request. Every
+    // OTHER date-scoped query in this dashboard (Overview, Vendor/Bidder
+    // Analytics' main filtered views, Category View, Auction Result) still
+    // uses ending_time only — end_date is only 34.2% populated across all
+    // settled lots (489,802 of 1,430,114), so switching everywhere would
+    // silently drop ~66% of lots from every date-filtered report. Limited
+    // to just these two "5-Year Bid Value" tables (+ their lot drill-down)
+    // specifically because the coalesce-with-fallback here means nothing
+    // is lost: a lot with no end_date still gets a year from ending_time,
+    // same as before. Verified end_date and ending_time agree exactly
+    // when both exist (0 of 10,827 matched auctions disagreed on year).
     if (type === "vendor-top-5-year") {
       const endYear = new Date().getUTCFullYear();
       const startYear = endYear - 4;
@@ -57,25 +65,26 @@ export default async function handler(req, res) {
               any(v.vendor) AS vendor,
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               any(v.bid_amount) AS bid_amount,
+              any(v.end_date) AS lot_end_date,
               any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
             HAVING ({category:String} = '' OR lot_category = {category:String})
           ),
-          auction_year AS (
-            SELECT DISTINCT auction_number, toYear(ending_time) AS yr
+          auction_meta AS (
+            SELECT DISTINCT auction_number, ending_time
             FROM xv3.mart_auction_productivity_report
-            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
           )
           SELECT
             l.vendor AS vendor,
-            ay.yr AS yr,
+            toYear(coalesce(l.lot_end_date, am.ending_time)) AS yr,
             sum(ifNull(l.bid_amount, 0)) AS bid_amount
           FROM lots l
-          INNER JOIN auction_year ay ON l.auction_number = ay.auction_number
+          LEFT JOIN auction_meta am ON l.auction_number = am.auction_number
           WHERE l.status IN ('Paid', 'Released') AND l.vendor IS NOT NULL AND trim(l.vendor) != ''
-          GROUP BY l.vendor, ay.yr
+            AND toYear(coalesce(l.lot_end_date, am.ending_time)) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          GROUP BY l.vendor, yr
         `,
         query_params: { startYear, endYear, category },
         format: "JSONEachRow",
@@ -189,6 +198,11 @@ export default async function handler(req, res) {
     // not a fabricated fallback. No Account Executive equivalent exists
     // for bidders (that's a vendor-specific consignment relationship), so
     // this table has no analogous column.
+    // Date field: end_date on xv3.mart_auction_vendor_analysis, falling
+    // back to ending_time when end_date is null — same change/reasoning as
+    // vendor-top-5-year above (see its comment): limited to this table
+    // (not the rest of the dashboard) since the coalesce fallback means no
+    // lot is ever dropped for lacking end_date.
     if (type === "bidder-top-5-year") {
       const endYear = new Date().getUTCFullYear();
       const startYear = endYear - 4;
@@ -202,25 +216,26 @@ export default async function handler(req, res) {
               any(trim(v.bidder_name)) AS bidder_name,
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               any(v.bid_amount) AS bid_amount,
+              any(v.end_date) AS lot_end_date,
               any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
             HAVING ({category:String} = '' OR lot_category = {category:String})
           ),
-          auction_year AS (
-            SELECT DISTINCT auction_number, toYear(ending_time) AS yr
+          auction_meta AS (
+            SELECT DISTINCT auction_number, ending_time
             FROM xv3.mart_auction_productivity_report
-            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
           )
           SELECT
             l.bidder_name AS bidder_name,
-            ay.yr AS yr,
+            toYear(coalesce(l.lot_end_date, am.ending_time)) AS yr,
             sum(ifNull(l.bid_amount, 0)) AS bid_amount
           FROM lots l
-          INNER JOIN auction_year ay ON l.auction_number = ay.auction_number
+          LEFT JOIN auction_meta am ON l.auction_number = am.auction_number
           WHERE l.status IN ('Paid', 'Released') AND l.bidder_name IS NOT NULL AND trim(l.bidder_name) != ''
-          GROUP BY l.bidder_name, ay.yr
+            AND toYear(coalesce(l.lot_end_date, am.ending_time)) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          GROUP BY l.bidder_name, yr
         `,
         query_params: { startYear, endYear, category },
         format: "JSONEachRow",
@@ -286,15 +301,18 @@ export default async function handler(req, res) {
     // category, branch, date, bid amount) — the per-lot rows that table's
     // own year/total figures are aggregated FROM, at
     // xv3.mart_auction_vendor_analysis's own grain, joined to
-    // xv3.mart_auction_productivity_report for date/branch. Same
-    // bidder_name identity, same 5-year window, same Paid/Released status,
-    // and the same optional Category filter as bidder-top-5-year, so a
-    // click always reconciles exactly with the row it was opened from.
-    // Fetched on-demand (only when a row is clicked), not preloaded for
-    // every bidder — this table can have hundreds/thousands of lots per
-    // active bidder, which would make the main 5-year response enormous if
-    // sent up front. Capped at 500 lots (DESC by date) as a safety valve,
-    // not a business rule — flagged via `truncated` when hit.
+    // xv3.mart_auction_productivity_report for branch (store_name has no
+    // equivalent on the vendor-analysis table). Date field: end_date,
+    // falling back to ending_time when null — same reasoning/scope as
+    // bidder-top-5-year above (see its comment), so this drill-down always
+    // reconciles with the row it was opened from. Same bidder_name
+    // identity, same 5-year window, same Paid/Released status, and the
+    // same optional Category filter as bidder-top-5-year. Fetched on-
+    // demand (only when a row is clicked), not preloaded for every bidder
+    // — this table can have hundreds/thousands of lots per active bidder,
+    // which would make the main 5-year response enormous if sent up
+    // front. Capped at 500 lots (DESC by date) as a safety valve, not a
+    // business rule — flagged via `truncated` when hit.
     if (type === "bidder-lots-detail") {
       const { bidder: bidderName = "" } = req.query;
       if (!bidderName.trim()) {
@@ -314,6 +332,7 @@ export default async function handler(req, res) {
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               any(v.bid_amount) AS bid_amount,
               any(v.name) AS lot_name,
+              any(v.end_date) AS lot_end_date,
               any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
@@ -324,7 +343,6 @@ export default async function handler(req, res) {
           auction_meta AS (
             SELECT DISTINCT auction_number, ending_time, store_name
             FROM xv3.mart_auction_productivity_report
-            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
           )
           SELECT
             l.auction_number AS auction_number,
@@ -332,12 +350,13 @@ export default async function handler(req, res) {
             l.bid_amount AS bid_amount,
             l.lot_name AS lot_name,
             l.lot_category AS lot_category,
-            am.ending_time AS ending_time,
+            coalesce(l.lot_end_date, am.ending_time) AS event_date,
             am.store_name AS store_name
           FROM lots l
-          INNER JOIN auction_meta am ON l.auction_number = am.auction_number
+          LEFT JOIN auction_meta am ON l.auction_number = am.auction_number
           WHERE l.status IN ('Paid', 'Released')
-          ORDER BY am.ending_time DESC
+            AND toYear(coalesce(l.lot_end_date, am.ending_time)) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          ORDER BY event_date DESC
           LIMIT {cap:UInt16}
         `,
         query_params: { bidder: bidderName, category, startYear, endYear, cap: LOT_DETAIL_CAP + 1 },
@@ -360,7 +379,7 @@ export default async function handler(req, res) {
           bid_amount: Number(r.bid_amount ?? 0),
           lot_name: r.lot_name ?? null,
           lot_category: r.lot_category ?? null,
-          ending_time: r.ending_time ?? null,
+          event_date: r.event_date ?? null,
           store_name: r.store_name ?? null,
         })),
       });

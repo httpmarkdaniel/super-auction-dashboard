@@ -67,7 +67,7 @@ export default function BidderLotsModal({ bidderName, category, onClose }) {
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={`${r.auction_number}-${r.lot_number}-${i}`} className="border-t border-gridline">
-                    <td className="py-2 px-3 text-ink whitespace-nowrap">{r.ending_time ? formatManila(r.ending_time, { withYear: true }) : "—"}</td>
+                    <td className="py-2 px-3 text-ink whitespace-nowrap">{r.event_date ? formatManila(r.event_date, { withYear: true }) : "—"}</td>
                     <td className="py-2 px-3 text-ink whitespace-nowrap">{r.auction_number ?? "—"}</td>
                     <td className="py-2 px-3 text-ink whitespace-nowrap">{r.lot_number ?? "—"}</td>
                     <td className="py-2 px-3 text-ink max-w-[220px] truncate" title={r.lot_name || ""}>{r.lot_name || "—"}</td>
