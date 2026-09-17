@@ -43,6 +43,7 @@ function formatAbs2dp(n) {
 // sharing that state would silently change Overview's category too.
 function VendorTop5YearTable() {
   const [category, setCategory] = useState("");
+  const [search, setSearch] = useState("");
   const { data, loading, error } = useVendorTop5Year(category);
 
   if (error && !data) {
@@ -54,7 +55,11 @@ function VendorTop5YearTable() {
 
   const years = [];
   for (let y = data.startYear; y <= data.endYear; y++) years.push(y);
-  const rows = data.rows || [];
+  const allRows = data.rows || [];
+  // Client-side, case-insensitive substring match on vendor name — every
+  // row is already loaded (no server cap), so no extra request needed.
+  const searchTerm = search.trim().toLowerCase();
+  const rows = searchTerm ? allRows.filter((r) => r.vendor?.toLowerCase().includes(searchTerm)) : allRows;
 
   return (
     <div className={loading ? "opacity-60" : ""}>
@@ -75,6 +80,13 @@ function VendorTop5YearTable() {
               ))}
             </select>
           </div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search vendor…"
+            className="bg-surface1 border border-gridline rounded-lg px-3 h-8 text-[14px] text-ink outline-none focus:border-navy/40 w-[200px]"
+          />
         </div>
         <button
           type="button"
@@ -110,14 +122,16 @@ function VendorTop5YearTable() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={years.length + 3} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
+                <td colSpan={years.length + 3} className="py-6 text-center text-muted text-[14px]">
+                  {searchTerm ? `No vendor matching "${search}".` : "No vendor activity in this 5-year window."}
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
       <div className="text-[11.5px] text-muted mt-2">
-        Settled Bid Value (status Paid/Released, same definition as the rest of Vendor Analytics), grouped by the calendar year each auction ended, {rows.length} vendor(s) shown — not filtered by the Store/date controls above, only by the Category selector here.
+        Settled Bid Value (status Paid/Released, same definition as the rest of Vendor Analytics), grouped by the calendar year each auction ended, {rows.length} of {allRows.length} vendor(s) shown — not filtered by the Store/date controls above, only by the Category selector and Search here. Export reflects what's currently shown (search/category applied).
       </div>
     </div>
   );

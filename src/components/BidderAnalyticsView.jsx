@@ -35,6 +35,7 @@ function formatAbs2dp(n) {
 // vendor-analytics's near-100%).
 function BidderTop5YearTable() {
   const [category, setCategory] = useState("");
+  const [search, setSearch] = useState("");
   const { data, loading, error } = useBidderTop5Year(category);
   // Per explicit request: click a bidder to see which auctions/lots they
   // participated in (auction number, lot number, bid amount, etc.) — see
@@ -51,7 +52,11 @@ function BidderTop5YearTable() {
 
   const years = [];
   for (let y = data.startYear; y <= data.endYear; y++) years.push(y);
-  const rows = data.rows || [];
+  const allRows = data.rows || [];
+  // Client-side, case-insensitive substring match on bidder name — every
+  // row is already loaded (no server cap), so no extra request needed.
+  const searchTerm = search.trim().toLowerCase();
+  const rows = searchTerm ? allRows.filter((r) => r.bidder_name?.toLowerCase().includes(searchTerm)) : allRows;
 
   return (
     <div className={loading ? "opacity-60" : ""}>
@@ -72,6 +77,13 @@ function BidderTop5YearTable() {
               ))}
             </select>
           </div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search bidder…"
+            className="bg-surface1 border border-gridline rounded-lg px-3 h-8 text-[14px] text-ink outline-none focus:border-navy/40 w-[200px]"
+          />
         </div>
         <button
           type="button"
@@ -116,14 +128,16 @@ function BidderTop5YearTable() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={years.length + 4} className="py-6 text-center text-muted text-[14px]">No bidder activity in this 5-year window.</td>
+                <td colSpan={years.length + 4} className="py-6 text-center text-muted text-[14px]">
+                  {searchTerm ? `No bidder matching "${search}".` : "No bidder activity in this 5-year window."}
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
       <div className="text-[11.5px] text-muted mt-2">
-        Settled winning Bid Value (status Paid/Released), grouped by the calendar year each auction ended, {rows.length} bidder(s) shown — not filtered by the Store/date controls above, only by the Category selector here. Phone/Email match by name against bidder registrations and are found for about 88% of bidders (real coverage gap, not every bidder resolves). Click a bidder to see the individual auctions/lots behind their totals.
+        Settled winning Bid Value (status Paid/Released), grouped by the calendar year each auction ended, {rows.length} of {allRows.length} bidder(s) shown — not filtered by the Store/date controls above, only by the Category selector and Search here. Phone/Email match by name against bidder registrations and are found for about 88% of bidders (real coverage gap, not every bidder resolves). Click a bidder to see the individual auctions/lots behind their totals. Export reflects what's currently shown (search/category applied).
       </div>
 
       <BidderLotsModal bidderName={selectedBidderName} category={category} onClose={() => setSelectedBidderName(null)} />
