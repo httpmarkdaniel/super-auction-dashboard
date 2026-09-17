@@ -300,14 +300,22 @@ async function computeLifecycleFunnel(from, to) {
   // on-hand stock; total_current_srp is stock value — verified 100% equal
   // to item_qty * current_srp, so the stored field is used as-is rather
   // than recomputed.
+  // stageAt is the real timestamp the unit reached THAT specific stage
+  // (not always the same field) — barcode created_time for Barcoded, the
+  // ASN's own created_at for ASN Raised, the ASN row's updated_at (when
+  // status flipped to RECEIVED) for Received/Put-away, published_date for
+  // Posted, first transaction_date for Sold. transaction_date is a plain
+  // Date (no time-of-day) so Sold's Timestamp column reads the same as its
+  // Date column — a real limitation of that source, not a display bug.
   const stageItems = { barcoded: [], asn: [], received: [], posted: [], sold: [] };
-  function toItemDetail(r) {
+  function toItemDetail(r, stageAt) {
     return {
       barcode: r.barcode,
       product: r.product_name || r.barcode,
       amount: toNum(r.current_srp),
       qty: toNum(r.item_qty),
       stockValue: toNum(r.total_current_srp),
+      stageAt: stageAt || null,
     };
   }
 
@@ -321,33 +329,33 @@ async function computeLifecycleFunnel(from, to) {
   let postedToSoldDaysN = 0;
 
   for (const r of cohortRows) {
-    stageItems.barcoded.push(toItemDetail(r));
+    stageItems.barcoded.push(toItemDetail(r, r.created_time));
 
     const asn = asnMap.get(r.barcode);
     const isAsn = !!asn;
     if (isAsn) {
       asnQty++;
-      stageItems.asn.push(toItemDetail(r));
+      stageItems.asn.push(toItemDetail(r, asn.asn_created_at));
     }
 
     const isReceived = isAsn && asn.latest_status === "RECEIVED";
     if (isReceived) {
       receivedQty++;
-      stageItems.received.push(toItemDetail(r));
+      stageItems.received.push(toItemDetail(r, asn.latest_status_at));
     }
 
     const firstPublished = postedMap.get(r.barcode);
     const isPosted = !!firstPublished;
     if (isPosted) {
       postedQty++;
-      stageItems.posted.push(toItemDetail(r));
+      stageItems.posted.push(toItemDetail(r, firstPublished));
     }
 
     const firstSale = soldMap.get(r.product_id);
     const isSold = !!firstSale;
     if (isSold) {
       soldQty++;
-      stageItems.sold.push(toItemDetail(r));
+      stageItems.sold.push(toItemDetail(r, firstSale));
     }
     if (isSold && !isPosted) soldNotPosted++;
 

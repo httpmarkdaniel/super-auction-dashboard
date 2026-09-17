@@ -6,17 +6,41 @@ import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatNum, formatPct, formatPeso } from "../format";
 
+// r.stageAt is the real timestamp the unit reached THAT specific stage
+// (created_time for Barcoded, the ASN's created_at for ASN Raised, its
+// updated_at for Received/Put-away, published_date for Posted,
+// transaction_date for Sold — see api/_hrh-barcode-analytics.js's
+// toItemDetail). Split into Date + Timestamp columns rather than one
+// combined column, per explicit request.
+function formatStageDate(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+}
+function formatStageTime(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  // transaction_date (Sold) is a plain Date with no time-of-day — showing a
+  // clock time for it would be fabricated, not a real value.
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return "—";
+  return d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
+}
+
 // Columns for a funnel stage's click-through modal — barcode/item name/
-// amount(unit price)/qty(current stock on hand)/stock value, per explicit
-// request. amount = current_srp, qty = item_qty, stockValue =
-// total_current_srp (verified server-side to equal item_qty * amount, so
-// it's sent as-is rather than recomputed here).
+// amount(unit price)/qty(current stock on hand)/stock value/date/
+// timestamp, per explicit request. amount = current_srp, qty = item_qty,
+// stockValue = total_current_srp (verified server-side to equal item_qty *
+// amount, so it's sent as-is rather than recomputed here).
 const STAGE_ITEM_COLUMNS = [
   { key: "barcode", label: "Barcode", width: 110 },
   { key: "product", label: "Item Name", maxWidth: 320 },
   { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
   { key: "qty", label: "Qty (Stock)", render: (r) => formatNum(r.qty) },
   { key: "stockValue", label: "Stock Value", render: (r) => formatPeso(r.stockValue) },
+  { key: "date", label: "Date", render: (r) => formatStageDate(r.stageAt) },
+  { key: "timestamp", label: "Timestamp", render: (r) => formatStageTime(r.stageAt) },
 ];
 
 function formatDays(days) {
