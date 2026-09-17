@@ -25,10 +25,11 @@ export const MODULES = [
   {
     id: "retail",
     name: "Retail",
-    status: "coming-soon",
+    status: "available",
     description:
       "Retail sales performance, store productivity, transactions, basket size and category performance.",
-    actionLabel: "Coming Soon",
+    route: "/retail",
+    actionLabel: "Open Dashboard",
   },
   {
     id: "inventory",

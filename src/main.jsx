@@ -4,16 +4,17 @@ import App from "./App.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import ComingSoonPage from "./pages/ComingSoonPage.jsx";
 import HrhOnlineApp from "./hrh-online/HrhOnlineApp.jsx";
+import RetailApp from "./retail/RetailApp.jsx";
 import { MODULES } from "./platform/modules.js";
 import "./index.css";
 
-// Plain pathname check — no router library. The Auction dashboard (App.jsx)
-// and the HRH Online dashboard (hrh-online/HrhOnlineApp.jsx) each do their
-// own navigation via in-memory tab state, never the URL, so a full page
-// load between platform routes (Home <-> /auction <-> /hrh-online <-> a
-// future "Coming Soon" module) is all that's needed here. See vercel.json
-// for the SPA rewrite that makes a direct load/refresh of any of these
-// paths work in production.
+// Plain pathname check — no router library. The Auction dashboard (App.jsx),
+// HRH Online (hrh-online/HrhOnlineApp.jsx) and Retail (retail/RetailApp.jsx)
+// each do their own navigation via in-memory tab state, never the URL, so a
+// full page load between platform routes (Home <-> /auction <-> /hrh-online
+// <-> /retail <-> a future "Coming Soon" module) is all that's needed here.
+// See vercel.json for the SPA rewrite that makes a direct load/refresh of
+// any of these paths work in production.
 function matchesRoute(pathname, route) {
   return pathname === route || pathname.startsWith(`${route}/`);
 }
@@ -25,6 +26,10 @@ function resolvePage(pathname) {
 
   if (matchesRoute(pathname, "/hrh-online")) {
     return <HrhOnlineApp />;
+  }
+
+  if (matchesRoute(pathname, "/retail")) {
+    return <RetailApp />;
   }
 
   const comingSoonModule = MODULES.find(
