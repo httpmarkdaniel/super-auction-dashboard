@@ -239,17 +239,25 @@ export async function handleCustomerAnalytics(req, res) {
     ).json();
 
     // New vs Returning — "one-time buyer status": New = this customer has
-    // placed exactly ONE order ever, across their ENTIRE history with HMR
-    // (any store, any channel, any date) as of right now. Returning = 2+
-    // lifetime orders. Deliberately NOT tied to the selected date range at
-    // all (an earlier "first order fell inside this window" definition was
-    // tried and rejected — it made New shrink to near-zero on a 1-day
-    // filter purely because a customer's literal first-ever-anything-day
-    // rarely lands on any one specific day you happen to be viewing).
-    // A customer's label is fixed as of today: if they were a one-time
-    // buyer last month but ordered again since, they read as Returning
-    // everywhere, including in past periods — this is intentional, not a
-    // bug (see prevNewCount below).
+    // placed exactly ONE order ever, across their ENTIRE history WITH HRH
+    // ONLINE specifically (any of its 3 channels — HMRPH Online, TikTok,
+    // Shopee — but not other HMR stores, any date) as of right now.
+    // Returning = 2+ lifetime orders at HRH Online. CHANGED 2026-09-17 per
+    // explicit request — an earlier version scoped this to the customer's
+    // entire history across ALL of HMR's stores; that's been replaced with
+    // an HRH-Online-only lifetime count. Deliberately NOT tied to the
+    // selected date range at all (an earlier "first order fell inside this
+    // window" definition was tried and rejected — it made New shrink to
+    // near-zero on a 1-day filter purely because a customer's literal
+    // first-ever-anything-day rarely lands on any one specific day you
+    // happen to be viewing), and NOT tied to the page's Channel filter
+    // either — a customer's lifetime status is computed across all 3 HRH
+    // Online channels regardless of which channel you're currently
+    // filtering the page to, same reasoning as the date-range independence
+    // below. A customer's label is fixed as of today: if they were a
+    // one-time buyer last month but ordered again since, they read as
+    // Returning everywhere, including in past periods — this is
+    // intentional, not a bug (see prevNewCount below).
     //
     // Lifetime count is computed by `ct.customer_name`, not customer_id —
     // verified customer_id is NOT a stable cross-store identity (a real
@@ -273,10 +281,12 @@ export async function handleCustomerAnalytics(req, res) {
           query: `
             SELECT \`ct.customer_name\` AS name, uniqExactIf(invoice_id, net_sales_amount > 0) AS lifetime_orders
             FROM xv3.mart_net_sales
-            WHERE \`ct.customer_name\` IN {names:Array(String)}
+            WHERE store_name = {store:String}
+              AND sales_channel IN {allChannels:Array(String)}
+              AND \`ct.customer_name\` IN {names:Array(String)}
             GROUP BY name
           `,
-          query_params: { names },
+          query_params: { store: HRH_STORE, allChannels: CHANNEL_MAP["All Channels"], names },
           format: "JSONEachRow",
         })
       ).json();
@@ -340,13 +350,14 @@ export async function handleCustomerAnalytics(req, res) {
     }
 
     // lifetimeOrders is exposed here (not just the isNew boolean) so the
-    // table is self-explanatory: New/Returning is a LIFETIME status (any
-    // store/channel, not tied to the selected period — see the note
-    // above), while firstPurchase/lastBuy below are only this customer's
-    // activity WITHIN the selected period. A customer can legitimately be
-    // "Returning" with firstPurchase === lastBuy (their only purchase in
-    // THIS window) if their other lifetime order(s) fall outside it —
-    // lifetimeOrders makes that visible instead of looking like a bug.
+    // table is self-explanatory: New/Returning is a LIFETIME status at HRH
+    // Online (any of its 3 channels, not tied to the selected period — see
+    // the note above), while firstPurchase/lastBuy below are only this
+    // customer's activity WITHIN the selected period. A customer can
+    // legitimately be "Returning" with firstPurchase === lastBuy (their
+    // only purchase in THIS window) if their other lifetime order(s) at
+    // HRH Online fall outside it — lifetimeOrders makes that visible
+    // instead of looking like a bug.
     const topCustomers = [...curCustomers]
       .sort((a, b) => b.gmv - a.gmv)
       .slice(0, TOP_CUSTOMERS_SHOWN)
@@ -722,7 +733,7 @@ export async function handleCustomerAnalytics(req, res) {
         customerScopeNote:
           "Excludes orders with no captured buyer identity ('WALK IN' — mostly TikTok/Shopee marketplace orders, which never carry a real customer profile); those share a single placeholder customer record and would otherwise wreck every count below.",
         newCustomerDefinition:
-          "New = this customer has placed exactly one order ever, across their entire history with HMR (any store, any channel) as of today. Returning = two or more lifetime orders. Not tied to the selected date range — a customer's label stays the same regardless of what period you're viewing.",
+          "New = this customer has placed exactly one order ever with HRH Online (across any of its 3 channels — HMRPH Online, TikTok, Shopee — but not other HMR stores) as of today. Returning = two or more lifetime orders at HRH Online. Not tied to the selected date range or the page's Channel filter — a customer's label stays the same regardless of what period or channel you're viewing.",
         provinceScopeNote: `HMRPH Online only, regardless of the Channel filter above — TikTok/Shopee orders never carry a real shipping address in HMR's own systems. Includes both Pickup and Delivery orders: ${matchedCustomers} of ${hmrphOnlineTotalCustomers} customers in this period matched to a real province, ${noAddressCustomers} have "No Address Provided" (every Pickup order, plus any Delivery order with no captured address — Pickup never has one, there's nothing to ship), and the remainder had an address that didn't match a recognized PH province.`,
         generatedAt: new Date().toISOString(),
       },

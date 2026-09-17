@@ -115,9 +115,10 @@ function CustomerTypePill({ type }) {
   );
 }
 
-// Customer Type is a LIFETIME status (any store/channel, not tied to the
-// selected period — see api/_hrh-customer-analytics.js's isOneTimeBuyer
-// note), while Orders/Units/GMV/First Purchase/Last Buy below are only
+// Customer Type is a LIFETIME status at HRH Online (any of its 3
+// channels, not other HMR stores; not tied to the selected period — see
+// api/_hrh-customer-analytics.js's isOneTimeBuyer note), while
+// Orders/Units/GMV/First Purchase/Last Buy below are only
 // this customer's activity WITHIN the selected period. Lifetime Orders
 // makes that visible directly next to the label: a customer can
 // correctly show as "Returning" with First Purchase = Last Buy (their
@@ -152,7 +153,8 @@ function isDateRangeReady(dateRange) {
 // (dispatched from api/hrh-sales-analytics.js via ?report=customers, co-located
 // only because of the Vercel Hobby plan's 12-function cap) for the queries.
 // New/Returning is "one-time buyer status" — New = exactly one lifetime
-// order across all of HMR (any store/channel) as of today, Returning = 2+.
+// order at HRH Online (any of its 3 channels, not other HMR stores) as of
+// today, Returning = 2+.
 // Deliberately NOT tied to the selected date range (see
 // api/_hrh-customer-analytics.js's isOneTimeBuyer comment for why an
 // earlier "first order fell inside this window" definition was replaced).
@@ -444,7 +446,7 @@ export default function CustomerAnalytics({ filters }) {
 
           <Panel
             title="Top Customers"
-            subtitle="Ranked by GMV for the selected period · Customer Type/Lifetime Orders are lifetime (any store/channel); every other column is this period only"
+            subtitle="Ranked by GMV for the selected period · Customer Type/Lifetime Orders are lifetime at HRH Online (any of its 3 channels); every other column is this period only"
           >
             <DataTable columns={TOP_CUSTOMER_COLUMNS} rows={data.topCustomers} paginate pageSize={10} />
           </Panel>
