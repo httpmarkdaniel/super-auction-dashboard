@@ -159,6 +159,127 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
+    // TOP BIDDERS — 5-YEAR BID VALUE (type=bidder-top-5-year) — same "hall
+    // of fame" concept as vendor-top-5-year above, applied to bidders, per
+    // explicit request. Deliberately does NOT reuse the heavy
+    // settledBiddersQuery/BIDDER_IDENTITY_CTES bridge below (~19M rows for
+    // a single date-range scan per that query's own comment) — instead
+    // uses `bidder_name`, a direct column on xv3.mart_auction_vendor_
+    // analysis (the SAME table vendor-top-5-year already reads), verified
+    // 99.9999% populated on settled lots (1,430,113 of 1,430,114). This
+    // keeps identity resolution as simple/direct as the vendor table's own
+    // (vendor name, not vendor_id) rather than a name-based approximation
+    // layered on top of an already-approximate bridge — same caliber of
+    // identity precision on both "5-year" tables, and this query runs in
+    // well under 1s (measured) instead of the heavy bridge's cost.
+    //
+    // Phone/Email: bidder_name does NOT exist on cms.mart_cms_bidder_
+    // registrations (which only has customer_firstname/customer_lastname),
+    // so these are looked up via UPPER(TRIM(bidder_name)) = UPPER(TRIM(
+    // firstname || ' ' || lastname)) — verified 3,156 of 3,592 (88%) of
+    // THIS endpoint's actual 5-year Paid/Released bidder population match
+    // this way (lower than vendor's 99.9%, since a real chunk of
+    // bidder_name values carry an internal prefix code — e.g. "S_324
+    // MICHAEL ONG", "G_797 JULIO BRINCES" — that firstname+lastname
+    // concatenation can't reproduce; matching the broader, dirtier
+    // universe of ALL distinct bidder names ever recorded, not just this
+    // endpoint's real output, was closer to 55%). Reported as-is (null
+    // when unmatched) rather than stripping those
+    // prefixes to force a fuzzier match — a real, disclosed coverage gap,
+    // not a fabricated fallback. No Account Executive equivalent exists
+    // for bidders (that's a vendor-specific consignment relationship), so
+    // this table has no analogous column.
+    if (type === "bidder-top-5-year") {
+      const endYear = new Date().getUTCFullYear();
+      const startYear = endYear - 4;
+
+      const result = await client.query({
+        query: `
+          WITH lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(trim(v.bidder_name)) AS bidder_name,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              any(v.bid_amount) AS bid_amount,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING ({category:String} = '' OR lot_category = {category:String})
+          ),
+          auction_year AS (
+            SELECT DISTINCT auction_number, toYear(ending_time) AS yr
+            FROM xv3.mart_auction_productivity_report
+            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          )
+          SELECT
+            l.bidder_name AS bidder_name,
+            ay.yr AS yr,
+            sum(ifNull(l.bid_amount, 0)) AS bid_amount
+          FROM lots l
+          INNER JOIN auction_year ay ON l.auction_number = ay.auction_number
+          WHERE l.status IN ('Paid', 'Released') AND l.bidder_name IS NOT NULL AND trim(l.bidder_name) != ''
+          GROUP BY l.bidder_name, ay.yr
+        `,
+        query_params: { startYear, endYear, category },
+        format: "JSONEachRow",
+      });
+
+      const rawRows = await result.json();
+
+      const byBidder = new Map();
+      for (const row of rawRows) {
+        const bidder = row.bidder_name;
+        if (!byBidder.has(bidder)) {
+          const years = {};
+          for (let y = startYear; y <= endYear; y++) years[y] = 0;
+          byBidder.set(bidder, { bidder_name: bidder, years, total: 0 });
+        }
+        const entry = byBidder.get(bidder);
+        const amount = Number(row.bid_amount ?? 0);
+        entry.years[row.yr] = amount;
+        entry.total += amount;
+      }
+
+      const bidderContactResult = await client.query({
+        query: `
+          SELECT
+            upper(trim(concat(customer_firstname, ' ', customer_lastname))) AS bidder_key,
+            argMax(nullIf(mobile_no, ''), customer_created_at) AS phone,
+            argMax(nullIf(email, ''), customer_created_at) AS email
+          FROM cms.mart_cms_bidder_registrations
+          WHERE customer_firstname IS NOT NULL
+          GROUP BY bidder_key
+        `,
+        query_params: {},
+        format: "JSONEachRow",
+      });
+      const bidderContactMap = new Map((await bidderContactResult.json()).map((r) => [r.bidder_key, r]));
+
+      const bidders = [...byBidder.values()]
+        .sort((a, b) => b.total - a.total)
+        .map((v) => {
+          const contact = bidderContactMap.get(v.bidder_name?.toUpperCase().trim());
+          return {
+            ...v,
+            phone: contact?.phone ?? null,
+            email: contact?.email ?? null,
+          };
+        });
+
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
+
+      return res.status(200).json({
+        type: "bidder-top-5-year",
+        startYear,
+        endYear,
+        category,
+        rows: bidders,
+      });
+    }
+
+    // =========================================================
     // VENDOR SUMMARY (type=vendor-financial-summary) — MOVED here from
     // Auction Result (api/overview.js's type=auction-result used to carry
     // this same data as `vendor_summary`/`vendor_summary_totals`; verified

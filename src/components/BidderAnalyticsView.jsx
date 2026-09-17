@@ -1,11 +1,119 @@
 import { useState } from "react";
 import { useBidderAnalytics } from "../useBidderAnalytics";
+import { useBidderTop5Year } from "../useBidderTop5Year";
+import { CATEGORY_NAMES } from "../../api/_category.js";
 import StorySection from "./primitives/StorySection";
 import StatTile from "./primitives/StatTile";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import BiddingPaceView from "./BiddingPaceView";
 import BidderDetailModal from "./primitives/BidderDetailModal";
 import { formatPeso } from "../utils/format";
+import { exportBidderTop5YearExcel } from "../utils/bidderTop5YearExport";
+
+// Bid Value on this table, per explicit request (same treatment as Vendor
+// Analytics' Top Vendors — 5-Year Bid Value): absolute value with exactly
+// 2 decimal places — distinct from the shared formatPeso (0 decimals, no
+// abs) used elsewhere in this file, which stays untouched.
+function formatAbsPeso2dp(n) {
+  if (n === null || n === undefined) return "—";
+  return "₱" + Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// TOP BIDDERS — 5-YEAR BID VALUE — same "same logic" treatment as Vendor
+// Analytics' Top Vendors — 5-Year Bid Value table, per explicit request:
+// unbounded row count (scrolls instead), Phone/Email columns (no Account
+// Executive — that's a vendor-only concept), absolute-value-2dp amounts,
+// an Excel export button, and its OWN local Category filter — deliberately
+// independent of this tab's page-wide category filter, same reasoning as
+// the vendor table (a standing reference view, not meant to silently
+// change Overview's own category selection). See api/leaderboards.js's
+// type=bidder-top-5-year comment for the identity/contact-match caveats
+// (bidder_name direct match ~100%, but its own phone/email lookup only
+// matches ~88% of this table's bidders — a real, disclosed gap, not
+// vendor-analytics's near-100%).
+function BidderTop5YearTable() {
+  const [category, setCategory] = useState("");
+  const { data, loading, error } = useBidderTop5Year(category);
+
+  if (error && !data) {
+    return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load 5-Year Top Bidders: {error}</div>;
+  }
+  if (!data) {
+    return <div className="text-center text-ink text-[15.5px] py-8">Loading 5-Year Top Bidders…</div>;
+  }
+
+  const years = [];
+  for (let y = data.startYear; y <= data.endYear; y++) years.push(y);
+  const rows = data.rows || [];
+
+  return (
+    <div className={loading ? "opacity-60" : ""}>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Category</span>
+          <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[220px]"
+            >
+              <option value="">All Categories</option>
+              {CATEGORY_NAMES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => exportBidderTop5YearExcel({ years, category, rows })}
+          className="text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border border-gridline bg-surface1 text-ink hover:border-navy/40 transition-colors"
+        >
+          Export to Excel
+        </button>
+      </div>
+
+      <div className="overflow-x-auto max-h-[560px] overflow-y-auto border border-gridline rounded-lg">
+        <table className="w-full text-[14px] min-w-[860px]">
+          <thead>
+            <tr className="text-white text-[12px] uppercase tracking-wide bg-navy sticky top-0 z-20">
+              <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy z-30">Bidder</th>
+              <th className="text-left font-medium py-2 px-3">Phone</th>
+              <th className="text-left font-medium py-2 px-3">Email</th>
+              {years.map((y) => (
+                <th key={y} className="text-right font-medium py-2 px-3">{y}</th>
+              ))}
+              <th className="text-right font-medium py-2 px-3">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.bidder_name} className="border-t border-gridline hover:bg-plane">
+                <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate" title={r.bidder_name}>{r.bidder_name}</td>
+                <td className="py-2 px-3 text-ink whitespace-nowrap">{r.phone || "—"}</td>
+                <td className="py-2 px-3 text-ink max-w-[200px] truncate" title={r.email || ""}>{r.email || "—"}</td>
+                {years.map((y) => (
+                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbsPeso2dp(r.years[y] || 0)}</td>
+                ))}
+                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbsPeso2dp(r.total)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={years.length + 4} className="py-6 text-center text-muted text-[14px]">No bidder activity in this 5-year window.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11.5px] text-muted mt-2">
+        Settled winning Bid Value (status Paid/Released), grouped by the calendar year each auction ended, {rows.length} bidder(s) shown — not filtered by the Store/date controls above, only by the Category selector here. Phone/Email match by name against bidder registrations and are found for about 88% of bidders (real coverage gap, not every bidder resolves).
+      </div>
+    </div>
+  );
+}
 
 // BIDDER ANALYTICS — fully dynamic to the selected Date/Store/Category
 // filters (see useBidderAnalytics.js). Historical/ending_time-cohort
@@ -199,7 +307,6 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
       <StorySection
         title={`Top 10 Bidders — ${rangeLabel}`}
         insight="Hover a bidder for their profile. Switch ranking mode to see the same 10-row limit ranked a different way — the two modes can surface different bidders."
-        last
       >
         <div className="flex items-center gap-2 mb-3">
           <button
@@ -306,6 +413,10 @@ export default function BidderAnalyticsView({ dateRange, store, biddingPaceStore
             Winning Lots/Winning Bid Amount are looked up by the bidder's own canonical email against the full settled/winning population (not just the top 10 by amount) — 0 / ₱0 for an identified bidder with no wins, "—" only if that identity genuinely can't be resolved.
           </div>
         )}
+      </StorySection>
+
+      <StorySection title="Top Bidders — 5-Year Bid Value" insight="Standing reference table, independent of the Store/date filters above — has its own Category filter." last>
+        <BidderTop5YearTable />
       </StorySection>
 
       <BidderDetailModal bidder={selectedBidder} onClose={() => setSelectedBidder(null)} />
