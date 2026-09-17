@@ -7,8 +7,6 @@ const client = createClient({
   database: process.env.CLICKHOUSE_DATABASE,
 });
 
-// See src/retail/stores.js for the full investigation writeup. Duplicated
-// per this dashboard's per-file store/date-helper convention.
 const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -20,18 +18,25 @@ const CORE_RETAIL_STORES = [
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
 ];
-const NO_FOOT_TRAFFIC_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
-const ALL_RETAIL_STORES = [...CORE_RETAIL_STORES, ...NO_FOOT_TRAFFIC_STORES];
-const ALL_STORES_OPTION = "All Stores";
+const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
+const HRH_ONLINE_STORE = "HRH ONLINE";
+const SEGMENTS = {
+  all: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE, ...WHOLESALE_STORES],
+  retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
+  wholesale: WHOLESALE_STORES,
+};
 
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+function pctDelta(current, previous) {
+  if (!previous) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
 function safeDivide(a, b) {
   return b ? a / b : 0;
 }
-
 function manilaTodayISODate() {
   const d = new Date(Date.now() + 8 * 3600 * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -51,179 +56,105 @@ function firstOfMonthISO(iso) {
   const [y, m] = iso.split("-").map(Number);
   return `${y}-${String(m).padStart(2, "0")}-01`;
 }
-function resolveRange(range, fromParam, toParam) {
-  const today = manilaTodayISODate();
-  if (range === "custom") {
-    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
-    const from = fromParam <= toParam ? fromParam : toParam;
-    const to = fromParam <= toParam ? toParam : fromParam;
-    return { current: { from, to } };
-  }
-  if (range === "mtd") return { current: { from: firstOfMonthISO(today), to: today } };
-  if (range === "ytd") return { current: { from: `${today.slice(0, 4)}-01-01`, to: today } };
-  if (range === "prevWeek") {
-    const thisWeekMonday = mondayOfWeek(today);
-    return { current: { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) } };
-  }
-  if (range === "prevMonth") {
-    const lastDayPrevMonth = addDaysISO(firstOfMonthISO(today), -1);
-    return { current: { from: firstOfMonthISO(lastDayPrevMonth), to: lastDayPrevMonth } };
-  }
-  if (range === "prevYear") {
-    const y = Number(today.slice(0, 4)) - 1;
-    return { current: { from: `${y}-01-01`, to: `${y}-12-31` } };
-  }
-  return { current: { from: mondayOfWeek(today), to: today } }; // wtd (default)
+function daysInMonth(year, month1Based) {
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
 }
-function resolveStoreScope(store) {
-  if (!store || store === ALL_STORES_OPTION) return { stores: ALL_RETAIL_STORES, coreStores: CORE_RETAIL_STORES };
-  if (!ALL_RETAIL_STORES.includes(store)) return null;
-  return { stores: [store], coreStores: CORE_RETAIL_STORES.includes(store) ? [store] : [] };
+function shiftMonthsClampedISO(iso, deltaMonths) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total0 = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total0 / 12);
+  const nm1 = (((total0 % 12) + 12) % 12) + 1;
+  const nd = Math.min(d, daysInMonth(ny, nm1));
+  return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function resolveView(view) {
+  const today = manilaTodayISODate();
+  if (view === "mtd") {
+    const current = { from: firstOfMonthISO(today), to: today };
+    const previous = { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) };
+    return { current, previous };
+  }
+  const thisWeekMonday = mondayOfWeek(today);
+  const current = { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  const previous = { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
+  return { current, previous };
+}
+function resolveSegment(segment) {
+  return SEGMENTS[segment] || SEGMENTS.all;
 }
 
-// This page's whole purpose is cross-store comparison — Attainment by
-// Store and Foot Traffic/Conversion by Store ALWAYS show all 11 (or all 9
-// core) branches regardless of the page's own Store filter (same "always
-// show the full breakdown" convention as Sales Analytics' Sales by Store —
-// see that file's comment). The Store Detail table and daily trend below
-// them DO respect the filter, for a per-store drill-down when one is
-// selected.
 export async function handleRetailStorePerformance(req, res) {
   try {
-    const { store = ALL_STORES_OPTION, from = "", to = "" } = req.query;
-    const range = req.query.range || (from && to ? "custom" : "wtd");
+    const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
+    const view = req.query.view === "mtd" ? "mtd" : "weekly";
+    const stores = resolveSegment(segment);
+    const { current, previous } = resolveView(view);
 
-    const scope = resolveStoreScope(store);
-    if (!scope) return res.status(400).json({ error: "Invalid store", message: `Unknown store: ${store}` });
-    const { stores, coreStores } = scope;
-
-    let current;
-    try {
-      ({ current } = resolveRange(range, from, to));
-    } catch (rangeErr) {
-      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
-    }
-
-    const [salesByStoreRows, targetByStoreRows, trafficByStoreRows, dailyRows] = await Promise.all([
+    const [salesRows, targetRows] = await Promise.all([
       client
         .query({
           query: `
-            SELECT store_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv, sum(net_sales_amount) AS nmv, uniqExactIf(invoice_id, net_sales_amount > 0) AS transactions
+            SELECT store_name,
+              sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_rev,
+              sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_rev,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_txn,
+              uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_txn,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
             FROM xv3.mart_net_sales
-            WHERE store_name IN {allStores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
             GROUP BY store_name
           `,
-          query_params: { allStores: ALL_RETAIL_STORES, curFrom: current.from, curTo: current.to },
+          query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
+      // Targets exist for all 11 real stores (including HRH Online? — no,
+      // xv3.mart_sales_target only ever has rows for the 9 core branches
+      // plus Envirocycle/HPI Canlubang; HRH Online's own target tracking
+      // lives in its own dashboard, not here) — LEFT JOIN'd in below, a
+      // store with no target row shows — rather than a fabricated 0/100%.
       client
         .query({
-          query: `
-            SELECT store_name, sum(daily_target) AS target
-            FROM xv3.mart_sales_target
-            WHERE store_name IN {allStores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String}
-            GROUP BY store_name
-          `,
-          query_params: { allStores: ALL_RETAIL_STORES, curFrom: current.from, curTo: current.to },
-          format: "JSONEachRow",
-        })
-        .then((r) => r.json()),
-      client
-        .query({
-          query: `
-            SELECT store_name, sum(traffic_count) AS traffic
-            FROM xv3.mart_foot_traffic_masterlist
-            WHERE store_name IN {coreStores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String}
-            GROUP BY store_name
-          `,
-          query_params: { coreStores: CORE_RETAIL_STORES, curFrom: current.from, curTo: current.to },
-          format: "JSONEachRow",
-        })
-        .then((r) => r.json()),
-      // Daily Sales vs Target for the SELECTED store scope (respects the
-      // page's Store filter) — the drill-down trend beneath the always-all
-      // comparison bars above.
-      client
-        .query({
-          query: `
-            SELECT s.date AS d, s.gmv AS gmv, t.target AS target
-            FROM (
-              SELECT transaction_date AS date, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
-              FROM xv3.mart_net_sales
-              WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-              GROUP BY transaction_date
-            ) s
-            FULL OUTER JOIN (
-              SELECT date, sum(daily_target) AS target
-              FROM xv3.mart_sales_target
-              WHERE store_name IN {stores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String}
-              GROUP BY date
-            ) t ON s.date = t.date
-          `,
+          query: `SELECT store_name, sum(daily_target) AS target FROM xv3.mart_sales_target WHERE store_name IN {stores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY store_name`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
     ]);
 
-    const targetByStore = new Map(targetByStoreRows.map((r) => [r.store_name, toNum(r.target)]));
-    const trafficByStore = new Map(trafficByStoreRows.map((r) => [r.store_name, toNum(r.traffic)]));
+    const targetByStore = new Map(targetRows.map((r) => [r.store_name, toNum(r.target)]));
 
-    const allStoreDetail = salesByStoreRows
+    const table = salesRows
       .map((r) => {
-        const storeName = r.store_name;
-        const gmv = toNum(r.gmv);
-        const nmv = toNum(r.nmv);
-        const transactions = toNum(r.transactions);
-        const target = targetByStore.get(storeName) || 0;
-        const hasFootTraffic = CORE_RETAIL_STORES.includes(storeName);
-        const footTraffic = hasFootTraffic ? trafficByStore.get(storeName) || 0 : null;
+        const store = r.store_name;
+        const curRev = toNum(r.cur_rev);
+        const prevRev = toNum(r.prev_rev);
+        const target = targetByStore.get(store) || 0;
         return {
-          store: storeName,
-          gmv,
-          nmv,
-          transactions,
-          avgBasket: safeDivide(nmv, transactions),
+          store,
+          curRev,
+          prevRev,
+          deltaPct: pctDelta(curRev, prevRev),
+          curTxn: toNum(r.cur_txn),
+          prevTxn: toNum(r.prev_txn),
+          curUnits: toNum(r.cur_units),
+          prevUnits: toNum(r.prev_units),
           target,
-          attainmentPct: target > 0 ? safeDivide(gmv, target) * 100 : null,
-          footTraffic,
-          conversionRatePct: footTraffic ? safeDivide(transactions, footTraffic) * 100 : null,
+          attainmentPct: target > 0 ? safeDivide(curRev, target) * 100 : null,
         };
       })
-      .sort((a, b) => b.gmv - a.gmv);
+      .sort((a, b) => b.curRev - a.curRev);
 
-    const attainmentByStore = allStoreDetail
-      .filter((r) => r.attainmentPct !== null)
-      .map((r) => ({ store: r.store, attainmentPct: r.attainmentPct }))
-      .sort((a, b) => b.attainmentPct - a.attainmentPct);
-
-    const trafficConversionByStore = allStoreDetail
-      .filter((r) => r.footTraffic !== null)
-      .map((r) => ({ store: r.store, footTraffic: r.footTraffic, conversionRatePct: r.conversionRatePct }))
-      .sort((a, b) => b.footTraffic - a.footTraffic);
-
-    // Store Detail table respects the page's own Store filter (unlike the
-    // two always-all comparison charts above).
-    const storeDetail = allStoreDetail.filter((r) => stores.includes(r.store));
-
-    const dailyByDate = new Map();
-    for (const r of dailyRows) {
-      const d = String(r.d).slice(0, 10);
-      dailyByDate.set(d, { date: d, gmv: toNum(r.gmv), target: toNum(r.target) });
-    }
-    const salesVsTarget = Array.from(dailyByDate.values()).sort((a, b) => (a.date < b.date ? -1 : 1));
+    const totalCur = table.reduce((s, r) => s + r.curRev, 0);
+    const totalPrev = table.reduce((s, r) => s + r.prevRev, 0);
+    const totalTarget = table.reduce((s, r) => s + r.target, 0);
 
     return res.status(200).json({
-      meta: { current, stores, coreStores },
-      attainmentByStore,
-      trafficConversionByStore,
-      storeDetail,
-      salesVsTarget,
-      dataQuality: [
-        "Attainment by Store and Foot Traffic by Store always compare all branches regardless of the page's Store filter — the Store Detail table and Sales vs Target trend below respect the filter.",
-        "Foot Traffic/Conversion Rate cover the 9 core walk-in branches only — HPI CANLUBANG and ENVIROCYCLE have no foot-traffic tracking (see src/retail/stores.js).",
-      ],
+      meta: { view, current, previous, segment, stores },
+      table,
+      totals: { curRev: totalCur, prevRev: totalPrev, deltaPct: pctDelta(totalCur, totalPrev), target: totalTarget, attainmentPct: totalTarget > 0 ? safeDivide(totalCur, totalTarget) * 100 : null },
+      dataQuality: ["Verified 2026-09-17: xv3.mart_sales_target currently has exactly one row per store/date (no duplicates), so a plain sum(daily_target) is correct — a duplicate-row bug was reported in an earlier version of this table but isn't present in the data this dashboard reads."],
     });
   } catch (err) {
     console.error("[retail-store-performance]", err);

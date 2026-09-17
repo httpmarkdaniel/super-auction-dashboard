@@ -132,14 +132,19 @@ function ComboTooltip({ active, payload, label }) {
 // left axis rather than forcing one scale; Orders and Units are both
 // "count" so they share the right axis and stack into one bar per bucket.
 // `data`: [{ dateLabel, gmv, orders, units }]. `tooltipContent` lets a
-// caller override the default ComboTooltip (e.g. ExecutiveOverview.jsx's
-// SalesTrendChannelTooltip, which adds a per-channel GMV breakdown) —
-// every other existing caller is unaffected by the default.
-export function SalesTrendComboChart({ data, height = 260, tooltipContent }) {
+// caller override the default ComboTooltip. `onPointClick(dateLabel)` is
+// optional — Trend.jsx uses it for its day-click item detail table; every
+// other caller that omits it is unaffected.
+export function SalesTrendComboChart({ data, height = 260, tooltipContent, onPointClick }) {
   const TooltipContent = tooltipContent || ComboTooltip;
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+      <ComposedChart
+        data={data}
+        margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+        onClick={onPointClick ? (state) => state?.activeLabel && onPointClick(state.activeLabel) : undefined}
+        style={onPointClick ? { cursor: "pointer" } : undefined}
+      >
         <CartesianGrid stroke={retail.border} vertical={false} />
         <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: retail.ink2 }} axisLine={{ stroke: retail.border }} tickLine={false} />
         <YAxis yAxisId="gmv" tick={{ fontSize: 11, fill: retail.ink2 }} axisLine={false} tickLine={false} tickFormatter={formatCompactPeso} width={60} />

@@ -1,16 +1,16 @@
 import { retail } from "../theme";
-import DateRangePicker from "./DateRangePicker";
-import StoreSelect from "./StoreSelect";
-import { STORE_FILTER_OPTIONS } from "../stores";
+import SegmentToggle from "./SegmentToggle";
 
-// Dashboard-wide filter bar — Date Range + Store, shown on every Retail
-// page. Same layout convention as src/hrh-online/components/Header.jsx,
-// with a Store dropdown (11 real stores) in place of Channel pills (see
-// StoreSelect.jsx for why a dropdown instead of pills here).
-export default function Header({ store, onStoreChange, dateRange, onDateRangeChange }) {
+// Dashboard-wide filter bar — just the All/Retail/Wholesale segment
+// toggle (see segments.js). No global Date Range control: every tab below
+// has its own Weekly/MTD toggle instead (matching the reference report's
+// own per-section toggle pattern), since "This Week vs Last Week" and
+// "MTD vs Last Month" are fixed, well-defined comparisons here, not a
+// free-form range picker.
+export default function Header({ segment, onSegmentChange }) {
   return (
     <div style={{ background: retail.surface, borderBottom: `1px solid ${retail.border}` }}>
-      <div className="relative px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+      <div className="px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[19px] font-bold" style={{ color: retail.ink }}>
             Retail
@@ -19,12 +19,7 @@ export default function Header({ store, onStoreChange, dateRange, onDateRangeCha
             Store Performance Dashboard
           </p>
         </div>
-        <div className="order-3 w-full flex justify-center md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
-          <StoreSelect value={store} onChange={onStoreChange} options={STORE_FILTER_OPTIONS} />
-        </div>
-        <div className="mr-0 md:mr-10 lg:mr-20">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-        </div>
+        <SegmentToggle value={segment} onChange={onSegmentChange} />
       </div>
     </div>
   );
