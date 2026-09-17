@@ -94,6 +94,25 @@ function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
 }
 
+// Store -> region — see src/retail/storeRegions.js for the full writeup
+// (a maintained static mapping, not a live query — xv3.stores' own
+// address fields only cover 9 of 11 stores). Duplicated here per this
+// dashboard's no-shared-import-across-frontend/backend convention.
+const STORE_REGIONS = {
+  PIONEER: "NCR",
+  "HMR SUCAT": "NCR",
+  "NORTH CALOOCAN": "NCR",
+  MABALACAT: "Central Luzon",
+  "S AND C CAINTA": "CALABARZON",
+  "SUBIC MAIN": "Central Luzon",
+  "HMR TAGAYTAY ROAD": "CALABARZON",
+  CEBU: "Central Visayas",
+  "HMR CAGAYAN DE ORO": "Northern Mindanao",
+  "HPI CANLUBANG": "CALABARZON",
+  ENVIROCYCLE: "CALABARZON",
+  "HRH ONLINE": "Online",
+};
+
 export async function handleRetailSalesOverview(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
@@ -223,6 +242,205 @@ export async function handleRetailSalesOverview(req, res) {
     const newRevenue = recencyMap.get("One time customer") || 0;
     const namedTotal = returningRevenue + newRevenue;
 
+    // Second wave — the mockup's extra sections (hero stats, KPI grid,
+    // trend chart, channel/category/region/hour breakdowns, inventory,
+    // top products), all for the SAME current window as above. Kept as a
+    // separate Promise.all rather than folded into the first one purely
+    // for readability — nothing here depends on the first wave's results.
+    const [
+      trendRows,
+      channelMixRows,
+      categoryRows,
+      hourRows,
+      activeSkuRows,
+      customerCountRows,
+      inventorySnapshotRows,
+      inventoryAgeRows,
+      topProductRows,
+    ] = await Promise.all([
+      client
+        .query({
+          query: `SELECT transaction_date AS d, sum(net_sales_amount) AS rev, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY transaction_date ORDER BY d`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `SELECT sales_channel, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY sales_channel ORDER BY gmv DESC`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `SELECT category_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0 GROUP BY category_name ORDER BY gmv DESC LIMIT 8`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `SELECT toHour(created_time) AS h, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY h ORDER BY h`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `SELECT count(DISTINCT product_name) AS n FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Total/New/Returning Customers — via mart_invoice_items'
+      // customer_recency (same coarse 2-way real classification used
+      // above for the At a Glance revenue split, applied here to
+      // customer COUNTS instead). The full New/Retained/Reactivated
+      // cohort breakdown lives on the dedicated Customer (3R) tab.
+      client
+        .query({
+          query: `SELECT customer_recency, uniqExact(customer_name) AS n FROM xv3.mart_invoice_items WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND invoice_item_is_voided = 0 AND invoice_is_voided = 0 AND customer_name IS NOT NULL AND trim(customer_name) != '' AND customer_name NOT IN ('n/a', 'WALK IN') AND match(customer_name, '[a-zA-Z]') GROUP BY customer_recency`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Inventory snapshot — a CURRENT point-in-time read (item_qty is
+      // "on hand right now", not scoped to the current/previous date
+      // window). Low stock threshold (<=2 units) and the 180-day
+      // recency filter on Out of Stock are both grounded in the real
+      // item_qty distribution investigated 2026-09-18 (p75 of in-stock
+      // items = 2 units; without the recency filter, "Out of Stock"
+      // would include millions of long-discontinued historical SKUs
+      // this table also tracks, not just the active catalog).
+      client
+        .query({
+          query: `
+            SELECT
+              sumIf(item_qty, item_qty > 0) AS units_on_hand,
+              sumIf(item_qty * current_srp, item_qty > 0) AS inventory_value,
+              countIf(item_qty > 0 AND item_qty <= 2) AS low_stock_items,
+              countIf(item_qty = 0 AND date_received >= today() - 180) AS out_of_stock_items
+            FROM xv3.mart_level_of_inventory
+            WHERE store_name IN {stores:Array(String)}
+          `,
+          query_params: { stores },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `
+            SELECT
+              multiIf(
+                dateDiff('day', date_received, today()) <= 30, '0-30 days',
+                dateDiff('day', date_received, today()) <= 60, '31-60 days',
+                dateDiff('day', date_received, today()) <= 90, '61-90 days',
+                dateDiff('day', date_received, today()) <= 180, '91-180 days',
+                '180+ days'
+              ) AS bucket,
+              sum(item_qty) AS units,
+              sum(item_qty * current_srp) AS value
+            FROM xv3.mart_level_of_inventory
+            WHERE store_name IN {stores:Array(String)} AND item_qty > 0 AND date_received IS NOT NULL
+            GROUP BY bucket
+          `,
+          query_params: { stores },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      client
+        .query({
+          query: `SELECT product_name, department_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0 GROUP BY product_name, department_name ORDER BY gmv DESC LIMIT 8`,
+          query_params: { stores, curFrom: current.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+    ]);
+
+    const salesTrend = trendRows.map((r) => ({ date: String(r.d).slice(0, 10), revenue: toNum(r.rev), units: toNum(r.units) }));
+
+    const channelTotal = channelMixRows.reduce((s, r) => s + toNum(r.gmv), 0);
+    const TOP_CHANNELS = 4;
+    const salesByChannel = channelMixRows.slice(0, TOP_CHANNELS).map((r) => ({ channel: r.sales_channel || "Unknown", gmv: toNum(r.gmv), sharePct: safeDivide(toNum(r.gmv), channelTotal) * 100 }));
+    const otherChannelGmv = channelMixRows.slice(TOP_CHANNELS).reduce((s, r) => s + toNum(r.gmv), 0);
+    if (otherChannelGmv > 0) salesByChannel.push({ channel: "Other", gmv: otherChannelGmv, sharePct: safeDivide(otherChannelGmv, channelTotal) * 100 });
+
+    const categoryTotal = categoryRows.reduce((s, r) => s + toNum(r.gmv), 0);
+    const topCategories = categoryRows.map((r) => ({ category: r.category_name || "Uncategorized", gmv: toNum(r.gmv), units: toNum(r.units), sharePct: safeDivide(toNum(r.gmv), categoryTotal) * 100 }));
+
+    const topStores = [...storeDeltas].sort((a, b) => b.cur - a.cur).slice(0, 8);
+    const storeTotal = storeDeltas.reduce((s, r) => s + r.cur, 0);
+
+    const regionTotals = new Map();
+    for (const s of storeDeltas) {
+      const region = STORE_REGIONS[s.store] || "Other";
+      regionTotals.set(region, (regionTotals.get(region) || 0) + s.cur);
+    }
+    const salesByRegion = Array.from(regionTotals, ([region, gmv]) => ({ region, gmv, sharePct: safeDivide(gmv, storeTotal) * 100 })).sort((a, b) => b.gmv - a.gmv);
+
+    const salesByHour = Array.from({ length: 24 }, (_, h) => {
+      const row = hourRows.find((r) => toNum(r.h) === h);
+      return { hour: h, gmv: row ? toNum(row.gmv) : 0 };
+    });
+
+    const activeSkus = toNum(activeSkuRows[0]?.n);
+    const custByRecency = new Map(customerCountRows.map((r) => [r.customer_recency, toNum(r.n)]));
+    const newCustomers = custByRecency.get("One time customer") || 0;
+    const returningCustomers = custByRecency.get("Repeat buyer") || 0;
+    const totalCustomers = newCustomers + returningCustomers;
+
+    const inv = inventorySnapshotRows[0] || {};
+    const unitsOnHand = toNum(inv.units_on_hand);
+    const inventoryValue = toNum(inv.inventory_value);
+    const lowStockItems = toNum(inv.low_stock_items);
+    const outOfStockItems = toNum(inv.out_of_stock_items);
+    const sellThroughPct = unitsOnHand + curUnits > 0 ? safeDivide(curUnits, curUnits + unitsOnHand) * 100 : null;
+
+    const AGE_BUCKET_ORDER = ["0-30 days", "31-60 days", "61-90 days", "91-180 days", "180+ days"];
+    const ageByBucket = new Map(inventoryAgeRows.map((r) => [r.bucket, { units: toNum(r.units), value: toNum(r.value) }]));
+    const totalAgeUnits = inventoryAgeRows.reduce((s, r) => s + toNum(r.units), 0);
+    const inventoryAge = AGE_BUCKET_ORDER.map((bucket) => {
+      const b = ageByBucket.get(bucket) || { units: 0, value: 0 };
+      return { bucket, units: b.units, value: b.value, sharePct: safeDivide(b.units, totalAgeUnits) * 100 };
+    });
+
+    const topProducts = topProductRows.map((r) => ({ product: r.product_name, department: r.department_name || "Uncategorized", gmv: toNum(r.gmv), units: toNum(r.units) }));
+
+    // Insights — same "auto-derived facts, not editorial recommendations"
+    // principle as Notable Changes above, restyled as icon cards on the
+    // frontend.
+    const insights = [];
+    const revDelta = pctDelta(curRev, prevRev);
+    if (revDelta !== null) {
+      insights.push({
+        icon: revDelta >= 0 ? "up" : "down",
+        title: `Sales ${revDelta >= 0 ? "increased" : "decreased"} by ${Math.abs(revDelta).toFixed(1)}%`,
+        description: `Total sales ${revDelta >= 0 ? "grew" : "fell"} by ₱${Math.abs(curRev - prevRev).toLocaleString("en-PH", { maximumFractionDigits: 0 })} compared to the previous period.`,
+      });
+    }
+    if (topCategories[0]) {
+      insights.push({
+        icon: "cart",
+        title: `${topCategories[0].category} leads`,
+        description: `${topCategories[0].sharePct.toFixed(1)}% share of total sales, ${toNum(topCategories[0].units).toLocaleString("en-PH")} units.`,
+      });
+    }
+    if (outOfStockItems > 0 || lowStockItems > 0) {
+      insights.push({
+        icon: "warn",
+        title: `${(outOfStockItems + lowStockItems).toLocaleString("en-PH")} SKUs need inventory attention`,
+        description: `${outOfStockItems.toLocaleString("en-PH")} recently-stocked items are now out of stock, ${lowStockItems.toLocaleString("en-PH")} more are at 2 units or fewer.`,
+      });
+    }
+    if (topChannel && salesByChannel[0]) {
+      insights.push({
+        icon: "announce",
+        title: `${topChannel.channel} is the top channel`,
+        description: `₱${topChannel.gmv.toLocaleString("en-PH", { maximumFractionDigits: 0 })} this period, ${salesByChannel[0].sharePct.toFixed(1)}% of channel-attributed sales.`,
+      });
+    }
+
     // Notable Changes — a short, factual, auto-derived list (NOT the
     // reference mock's hand-written "Recommended Actions" — those are
     // editorial judgment calls that can't be honestly generated from a
@@ -253,9 +471,36 @@ export async function handleRetailSalesOverview(req, res) {
         newVsReturning: namedTotal > 0 ? { newPct: safeDivide(newRevenue, namedTotal) * 100, returningPct: safeDivide(returningRevenue, namedTotal) * 100 } : null,
       },
       notableChanges,
+      insights,
+      hero: {
+        totalSales: { value: curRev, delta: pctDelta(curRev, prevRev) },
+        unitsSold: { value: curUnits, delta: pctDelta(curUnits, prevUnits) },
+        sellThroughPct,
+      },
+      moreKpis: {
+        activeSkus,
+        totalCustomers,
+        newCustomers,
+        returningCustomers,
+      },
+      salesTrend,
+      salesByChannel,
+      topCategories,
+      topStores,
+      salesByRegion,
+      salesByHour,
+      inventoryOverview: { inventoryValue, unitsOnHand, lowStockItems, outOfStockItems },
+      inventoryAge,
+      topProducts,
       dataQuality: [
         "New vs Returning Revenue (At a Glance) uses xv3.mart_invoice_items' own customer_recency field (Repeat buyer / One time customer / No name) — a coarser 2-way split than the full New/Retained/Reactivated cohort analysis on the Customer (3R) tab, used here only for a quick-reference figure.",
-        "Notable Changes are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
+        "Notable Changes/Insights are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
+        "Sales by Region uses a maintained store→region lookup (src/retail/storeRegions.js), not a live query — xv3.stores' own address data only covers 9 of 11 stores.",
+        "Sales by Payment Method is intentionally NOT included — the only table with a real payment-method field (xv3.mart_xv3_order_report) covers just ~4% of this store scope's actual transaction volume (verified 2026-09-18: 83K order rows vs ~2M real POS transactions), so a breakdown from it would misrepresent how customers actually pay.",
+        "Inventory figures (value, units on hand, low/out-of-stock, aging, gross margin) are a CURRENT point-in-time snapshot from xv3.mart_level_of_inventory, independent of the Weekly/MTD toggle above (which only affects sales figures).",
+        "Gross Margin is intentionally NOT included — investigated 2026-09-18 via current inventory (current_srp vs item_cost); a small number of extreme-volume SKUs (e.g. one product with item_cost double its current_srp, at ~39,000 units) have an implausible cost-exceeds-price relationship that single-handedly drove the network-wide aggregate negative. This looks like a source-data entry error (cost/price swapped or stale) rather than real economics, so showing it would mislead rather than inform.",
+        "Sell-Through Rate = units sold this period ÷ (units sold + current units on hand) — a standard approximation using current stock as a stand-in for period-start inventory, not exact.",
+        "\"Products to Watch\" (days-of-supply) from the reference layout is NOT included — investigated 2026-09-18 and found the product-name join between sales and inventory data only matches cleanly for a small fraction of items, too weak to trust per-product.",
       ],
     });
   } catch (err) {

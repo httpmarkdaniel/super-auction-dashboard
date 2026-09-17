@@ -3,7 +3,8 @@ import { retail } from "../theme";
 import { EmptyState } from "./States";
 import Pagination from "./Pagination";
 
-// Generic dense table — dark navy header per the design brief, used by
+// Generic dense table — matches the mockup's own .table exactly (light
+// muted-blue header, bottom-border rows, no zebra striping), used by
 // every comparison/detail table across Retail. columns: [{ key, label,
 // render?(row), maxWidth?, width? }]. `maxWidth` (px) truncates a long
 // column (e.g. a product name) with an ellipsis + hover title instead of
@@ -61,12 +62,12 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-[13px] border-collapse">
           <thead>
-            <tr style={{ background: retail.navy }}>
+            <tr>
               {columns.map((c, i) => (
                 <th
                   key={c.key}
-                  className="text-left px-3 py-2 font-semibold text-white whitespace-nowrap text-[10.5px] uppercase tracking-[0.04em] first:rounded-l-sm last:rounded-r-sm"
-                  style={{ ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, retail.navy) }}
+                  className="text-left px-2.5 py-2.5 font-semibold whitespace-nowrap text-[12px] uppercase tracking-[0.02em]"
+                  style={{ color: retail.muted, background: retail.tableHeaderBg, ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, retail.tableHeaderBg) }}
                 >
                   {c.label}
                 </th>
@@ -77,9 +78,9 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
             {visibleRows.map((r, i) => (
               <tr
                 key={r.id ?? i}
-                style={{ borderBottom: `1px solid ${retail.border}`, cursor: onRowClick ? "pointer" : undefined, background: i % 2 === 1 ? "#fafafa" : "transparent" }}
+                style={{ borderBottom: `1px solid #ebf0f6`, cursor: onRowClick ? "pointer" : undefined }}
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
-                className={onRowClick ? "hover:bg-black/[0.03]" : undefined}
+                className={onRowClick ? "hover:bg-black/[0.02]" : undefined}
               >
                 {columns.map((c, ci) => (
                   <td

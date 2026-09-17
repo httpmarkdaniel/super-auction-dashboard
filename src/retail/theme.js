@@ -1,35 +1,32 @@
-// Retail's own fixed palette — deliberately distinct from HRH Online's
-// white-surface/orange-accent identity (2026-09-17 redesign, per explicit
-// "it looks the same as HRH Online" feedback). Lifted directly from the
-// reference report's own <style> block (public/HRH_Weekly_MTD_Sales_Report
-// (13).html) — dark navy chrome, gold accent, maroon section headers —
-// rather than reusing HRH/Auction's shared orange/blue brand treatment.
+// Retail's own fixed palette — "modern SaaS dashboard" redesign
+// (2026-09-18), replacing the dark-navy/gold/maroon BI-report look from
+// the previous pass. Lifted directly from
+// public/HRH_Retail_Dashboard_Modern_Layout.html's own :root tokens.
 export const retail = {
-  navy: "#0F3460", // header, table headers, KPI values, total-row border
-  navyDark: "#154360", // tab bar, headline banner, verify-note border
-  navySoft: "#1a4570",
-  navyBorder: "#1c4d80", // chart tooltip border (on navy bg)
-  gold: "#FF9F1C", // active tab underline, active toggle, headline highlight
-  maroon: "#7B241C", // section headers, note border, active sub-tab
-  methGreen: "#0B5345", // methodology table header (reference's own one-off accent)
-  bg: "#f4f6f8",
+  navy: "#0f2f57",
+  navy2: "#173f72",
+  navy3: "#1e4f86",
+  bg: "#f4f7fb",
   surface: "#ffffff",
-  border: "#e3e8ee",
-  ink: "#1a1a2e",
-  ink2: "#555555",
-  muted: "#888888",
-  good: "#2e7d32",
-  bad: "#c62828",
-  goodBg: "#c6efce",
-  badBg: "#ffcccc",
-  warnBg: "#fff2cc",
-  series: ["#0F3460", "#FF9F1C", "#7B241C", "#2e7d32", "#154360", "#c62828"],
-  // Kept for any leftover references during the transition — not used by
-  // the new component styling.
-  accent: "#FF9F1C",
-  accentSoft: "#fff2cc",
-  accentText: "#7B241C",
-  blue: "#0F3460",
-  blueSoft: "#e3e8ee",
-  blueText: "#154360",
+  border: "#dfe7f1",
+  tableHeaderBg: "#f9fbfe",
+  ink: "#16324f",
+  ink2: "#3f5876",
+  muted: "#6f86a3",
+  orange: "#f59e0b",
+  blue: "#3b82f6",
+  blueDark: "#2563eb",
+  good: "#16a34a",
+  bad: "#ef4444",
+  purple: "#8b5cf6",
+  shadow: "0 6px 24px rgba(16,52,96,.08)",
+  radius: "16px",
+  series: ["#3b82f6", "#f59e0b", "#16a34a", "#8b5cf6", "#0f2f57", "#ef4444"],
+  // Kept as aliases so any not-yet-migrated reference resolves sensibly.
+  navyBorder: "#1e4f86",
+  navyDark: "#173f72",
+  maroon: "#16324f",
+  gold: "#f59e0b",
+  accent: "#3b82f6",
+  accentText: "#2563eb",
 };

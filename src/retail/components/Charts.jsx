@@ -272,6 +272,44 @@ export function RateTrendComboChart({ data, bars, rateKey, rateName, height = 26
   );
 }
 
+// One bar series (left axis) + one line series (right axis), different
+// units/scales — e.g. Revenue (bars, pesos) + Units Sold (line, whole
+// numbers). Flexible field names, unlike SalesTrendComboChart's fixed
+// gmv/orders/units shape.
+function DualAxisTooltip({ active, payload, label, barName, lineName, barValueFormatter, lineValueFormatter }) {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload;
+  if (!row) return null;
+  return (
+    <div className="rounded-md px-3 py-2 text-[12px]" style={{ background: retail.navy, border: `1px solid ${retail.navyBorder}`, color: "#fff" }}>
+      <div className="font-semibold mb-1">{label}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span style={{ color: "#a3adba" }}>{p.dataKey === "bar" ? barName : lineName}:</span>
+          <span className="font-semibold">{p.dataKey === "bar" ? barValueFormatter(row.bar) : lineValueFormatter(row.line)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+export function DualAxisComboChart({ data, barName, barColor, lineName, lineColor, height = 260, barValueFormatter = (v) => v.toLocaleString("en-PH"), lineValueFormatter = (v) => v.toLocaleString("en-PH") }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke={retail.border} vertical={false} />
+        <XAxis dataKey="label" tick={{ fontSize: 11, fill: retail.ink2 }} axisLine={{ stroke: retail.border }} tickLine={false} />
+        <YAxis yAxisId="bar" tick={{ fontSize: 11, fill: retail.ink2 }} axisLine={false} tickLine={false} tickFormatter={barValueFormatter} width={54} />
+        <YAxis yAxisId="line" orientation="right" tick={{ fontSize: 11, fill: retail.ink2 }} axisLine={false} tickLine={false} width={44} />
+        <Tooltip content={<DualAxisTooltip barName={barName} lineName={lineName} barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} />} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar yAxisId="bar" dataKey="bar" name={barName} fill={barColor || retail.blue} radius={[4, 4, 0, 0]} maxBarSize={26} />
+        <Line yAxisId="line" type="monotone" dataKey="line" name={lineName} stroke={lineColor || retail.orange} strokeWidth={2.5} dot={false} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 // Groups the bar's own value with its paired `${key}__line` value (read
 // straight off the full data row via `p.payload`, not off a rendered Line
 // series — this works whether or not a Line is actually plotted, so the

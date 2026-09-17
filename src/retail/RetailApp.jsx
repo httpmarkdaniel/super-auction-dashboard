@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
+import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
-import TabBar from "./components/TabBar";
 import SalesOverview from "./pages/SalesOverview";
 import Trend from "./pages/Trend";
 import StorePerformance from "./pages/StorePerformance";
@@ -23,13 +23,12 @@ const PAGES = {
 };
 
 // A separate module tree from Auction's App.jsx and HRH Online's
-// HrhOnlineApp.jsx — dark-navy header + sticky horizontal TabBar instead
-// of a left Sidebar, per explicit "make Retail feel different from HRH
-// Online" request (2026-09-17) — matches the reference report's own
-// header/tabbar layout. Segment (All/Retail/Wholesale) is the one
-// dashboard-wide filter (see segments.js) — every page reads
-// filters.segment; each page manages its own Weekly/MTD toggle internally
-// rather than a shared Date Range control.
+// HrhOnlineApp.jsx — gradient-navy Sidebar + white Header, matching
+// public/HRH_Retail_Dashboard_Modern_Layout.html's own "modern SaaS
+// dashboard" layout (2026-09-18 redesign, replacing the dark-navy top-tab-
+// bar look from the previous pass). Segment (All/Retail/Wholesale) is the
+// one dashboard-wide filter (see segments.js) — every page reads
+// filters.segment; each page manages its own Weekly/MTD toggle internally.
 export default function RetailApp() {
   const [page, setPage] = useState("salesOverview");
   const [segment, setSegment] = useState("all");
@@ -42,12 +41,14 @@ export default function RetailApp() {
   const filters = { segment };
 
   return (
-    <div className="min-h-screen" style={{ background: retail.bg }}>
-      <Header segment={segment} onSegmentChange={setSegment} />
-      <TabBar active={page} onNavigate={setPage} />
-      <main className="max-w-[1300px] mx-auto px-5 md:px-6 py-6">
-        <Page filters={filters} />
-      </main>
+    <div className="min-h-screen flex" style={{ background: retail.bg }}>
+      <Sidebar active={page} onNavigate={setPage} />
+      <div className="flex-1 min-w-0">
+        <Header segment={segment} onSegmentChange={setSegment} />
+        <main className="px-[18px] pb-7 pt-[18px]">
+          <Page filters={filters} />
+        </main>
+      </div>
     </div>
   );
 }
