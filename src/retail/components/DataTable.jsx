@@ -77,7 +77,7 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
             {visibleRows.map((r, i) => (
               <tr
                 key={r.id ?? i}
-                style={{ borderBottom: `1px solid ${retail.border}`, cursor: onRowClick ? "pointer" : undefined }}
+                style={{ borderBottom: `1px solid ${retail.border}`, cursor: onRowClick ? "pointer" : undefined, background: i % 2 === 1 ? "#fafafa" : "transparent" }}
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={onRowClick ? "hover:bg-black/[0.03]" : undefined}
               >

@@ -1,15 +1,16 @@
 import { retail } from "../theme";
 
-// Generic section card used for every chart/table block across Retail
-// pages — keeps the "dense BI panel" look in exactly one place.
+// Generic section card — white bg + soft shadow (reference's own
+// .chart-box), title in maroon (reference's own h2 color) rather than
+// HRH Online's bordered-card/gray-uppercase-title look.
 export default function Panel({ title, subtitle, action, badge, children, className = "" }) {
   return (
-    <div className={`rounded-md p-4 ${className}`} style={{ background: retail.surface, border: `1px solid ${retail.border}` }}>
+    <div className={`rounded-lg p-4 ${className}`} style={{ background: retail.surface, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
       {(title || badge || action) && (
-        <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
           <div>
             {title && (
-              <h3 className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: retail.ink }}>
+              <h3 className="text-[15px] font-semibold" style={{ color: retail.maroon }}>
                 {title}
               </h3>
             )}

@@ -1,38 +1,35 @@
 import { Children } from "react";
 import { retail } from "../theme";
 
-// Compact executive KPI card — thin orange top accent, room for a future
-// comparison delta and a short contextual label, per the Phase 2 brief.
+// Compact KPI card — matches the reference report's own .kpi exactly
+// (white bg, soft shadow, bold navy value, no colored top accent bar).
 // `previousLabel` (an already-formatted string, e.g. formatPeso(previous))
-// renders a "vs {previousLabel}" comparison line at the bottom of the card
-// alongside the delta badge — used by Executive Overview, whose "Compare
-// to" pill selector (Day/Week/Month) changes what "previous" means.
-// `icon` is optional. A `sparkline` prop is accepted but intentionally
-// ignored (not rendered) — sparklines were removed dashboard-wide per
-// explicit request; callers still passing one are harmless no-ops.
+// renders a "vs {previousLabel}" comparison line at the bottom of the
+// card alongside the delta. `icon` is optional. A `sparkline` prop is
+// accepted but intentionally ignored — sparklines aren't part of this
+// module's design.
 export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
-    <div className="relative overflow-hidden rounded-md p-3.5" style={{ background: retail.surface, border: `1px solid ${retail.border}` }}>
-      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: retail.accent }} />
-      <div className="flex items-center gap-1.5 mb-1.5">
+    <div className="rounded-lg p-3.5" style={{ background: retail.surface, boxShadow: "0 1px 4px rgba(0,0,0,0.08)" }}>
+      <div className="flex items-center gap-1.5 mb-1">
         {icon && (
-          <span className="shrink-0" style={{ color: retail.accent }}>
+          <span className="shrink-0" style={{ color: retail.navy }}>
             {icon}
           </span>
         )}
-        <div className="text-[11px] uppercase tracking-[0.06em] font-semibold" style={{ color: retail.ink2 }}>
+        <div className="text-[10.5px] uppercase tracking-[0.04em] font-semibold" style={{ color: retail.ink2 }}>
           {label}
         </div>
       </div>
-      <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: retail.ink }}>
+      <div className="text-[19px] font-bold leading-none tabular-nums" style={{ color: retail.navy }}>
         {value}
       </div>
       {(hasDelta || sub) && (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[12px] flex-wrap">
+        <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] flex-wrap">
           {hasDelta && (
-            <span className="font-semibold" style={{ color: positive ? retail.good : retail.bad }}>
+            <span className="font-bold" style={{ color: positive ? retail.good : retail.bad }}>
               {positive ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}%
             </span>
           )}
@@ -40,7 +37,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
         </div>
       )}
       {previousLabel && (
-        <div className="mt-1 pt-1.5 text-[11px]" style={{ borderTop: `1px solid ${retail.border}`, color: retail.muted }}>
+        <div className="mt-1 text-[10.5px]" style={{ color: retail.muted }}>
           vs {previousLabel}
         </div>
       )}
