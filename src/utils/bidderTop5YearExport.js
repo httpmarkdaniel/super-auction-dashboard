@@ -13,7 +13,8 @@ function dash(value) {
 // one column per calendar year plus Total, plus Phone/Email (no Account
 // Executive column — that's a vendor-specific concept, doesn't apply to
 // bidders). Year/Total amounts are exported as plain numbers with a real
-// Excel number format, not the on-screen abs-value-2dp string.
+// Excel number format (no currency symbol, per explicit request), not the
+// on-screen abs-value-2dp string.
 export function exportBidderTop5YearExcel({ years, category, rows }) {
   const wb = XLSX.utils.book_new();
   const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: NAVY_HEX } } };
@@ -33,7 +34,7 @@ export function exportBidderTop5YearExcel({ years, category, rows }) {
   for (let r = 1; r < aoa.length; r++) {
     for (let c = firstYearCol; c < headers.length; c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
-      if (ws[addr]) ws[addr].z = '"₱"#,##0.00';
+      if (ws[addr]) ws[addr].z = "#,##0.00";
     }
   }
   ws["!cols"] = [{ wch: 32 }, { wch: 16 }, { wch: 28 }, ...years.map(() => ({ wch: 16 })), { wch: 18 }];

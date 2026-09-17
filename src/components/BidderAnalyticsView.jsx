@@ -7,16 +7,18 @@ import StatTile from "./primitives/StatTile";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
 import BiddingPaceView from "./BiddingPaceView";
 import BidderDetailModal from "./primitives/BidderDetailModal";
+import BidderLotsModal from "./primitives/BidderLotsModal";
 import { formatPeso } from "../utils/format";
 import { exportBidderTop5YearExcel } from "../utils/bidderTop5YearExport";
 
 // Bid Value on this table, per explicit request (same treatment as Vendor
 // Analytics' Top Vendors — 5-Year Bid Value): absolute value with exactly
-// 2 decimal places — distinct from the shared formatPeso (0 decimals, no
-// abs) used elsewhere in this file, which stays untouched.
-function formatAbsPeso2dp(n) {
+// 2 decimal places, NO currency symbol (removed per explicit follow-up
+// request) — distinct from the shared formatPeso (0 decimals, no abs, has
+// ₱) used elsewhere in this file, which stays untouched.
+function formatAbs2dp(n) {
   if (n === null || n === undefined) return "—";
-  return "₱" + Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // TOP BIDDERS — 5-YEAR BID VALUE — same "same logic" treatment as Vendor
@@ -34,6 +36,11 @@ function formatAbsPeso2dp(n) {
 function BidderTop5YearTable() {
   const [category, setCategory] = useState("");
   const { data, loading, error } = useBidderTop5Year(category);
+  // Per explicit request: click a bidder to see which auctions/lots they
+  // participated in (auction number, lot number, bid amount, etc.) — see
+  // BidderLotsModal.jsx. Bidder Analytics only, no Vendor Analytics
+  // equivalent.
+  const [selectedBidderName, setSelectedBidderName] = useState(null);
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load 5-Year Top Bidders: {error}</div>;
@@ -90,14 +97,21 @@ function BidderTop5YearTable() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.bidder_name} className="border-t border-gridline hover:bg-plane">
-                <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate" title={r.bidder_name}>{r.bidder_name}</td>
+              <tr
+                key={r.bidder_name}
+                onClick={() => setSelectedBidderName(r.bidder_name)}
+                className="border-t border-gridline hover:bg-plane/60 transition-colors cursor-pointer"
+              >
+                <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate">
+                  <span className="block truncate" title={r.bidder_name}>{r.bidder_name}</span>
+                  <span className="text-[11px] text-series1 font-medium">Click to view lots</span>
+                </td>
                 <td className="py-2 px-3 text-ink whitespace-nowrap">{r.phone || "—"}</td>
                 <td className="py-2 px-3 text-ink max-w-[200px] truncate" title={r.email || ""}>{r.email || "—"}</td>
                 {years.map((y) => (
-                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbsPeso2dp(r.years[y] || 0)}</td>
+                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbs2dp(r.years[y] || 0)}</td>
                 ))}
-                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbsPeso2dp(r.total)}</td>
+                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbs2dp(r.total)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
@@ -109,8 +123,10 @@ function BidderTop5YearTable() {
         </table>
       </div>
       <div className="text-[11.5px] text-muted mt-2">
-        Settled winning Bid Value (status Paid/Released), grouped by the calendar year each auction ended, {rows.length} bidder(s) shown — not filtered by the Store/date controls above, only by the Category selector here. Phone/Email match by name against bidder registrations and are found for about 88% of bidders (real coverage gap, not every bidder resolves).
+        Settled winning Bid Value (status Paid/Released), grouped by the calendar year each auction ended, {rows.length} bidder(s) shown — not filtered by the Store/date controls above, only by the Category selector here. Phone/Email match by name against bidder registrations and are found for about 88% of bidders (real coverage gap, not every bidder resolves). Click a bidder to see the individual auctions/lots behind their totals.
       </div>
+
+      <BidderLotsModal bidderName={selectedBidderName} category={category} onClose={() => setSelectedBidderName(null)} />
     </div>
   );
 }

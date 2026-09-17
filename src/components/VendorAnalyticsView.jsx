@@ -16,13 +16,14 @@ import { exportVendorTop5YearExcel } from "../utils/vendorTop5YearExport";
 
 // Bid Value on this table, per explicit request: absolute value (a
 // settled bid amount is never genuinely negative in this data, but this
-// guarantees no stray "-" ever renders) with exactly 2 decimal places —
-// distinct from the shared formatPeso (0 decimals, no abs) and
-// formatCompactPeso (1 decimal, compact notation) used elsewhere in this
-// file, which stay untouched.
-function formatAbsPeso2dp(n) {
+// guarantees no stray "-" ever renders) with exactly 2 decimal places, NO
+// currency symbol (removed per explicit follow-up request) — distinct
+// from the shared formatPeso (0 decimals, no abs, has ₱) and
+// formatCompactPeso (1 decimal, compact notation, has ₱) used elsewhere
+// in this file, which stay untouched.
+function formatAbs2dp(n) {
   if (n === null || n === undefined) return "—";
-  return "₱" + Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // TOP VENDORS — 5-YEAR BID VALUE — one row per distinct vendor, one
@@ -30,12 +31,14 @@ function formatAbsPeso2dp(n) {
 // api/leaderboards.js's type=vendor-top-5-year for the exact rolling-
 // window rule), Total DESC. Sticky Vendor column + header, horizontal
 // scroll for the year columns. Per explicit request: no longer capped at
-// 100 rows (the table scrolls instead), Account Executive/Phone/Email
-// columns added, Bid Value shown as absolute-value-2dp, an Excel export
-// button, and its own Category filter (General Merchandise/Vehicles and
-// Automotive/Equipment and Industrial/Bulk Auction) — kept as LOCAL state
-// here, deliberately NOT the page-wide category filter used by Overview/
-// Bidder Analytics/the rest of this tab, since this table is explicitly a
+// 100 rows (the table scrolls instead), Account Executive column added
+// (Phone/Email were also added, then removed per a follow-up request —
+// the backend still returns them, just unused here), Bid Value shown as
+// absolute-value-2dp with no currency symbol, an Excel export button, and
+// its own Category filter (General Merchandise/Vehicles and Automotive/
+// Equipment and Industrial/Bulk Auction) — kept as LOCAL state here,
+// deliberately NOT the page-wide category filter used by Overview/Bidder
+// Analytics/the rest of this tab, since this table is explicitly a
 // standing reference view independent of the dashboard's other filters;
 // sharing that state would silently change Overview's category too.
 function VendorTop5YearTable() {
@@ -83,13 +86,11 @@ function VendorTop5YearTable() {
       </div>
 
       <div className="overflow-x-auto max-h-[560px] overflow-y-auto border border-gridline rounded-lg">
-        <table className="w-full text-[14px] min-w-[960px]">
+        <table className="w-full text-[14px] min-w-[760px]">
           <thead>
             <tr className="text-white text-[12px] uppercase tracking-wide bg-navy sticky top-0 z-20">
               <th className="text-left font-medium py-2 px-3 sticky left-0 bg-navy z-30">Vendor</th>
               <th className="text-left font-medium py-2 px-3">Account Executive</th>
-              <th className="text-left font-medium py-2 px-3">Phone</th>
-              <th className="text-left font-medium py-2 px-3">Email</th>
               {years.map((y) => (
                 <th key={y} className="text-right font-medium py-2 px-3">{y}</th>
               ))}
@@ -101,17 +102,15 @@ function VendorTop5YearTable() {
               <tr key={r.vendor} className="border-t border-gridline hover:bg-plane">
                 <td className="py-2 px-3 text-ink font-medium sticky left-0 bg-surface1 max-w-[240px] truncate" title={r.vendor}>{r.vendor}</td>
                 <td className="py-2 px-3 text-ink max-w-[160px] truncate" title={r.account_executive || ""}>{r.account_executive || "—"}</td>
-                <td className="py-2 px-3 text-ink whitespace-nowrap">{r.phone || "—"}</td>
-                <td className="py-2 px-3 text-ink max-w-[200px] truncate" title={r.email || ""}>{r.email || "—"}</td>
                 {years.map((y) => (
-                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbsPeso2dp(r.years[y] || 0)}</td>
+                  <td key={y} className="py-2 px-3 text-right tabular text-ink">{formatAbs2dp(r.years[y] || 0)}</td>
                 ))}
-                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbsPeso2dp(r.total)}</td>
+                <td className="py-2 px-3 text-right tabular text-series1 font-semibold">{formatAbs2dp(r.total)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={years.length + 5} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
+                <td colSpan={years.length + 3} className="py-6 text-center text-muted text-[14px]">No vendor activity in this 5-year window.</td>
               </tr>
             )}
           </tbody>

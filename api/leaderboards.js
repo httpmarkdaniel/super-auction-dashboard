@@ -280,6 +280,93 @@ export default async function handler(req, res) {
     }
 
     // =========================================================
+    // BIDDER'S OWN LOTS (type=bidder-lots-detail) — per explicit request:
+    // clicking a bidder on the Top Bidders — 5-Year Bid Value table shows
+    // every individual lot they won (auction number, lot number, item,
+    // category, branch, date, bid amount) — the per-lot rows that table's
+    // own year/total figures are aggregated FROM, at
+    // xv3.mart_auction_vendor_analysis's own grain, joined to
+    // xv3.mart_auction_productivity_report for date/branch. Same
+    // bidder_name identity, same 5-year window, same Paid/Released status,
+    // and the same optional Category filter as bidder-top-5-year, so a
+    // click always reconciles exactly with the row it was opened from.
+    // Fetched on-demand (only when a row is clicked), not preloaded for
+    // every bidder — this table can have hundreds/thousands of lots per
+    // active bidder, which would make the main 5-year response enormous if
+    // sent up front. Capped at 500 lots (DESC by date) as a safety valve,
+    // not a business rule — flagged via `truncated` when hit.
+    if (type === "bidder-lots-detail") {
+      const { bidder: bidderName = "" } = req.query;
+      if (!bidderName.trim()) {
+        return res.status(400).json({ error: "bidder is required" });
+      }
+      const endYear = new Date().getUTCFullYear();
+      const startYear = endYear - 4;
+      const LOT_DETAIL_CAP = 500;
+
+      const result = await client.query({
+        query: `
+          WITH lots AS (
+            SELECT
+              v.auction_number AS auction_number,
+              v.lot_number AS lot_number,
+              any(trim(v.bidder_name)) AS bidder_name,
+              argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
+              any(v.bid_amount) AS bid_amount,
+              any(v.name) AS lot_name,
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+            FROM xv3.mart_auction_vendor_analysis v
+            WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
+            GROUP BY v.auction_number, v.lot_number
+            HAVING upper(trim(bidder_name)) = upper({bidder:String})
+              AND ({category:String} = '' OR lot_category = {category:String})
+          ),
+          auction_meta AS (
+            SELECT DISTINCT auction_number, ending_time, store_name
+            FROM xv3.mart_auction_productivity_report
+            WHERE toYear(ending_time) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
+          )
+          SELECT
+            l.auction_number AS auction_number,
+            l.lot_number AS lot_number,
+            l.bid_amount AS bid_amount,
+            l.lot_name AS lot_name,
+            l.lot_category AS lot_category,
+            am.ending_time AS ending_time,
+            am.store_name AS store_name
+          FROM lots l
+          INNER JOIN auction_meta am ON l.auction_number = am.auction_number
+          WHERE l.status IN ('Paid', 'Released')
+          ORDER BY am.ending_time DESC
+          LIMIT {cap:UInt16}
+        `,
+        query_params: { bidder: bidderName, category, startYear, endYear, cap: LOT_DETAIL_CAP + 1 },
+        format: "JSONEachRow",
+      });
+
+      const rows = await result.json();
+      const truncated = rows.length > LOT_DETAIL_CAP;
+
+      res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
+
+      return res.status(200).json({
+        type: "bidder-lots-detail",
+        bidder: bidderName,
+        category,
+        truncated,
+        rows: rows.slice(0, LOT_DETAIL_CAP).map((r) => ({
+          auction_number: r.auction_number,
+          lot_number: r.lot_number,
+          bid_amount: Number(r.bid_amount ?? 0),
+          lot_name: r.lot_name ?? null,
+          lot_category: r.lot_category ?? null,
+          ending_time: r.ending_time ?? null,
+          store_name: r.store_name ?? null,
+        })),
+      });
+    }
+
+    // =========================================================
     // VENDOR SUMMARY (type=vendor-financial-summary) — MOVED here from
     // Auction Result (api/overview.js's type=auction-result used to carry
     // this same data as `vendor_summary`/`vendor_summary_totals`; verified
