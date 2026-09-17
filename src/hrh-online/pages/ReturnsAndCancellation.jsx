@@ -435,11 +435,16 @@ export default function ReturnsAndCancellation({ filters }) {
             action={<TrendBucketPills value={cancellationBucket} onChange={setCancellationBucket} />}
             className="mb-4"
           >
+            {/* Cancelled listed/rendered first and kept in the bold "bad"
+                red, Received pushed to a muted gray — Cancelled is the
+                number this panel is about, and it's a small slice of
+                Received by nature, so relying on bar height alone buried
+                it next to the much taller Received bars. */}
             <RateTrendComboChart
               data={cancellationPerf}
               bars={[
-                { key: "received", name: "Orders Received", color: hrh.blue },
                 { key: "cancelled", name: "Cancelled", color: hrh.bad },
+                { key: "received", name: "Orders Received", color: hrh.muted },
               ]}
               rateKey="cancellationRate"
               rateName="Cancellation Rate"

@@ -68,27 +68,68 @@ function isDevTestOrder(o) {
   return false;
 }
 
-// Cancellation Reasons — 7 categories, built from the free-text
+// Cancellation Reasons — 10 categories, built from the free-text
 // cancellation_reason field (~30 distinct raw values customers can pick
 // from). Keyword-matched against the categories' own descriptions in the
 // methodology report rather than an exhaustive enumeration of every raw
 // string (that full list wasn't in the report) — see dataQuality caveats
 // in the response for this limitation.
+//
+// 2026-09-17: "System-Initiated (Expired)" split into its own 4
+// sub-categories per explicit request — real data showed 3 distinct
+// auto-cancel reason strings under that one bucket ("No Payment for 1
+// day", "No Payment for 2 days", "No Customer Confirmation for 2 days"),
+// so lumping them together was hiding real signal. These 4 sub-categories
+// are still exactly the "System-Initiated" family for every other
+// purpose on this page (Real Orders Received, Cancellation Rate,
+// System-Initiated Share, etc.) — see SYSTEM_INITIATED_EXPIRED_CATEGORIES/
+// isCustomerInitiatedCancellation below, nothing about which orders count
+// as "real"/"cancelled" changed, only how the reason is labeled.
 function categorizeCancellationReason(reason) {
   const r = (reason || "").toLowerCase().trim();
   if (!r) return "No Reason Logged";
-  if (r.includes("expired")) return "System-Initiated (Expired)";
+  if (r.includes("expired")) {
+    if (r.includes("no payment") && r.includes("1 day")) return "Expired — No Payment (1 Day)";
+    if (r.includes("no payment") && r.includes("2 day")) return "Expired — No Payment (2 Days)";
+    if (r.includes("no customer confirmation")) return "Expired — No Customer Confirmation (2 Days)";
+    return "Expired — Other";
+  }
   if (r.includes("change") && r.includes("mind")) return "Changed Mind / No Longer Needed";
   if (r.includes("no longer need") || (r.includes("need") && (r.includes("didn") || r.includes("don")))) {
     return "Changed Mind / No Longer Needed";
   }
   if (r.includes("payment") || r.includes("gcash") || r.includes("insufficient") || r.includes("cod")) return "Payment Issues";
-  if (r.includes("website") || r.includes("technical") || r.includes("checkout") || r.includes("login") || r.includes("cart") || r.includes("glitch") || r.includes("site error")) {
+  if (
+    r.includes("website") ||
+    r.includes("technical") ||
+    r.includes("checkout") ||
+    r.includes("login") ||
+    r.includes("log in") ||
+    r.includes("cart") ||
+    r.includes("glitch") ||
+    r.includes("site error") ||
+    r.includes("didn't load") ||
+    r.includes("didnt load")
+  ) {
     return "Technical / Website Issues";
   }
-  if (r.includes("duplicate") || r.includes("add item") || r.includes("promo") || r.includes("modif")) return "Order Modification";
+  if (r.includes("duplicate") || r.includes("promo") || r.includes("modif") || r.includes("reorder") || (r.includes("add") && r.includes("item"))) {
+    return "Order Modification";
+  }
   return "Other / Miscellaneous";
 }
+
+// The 4 finer sub-categories categorizeCancellationReason can return for
+// an "expired" reason — still one family (System-Initiated) for every
+// purpose other than the Cancellation Reasons table's own display
+// granularity. See isCustomerInitiatedCancellation and the System-
+// Initiated Share KPI below.
+const SYSTEM_INITIATED_EXPIRED_CATEGORIES = new Set([
+  "Expired — No Payment (1 Day)",
+  "Expired — No Payment (2 Days)",
+  "Expired — No Customer Confirmation (2 Days)",
+  "Expired — Other",
+]);
 
 // "Customer-initiated" (methodology's own footnote definition): cancelled
 // with a stated reason OTHER than an "Expired Order" auto-cancel — as
@@ -104,7 +145,7 @@ function categorizeCancellationReason(reason) {
 // orders received and count toward Cancelled everywhere. See
 // allRealCancelled/realOrdersReceived below.
 function isCustomerInitiatedCancellation(category) {
-  return category !== "System-Initiated (Expired)" && category !== "No Reason Logged";
+  return !SYSTEM_INITIATED_EXPIRED_CATEGORIES.has(category) && category !== "No Reason Logged";
 }
 
 function normalizeName(name) {
@@ -937,7 +978,10 @@ export async function handleOrdersFulfillment(req, res) {
     })).sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const CATEGORY_ORDER = [
-      "System-Initiated (Expired)",
+      "Expired — No Payment (1 Day)",
+      "Expired — No Payment (2 Days)",
+      "Expired — No Customer Confirmation (2 Days)",
+      "Expired — Other",
       "Payment Issues",
       "Technical / Website Issues",
       "Changed Mind / No Longer Needed",
@@ -1042,9 +1086,10 @@ export async function handleOrdersFulfillment(req, res) {
     // does. Previous period re-categorizes mPrev.stayingCancelled the same
     // way (each order already carries its own .category from
     // computeHmrphOnlineLifecycle's classification loop).
-    const curSystemInitiatedShare = safeDivide(byCategory.get("System-Initiated (Expired)").count, allRealCancelledOrders.length) * 100;
+    const curSystemInitiatedCount = [...SYSTEM_INITIATED_EXPIRED_CATEGORIES].reduce((sum, cat) => sum + byCategory.get(cat).count, 0);
+    const curSystemInitiatedShare = safeDivide(curSystemInitiatedCount, allRealCancelledOrders.length) * 100;
     const curCancelNoReasonCount = byCategory.get("No Reason Logged").count;
-    const prevSystemInitiatedCount = mPrev.stayingCancelled.filter((o) => o.category === "System-Initiated (Expired)").length;
+    const prevSystemInitiatedCount = mPrev.stayingCancelled.filter((o) => SYSTEM_INITIATED_EXPIRED_CATEGORIES.has(o.category)).length;
     const prevCancelNoReasonCount = mPrev.stayingCancelled.filter((o) => o.category === "No Reason Logged").length;
     const prevSystemInitiatedShare = safeDivide(prevSystemInitiatedCount, mPrev.stayingCancelled.length) * 100;
 
@@ -1171,7 +1216,7 @@ export async function handleOrdersFulfillment(req, res) {
       returns: { ...returnsWithComparison, trendTrailing: returnsTrendTrailing },
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
-        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 7 categories (everything except System-Initiated (Expired) and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
+        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired, split into its 4 auto-cancel sub-reasons) + No Reason Logged only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 10 categories (everything except the 4 Expired sub-categories and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",

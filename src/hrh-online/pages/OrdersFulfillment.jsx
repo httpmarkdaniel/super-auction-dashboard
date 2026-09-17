@@ -583,11 +583,14 @@ export default function OrdersFulfillment({ filters }) {
               </div>
               <div>
                 <div className="font-semibold mb-0.5" style={{ color: hrh.ink }}>
-                  Cancellation Reasons — 7 categories
+                  Cancellation Reasons — 10 categories
                 </div>
-                Built from the free-text cancellation_reason field: System-Initiated (Expired), Payment Issues,
+                Built from the free-text cancellation_reason field: Expired — No Payment (1 Day), Expired — No
+                Payment (2 Days), Expired — No Customer Confirmation (2 Days), Expired — Other, Payment Issues,
                 Technical / Website Issues, Changed Mind / No Longer Needed, Order Modification, No Reason Logged,
-                Other / Miscellaneous.
+                Other / Miscellaneous. The 4 Expired sub-categories are still one "System-Initiated" family for
+                every other metric on this page (Cancellation Rate, System-Initiated Share, etc.) — only the
+                Cancellation Reasons table's own display is broken down further.
               </div>
               <div>
                 <div className="font-semibold mb-0.5" style={{ color: hrh.ink }}>
