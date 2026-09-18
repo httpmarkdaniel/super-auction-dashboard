@@ -670,8 +670,20 @@ export async function computeReturnsAnalysis(from, to, channels) {
   const returnOrders = returnRows.map((r) => {
     const amount = Math.abs(toNum(r.net_sales_amount));
     const category = categorizeReturnReason(r.invoice_remarks);
-    const method = checkoutByOrderNo.get(r.order_no) || "Unknown";
-    const paymentType = paymentTypeByOrderNo.get(r.order_no) || "Unknown";
+    // Returns with no order_no match (nothing to join against
+    // xv3.mart_xv3_order_report) normally fall to "Unknown" — except a
+    // "refused to accept" remark, verified 2026-09-18: every OTHER return
+    // with this exact wording AND a real order_no match is 100% Delivery
+    // / Cash On Delivery (7/7, zero exceptions) — refusing a delivery at
+    // the door has no walk-in/pickup equivalent, so this is a safe,
+    // deterministic fallback, not a probabilistic guess like the
+    // payment-type-based cancellation-reason inference elsewhere in this
+    // file. Any other "Unknown" (e.g. a damaged-item return with no
+    // order_no) has no such signal and stays Unknown.
+    const remarksLower = (r.invoice_remarks || "").toLowerCase();
+    const isRefusedDelivery = remarksLower.includes("refuse") && remarksLower.includes("accept");
+    const method = checkoutByOrderNo.get(r.order_no) || (isRefusedDelivery ? "Delivery" : "Unknown");
+    const paymentType = paymentTypeByOrderNo.get(r.order_no) || (isRefusedDelivery ? "Cash On Delivery" : "Unknown");
     const returnDate = String(r.transaction_date).slice(0, 10);
     const key = `${normalizeName(`${r.customer_firstname || ""} ${r.customer_lastname || ""}`)}|${r.product_name}`;
     const laterSaleDates = candidatesByNameProduct.get(key) || [];
@@ -921,7 +933,9 @@ export async function handleOrdersFulfillment(req, res) {
         cancellationTrendTrailing: [],
         unresolvedOrders: [],
         returns: { ...returnsWithComparison, trendTrailing: returnsTrendTrailing },
-        dataQuality: [],
+        dataQuality: [
+          "Returns by Fulfillment Method: a return with no order_no shows \"Unknown\" — except a \"refused to accept\" remark, inferred as Delivery/Cash On Delivery (verified 2026-09-18: every other return with this exact wording and a real order_no match is 100% Delivery/COD, zero exceptions — refusing a delivery at the door has no walk-in/pickup equivalent). Other Unknowns (e.g. a damaged-item return with no order_no) stay Unknown when there's no equivalent signal to infer from.",
+        ],
       });
     }
 
@@ -1247,6 +1261,7 @@ export async function handleOrdersFulfillment(req, res) {
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",
         "Cancellation reason categorization is keyword-based against the methodology's 7-category descriptions, not an exhaustive enumeration of every raw dropdown value.",
+        "Returns by Fulfillment Method: a return with no order_no shows \"Unknown\" — except a \"refused to accept\" remark, inferred as Delivery/Cash On Delivery (verified 2026-09-18: every other return with this exact wording and a real order_no match is 100% Delivery/COD, zero exceptions — refusing a delivery at the door has no walk-in/pickup equivalent). Other Unknowns (e.g. a damaged-item return with no order_no) stay Unknown when there's no equivalent signal to infer from.",
         "This is a live warehouse — counts can shift slightly between queries as new transactions land.",
       ],
     });
