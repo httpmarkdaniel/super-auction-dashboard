@@ -533,8 +533,29 @@ export async function handleWeeklyBusinessReview(req, res) {
     }
     for (const p of categorized.disappeared) p.stockStatus = stockStatus(p.stockQty);
 
+    // Extended 2026-09-18 to also aggregate units and stock — per explicit
+    // request to show each category's last-period total sales/units and
+    // current total stock on hand, not just buried inline in the notes
+    // text. Stock sums only SKUs with a real inventory match (stockQty !==
+    // undefined) — an unmatched SKU contributes 0 to the sum but is
+    // counted separately (stockUnknownCount) so "Stock" never silently
+    // understates by conflating "confirmed 0 on hand" with "no match
+    // found", same distinction stockStatus() already draws per-SKU.
     function categoryTotals(items) {
-      return { curGmv: items.reduce((s, i) => s + i.curGmv, 0), prevGmv: items.reduce((s, i) => s + i.prevGmv, 0) };
+      let stockQty = 0;
+      let stockUnknownCount = 0;
+      for (const i of items) {
+        if (i.stockQty === undefined) stockUnknownCount += 1;
+        else stockQty += i.stockQty;
+      }
+      return {
+        curGmv: items.reduce((s, i) => s + i.curGmv, 0),
+        prevGmv: items.reduce((s, i) => s + i.prevGmv, 0),
+        curUnits: items.reduce((s, i) => s + i.curUnits, 0),
+        prevUnits: items.reduce((s, i) => s + i.prevUnits, 0),
+        stockQty,
+        stockUnknownCount,
+      };
     }
     const grewTotals = categoryTotals(categorized.grew);
     const dippedTotals = categoryTotals(categorized.dipped);
@@ -575,6 +596,14 @@ export async function handleWeeklyBusinessReview(req, res) {
       });
     }
 
+    // lastPeriodSales/lastPeriodUnits/stock added 2026-09-18 per explicit
+    // request — the same "Total Sales / Units / Stock" figures already
+    // shown per-SKU in the modal, now also aggregated per category so the
+    // main table doesn't require opening every category to see the scale
+    // of last period's sales/units or how much stock sits behind it.
+    // stockUnknownCount (SKUs with no inventory match) rides along so the
+    // frontend can caveat the Stock figure instead of presenting a partial
+    // sum as complete.
     const skuMovement = [
       {
         category: "Grew",
@@ -584,6 +613,10 @@ export async function handleWeeklyBusinessReview(req, res) {
           ? `Sales increased by ${pctDelta(grewTotals.curGmv, grewTotals.prevGmv)?.toFixed(1)}% combined (${formatPesoLocal(grewTotals.prevGmv)} → ${formatPesoLocal(grewTotals.curGmv)}) across ${categorized.grew.length} SKU(s), vs. ${previousLabel}.`
           : "No SKUs had any real sales increase this period.",
         topSkus: topSkusFor(categorized.grew, "grew"),
+        lastPeriodSales: grewTotals.prevGmv,
+        lastPeriodUnits: grewTotals.prevUnits,
+        stock: grewTotals.stockQty,
+        stockUnknownCount: grewTotals.stockUnknownCount,
       },
       {
         category: "Dipped",
@@ -593,6 +626,10 @@ export async function handleWeeklyBusinessReview(req, res) {
           ? `Sales decreased by ${Math.abs(pctDelta(dippedTotals.curGmv, dippedTotals.prevGmv) ?? 0).toFixed(1)}% combined (${formatPesoLocal(dippedTotals.prevGmv)} → ${formatPesoLocal(dippedTotals.curGmv)}) across ${categorized.dipped.length} SKU(s), vs. ${previousLabel}.`
           : "No SKUs had any real sales decrease this period.",
         topSkus: topSkusFor(categorized.dipped, "dipped"),
+        lastPeriodSales: dippedTotals.prevGmv,
+        lastPeriodUnits: dippedTotals.prevUnits,
+        stock: dippedTotals.stockQty,
+        stockUnknownCount: dippedTotals.stockUnknownCount,
       },
       {
         category: "Emerging / Breakout",
@@ -602,6 +639,13 @@ export async function handleWeeklyBusinessReview(req, res) {
           ? `Newly selling — ${categorized.emerging.length} SKU(s) with ${formatPesoLocal(emergingTotals.curGmv)} combined sales this period and no comparable prior-period sales.`
           : "No new/breakout SKUs this period.",
         topSkus: topSkusFor(categorized.emerging, "emerging"),
+        // Always 0 by definition (Emerging = zero-or-no prior-period
+        // sales) — shown, not omitted, since "0" is itself the real,
+        // meaningful answer here (confirms these are genuinely new).
+        lastPeriodSales: emergingTotals.prevGmv,
+        lastPeriodUnits: emergingTotals.prevUnits,
+        stock: emergingTotals.stockQty,
+        stockUnknownCount: emergingTotals.stockUnknownCount,
       },
       {
         category: "Disappeared",
@@ -611,6 +655,10 @@ export async function handleWeeklyBusinessReview(req, res) {
           ? `Had ${formatPesoLocal(disappearedTotals.prevGmv)} in sales last period, zero this period. ${disappearedOOS} Out of Stock, ${disappearedHasStock} Has Stock but no current sales${disappearedUnknown ? `, ${disappearedUnknown} Cause not determined from available data` : ""}.`
           : "No SKUs with prior-period sales dropped to zero this period.",
         topSkus: topSkusFor(categorized.disappeared, "disappeared"),
+        lastPeriodSales: disappearedTotals.prevGmv,
+        lastPeriodUnits: disappearedTotals.prevUnits,
+        stock: disappearedTotals.stockQty,
+        stockUnknownCount: disappearedTotals.stockUnknownCount,
       },
     ];
 
@@ -693,6 +741,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         "Grew/Dipped (Slide 4) count every SKU with any real GMV increase or decrease between the two periods (no minimum % threshold) — only an exact 0% change (identical GMV in both periods) is left uncategorized as genuinely flat.",
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",
         "SKU-level comparisons (Slides 4-5) use the same current-vs-previous-comparable-period engine as Product Analytics' Top Products/Dropped Products, not week-over-week/month-over-month specifically — the task's own Slide 4/5 definitions ask for a generic \"comparable prior period\", unlike Slide 2's explicit WoW/MoM columns.",
+        "Each SKU Movement category's Stock total (2026-09-18) only sums SKUs with a real inventory match — a SKU with no match contributes 0 rather than being guessed, and is counted separately (shown as \"+N unknown\") so the total is never mistaken for complete when it isn't.",
       ],
     });
   } catch (err) {

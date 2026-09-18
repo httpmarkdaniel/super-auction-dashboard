@@ -117,11 +117,30 @@ const PLATFORM_CHANGE_COLUMNS = [
   { key: "pctChange", label: "% Change", render: (r) => (r.pctChange === null || r.pctChange === undefined ? "New" : formatPct(r.pctChange)) },
 ];
 
+// lastPeriodSales/lastPeriodUnits/stock added 2026-09-18 per explicit
+// request — each category's aggregate "Total Sales / Units / Stock",
+// mirroring the same figures already shown per-SKU in the modal, so the
+// scale behind a category is visible without opening it. Stock shows a
+// "+N unknown" caveat when some of the category's SKUs had no inventory
+// match (see api/_hrh-weekly-business-review.js's own comment) — those
+// SKUs contribute 0 to the sum, never a guess.
 const SKU_MOVEMENT_COLUMNS = [
   { key: "category", label: "Category" },
   { key: "skus", label: "SKUs", render: (r) => <SkuCountWithModal count={r.skus} topSkus={r.topSkus} category={r.category} /> },
   { key: "movement", label: "Movement" },
-  { key: "notes", label: "Notes / Why", maxWidth: 480 },
+  { key: "lastPeriodSales", label: "Last Period Sales", render: (r) => formatPeso(r.lastPeriodSales) },
+  { key: "lastPeriodUnits", label: "Last Period Units", render: (r) => formatNum(r.lastPeriodUnits) },
+  {
+    key: "stock",
+    label: "Stock",
+    render: (r) => (
+      <span className="whitespace-nowrap">
+        {formatNum(r.stock)}
+        {r.stockUnknownCount > 0 && <span style={{ color: hrh.muted }}> (+{r.stockUnknownCount} unknown)</span>}
+      </span>
+    ),
+  },
+  { key: "notes", label: "Notes / Why", maxWidth: 420 },
 ];
 
 const TOP10_TABLE_COLUMNS = [
