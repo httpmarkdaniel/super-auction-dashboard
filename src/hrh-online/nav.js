@@ -1,11 +1,11 @@
 // Single source of truth for the HRH Online sidebar AND the page-key ->
 // component map in HrhOnlineApp.jsx — add a page in one place only.
 export const NAV_GROUPS = [
-  { label: "Overview", items: [{ key: "overview", label: "Executive Overview" }] },
+  { label: "Overview", items: [{ key: "overview", label: "Sales Overview" }] },
   {
-    label: "Commerce",
+    label: "Marketing",
     items: [
-      { key: "sales", label: "Sales Analytics" },
+      { key: "sales", label: "Voucher" },
       { key: "traffic", label: "Traffic & Conversion" },
       { key: "customers", label: "Customer Analytics" },
     ],
@@ -14,8 +14,7 @@ export const NAV_GROUPS = [
     label: "Merchandising",
     items: [
       { key: "productAnalytics", label: "Product Analytics" },
-      { key: "markdown", label: "Markdown Analytics" },
-      { key: "barcodeAnalytics", label: "Barcode Analytics" },
+      { key: "barcodeAnalytics", label: "Stocks" },
     ],
   },
   {
@@ -23,7 +22,6 @@ export const NAV_GROUPS = [
     items: [
       { key: "fulfillment", label: "Orders & Fulfillment" },
       { key: "returnsCancellation", label: "Returns and Cancellation" },
-      { key: "customerSuccess", label: "Customer Success" },
     ],
   },
   {
