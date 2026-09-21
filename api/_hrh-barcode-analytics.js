@@ -462,6 +462,53 @@ async function fetchWarehouseKpis(from, to) {
   };
 }
 
+// ============================================================================
+// ON-HAND STOCK — current qty + value per product, right now
+// ============================================================================
+// A live snapshot, not scoped to the page's Date Range filter at all — "on
+// hand" means right now, not "as of the selected period" (same convention
+// as e.g. Executive Overview's trailing Sales Trend being independent of
+// the Date Range filter). Same source table as the lifecycle funnel's
+// per-item modal (xv3.mart_level_of_inventory, store_name = 'HRH ONLINE'):
+// item_qty is the live on-hand counter (drops to 0 once sold — see
+// computeLifecycleFunnel's header comment), current_srp the unit's current
+// selling price, total_current_srp the stock value (verified there to
+// equal item_qty * current_srp). Grouped by product (product_id), summing
+// across every barcode row for that product, and filtered to item_qty > 0
+// so sold-out products don't clutter the table with a 0 row.
+async function computeOnHandStock() {
+  const HRH_STORE = "HRH ONLINE";
+  const rows = await client
+    .query({
+      query: `
+        SELECT
+          toString(product_id) AS product_id,
+          any(product_name) AS product_name,
+          sum(item_qty) AS qty,
+          sum(total_current_srp) AS stock_value
+        FROM xv3.mart_level_of_inventory
+        WHERE store_name = {store:String} AND item_qty > 0
+        GROUP BY product_id
+        HAVING qty > 0
+        ORDER BY stock_value DESC
+      `,
+      query_params: { store: HRH_STORE },
+      format: "JSONEachRow",
+    })
+    .then((r) => r.json());
+  const items = rows.map((r) => ({
+    productId: r.product_id,
+    product: r.product_name,
+    qty: toNum(r.qty),
+    stockValue: toNum(r.stock_value),
+  }));
+  const totals = items.reduce(
+    (acc, r) => ({ qty: acc.qty + r.qty, stockValue: acc.stockValue + r.stockValue }),
+    { qty: 0, stockValue: 0 },
+  );
+  return { items, totals };
+}
+
 export async function handleBarcodeAnalytics(req, res) {
   try {
     const { from = "", to = "" } = req.query;
@@ -480,7 +527,7 @@ export async function handleBarcodeAnalytics(req, res) {
     // independent of each other — same date range, different tables/
     // aggregations, nothing depends on another's result — so they're fired
     // together via Promise.all instead of one round-trip at a time.
-    const [kCur, kPrev, pickerRows, qcRows, distRows, dailyRows, lifecycleFunnel] = await Promise.all([
+    const [kCur, kPrev, pickerRows, qcRows, distRows, dailyRows, lifecycleFunnel, onHandStock] = await Promise.all([
       fetchWarehouseKpis(range_.from, range_.to),
       fetchWarehouseKpis(comparison.from, comparison.to),
       // Picker Performance — real named pickers, ranked by volume. Excludes
@@ -562,6 +609,7 @@ export async function handleBarcodeAnalytics(req, res) {
         })
         .then((r) => r.json()),
       computeLifecycleFunnel(range_.from, range_.to),
+      computeOnHandStock(),
     ]);
     const pickerPerformance = pickerRows.map((r) => ({
       picker: r.picker_name,
@@ -618,6 +666,7 @@ export async function handleBarcodeAnalytics(req, res) {
       pickToDispatchDistribution,
       dailyVolume,
       lifecycleFunnel,
+      onHandStock,
       dataQuality: [
         "picker_name/qc_station are excluded when null (1 order store-wide has no picker logged) rather than shown as a meaningless \"Unassigned\" row.",
         "Pick-to-Dispatch duration is picking_started_at → dispatch_finalized_at, computed directly (not summed from intermediate stage columns), so a null in any one intermediate stage can't silently understate it.",

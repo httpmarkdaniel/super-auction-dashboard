@@ -2,9 +2,32 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Panel from "../components/Panel";
 import Modal from "../components/Modal";
 import DataTable from "../components/DataTable";
+import { KpiCard, KpiRow } from "../components/Kpi";
 import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatNum, formatPct, formatPeso } from "../format";
+
+function StockIcon({ children }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {children}
+    </svg>
+  );
+}
+const STOCK_ICONS = {
+  box: (
+    <StockIcon>
+      <path d="M21 8V21H3V8" />
+      <path d="M1 3h22v5H1z" />
+      <path d="M10 12h4" />
+    </StockIcon>
+  ),
+  peso: (
+    <StockIcon>
+      <path d="M6 3v18M6 3h7a4 4 0 0 1 0 8H6M3 10h13M3 14h10" />
+    </StockIcon>
+  ),
+};
 
 // r.stageAt is the real timestamp the unit reached THAT specific stage
 // (created_time for Barcoded, the ASN's created_at for ASN Raised, its
@@ -41,6 +64,17 @@ const STAGE_ITEM_COLUMNS = [
   { key: "stockValue", label: "Stock Value", render: (r) => formatPeso(r.stockValue) },
   { key: "date", label: "Date", render: (r) => formatStageDate(r.stageAt) },
   { key: "timestamp", label: "Timestamp", render: (r) => formatStageTime(r.stageAt) },
+];
+
+// On-Hand Stock table columns — Product/Qty/Stock Value, per explicit
+// request. `onHandStock` is a live current-inventory snapshot (see
+// api/_hrh-barcode-analytics.js's computeOnHandStock), independent of the
+// page's Date Range filter, so it's rendered above the lifecycle funnel
+// (which IS date-scoped) rather than mixed into it.
+const ON_HAND_STOCK_COLUMNS = [
+  { key: "product", label: "Product", maxWidth: 360 },
+  { key: "qty", label: "On-Hand Qty", render: (r) => formatNum(r.qty) },
+  { key: "stockValue", label: "On-Hand Stock Value", render: (r) => formatPeso(r.stockValue) },
 ];
 
 function formatDays(days) {
@@ -207,16 +241,35 @@ export default function BarcodeAnalytics({ filters }) {
   }, [params, ready, load]);
 
   const funnel = data?.lifecycleFunnel;
+  const onHandStock = data?.onHandStock;
 
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Barcode Analytics
+        Stocks
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
-      {ready && loading && !data && <LoadingState label="Loading Barcode Analytics…" />}
-      {error && <ErrorState label={`Couldn't load Barcode Analytics: ${error}`} />}
+      {ready && loading && !data && <LoadingState label="Loading Stocks…" />}
+      {error && <ErrorState label={`Couldn't load Stocks: ${error}`} />}
+
+      {onHandStock && !error && (
+        <Panel title="On-Hand Stock" subtitle="Live current inventory, by product — not affected by the Date Range filter above." className="mb-4">
+          <KpiRow>
+            <KpiCard label="On-Hand Qty" icon={STOCK_ICONS.box} value={formatNum(onHandStock.totals.qty)} />
+            <KpiCard label="On-Hand Stock Value" icon={STOCK_ICONS.peso} value={formatPeso(onHandStock.totals.stockValue)} />
+          </KpiRow>
+          <div className="mt-4">
+            <DataTable
+              columns={ON_HAND_STOCK_COLUMNS}
+              rows={onHandStock.items}
+              paginate
+              pageSize={10}
+              emptyLabel="No products currently on hand."
+            />
+          </div>
+        </Panel>
+      )}
 
       {funnel && !error && (
         <Panel

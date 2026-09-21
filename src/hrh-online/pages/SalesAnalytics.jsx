@@ -2,29 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { KpiCard, KpiRow } from "../components/Kpi";
-import { DonutChart, BarComparisonChart, PairedBarLineChart } from "../components/Charts";
+import { PairedBarLineChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { LoadingState, ErrorState } from "../components/States";
 import { bucketRows } from "../trendBucket";
 import { hrh } from "../theme";
-import { formatPeso, formatPct, formatNum, formatCompactPeso } from "../format";
-
-// Sales Trend is a fixed trailing window (last 30 days/4 weeks/6 months,
-// always ending today), independent of the page's Date Range filter — same
-// pattern as Executive Overview's Sales Trend (see api/hrh-sales-
-// analytics.js's trailingFrom/trailingTo). These counts are how many of
-// bucketRows' most-recent buckets to keep after re-bucketing. GMV only,
-// stacked by channel (HMRPH Online/TikTok/Shopee) — no Orders/Units here,
-// per explicit request.
-const TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
-// Colors per explicit request, not each brand's own real color — just this
-// chart's own consistent code: HMRPH Online = dark blue, TikTok = orange
-// (hrh.accent, HMR's own brand orange), Shopee = green (hrh.good).
-const SALES_TREND_CHANNEL_SERIES = [
-  { key: "gmvHmrphOnline", name: "HMRPH Online", color: hrh.series[0] },
-  { key: "gmvTiktok", name: "TikTok", color: hrh.accent },
-  { key: "gmvShopee", name: "Shopee", color: hrh.good },
-];
+import { formatPeso, formatNum } from "../format";
 
 // Small hand-drawn stroke icons for VoucherAssistedSalesPanel's KPI row —
 // same feather-icon convention as TrafficConversion.jsx / Sidebar.jsx
@@ -66,11 +49,6 @@ const ICONS = {
   ),
 };
 
-function formatRateWithCount(rate, count) {
-  if (rate === null || rate === undefined) return "—";
-  return `${formatPct(rate)} (${formatNum(count)})`;
-}
-
 const DRIVER_VALUE_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 220 },
   { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
@@ -107,17 +85,6 @@ function TopSalesDriversPanel({ topSalesDrivers }) {
     </div>
   );
 }
-
-const CHANNEL_TABLE_COLUMNS = [
-  { key: "channel", label: "Channel" },
-  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
-  { key: "nmv", label: "NMV", render: (r) => formatPeso(r.nmv) },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
-  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
-  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatRateWithCount(r.cancellationRate, r.cancellations) },
-  { key: "returnRate", label: "Return Rate", render: (r) => formatRateWithCount(r.returnRate, r.returns) },
-];
 
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
@@ -201,25 +168,25 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
             Bars = Discount Value (₱) · hover a bar for that voucher's Orders count
           </div>
         </div>
-        <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" />
+        <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" stacked />
       </div>
       <TopSalesDriversPanel topSalesDrivers={voucherAssistedSales?.topSalesDrivers} />
     </Panel>
   );
 }
 
-// Real ClickHouse-backed Sales Analytics — see api/hrh-sales-analytics.js
-// for the queries (same locked GMV/NMV/Orders/Units/AOV contract as Product
-// Analytics/Executive Overview). Channel Comparison always shows all 3
-// channels (it IS the channel breakdown, so the filter would just hide
-// rows); the panels below it respect the page's Channel + Date Range filter
-// like everywhere else on the dashboard.
+// Real ClickHouse-backed Voucher page — see api/hrh-sales-analytics.js for
+// the queries (same locked GMV/NMV/Orders/Units/AOV contract as Product
+// Analytics/Executive Overview). Sales Trend/Channel Comparison/Payment
+// Type/Checkout Method used to live on this page too; they now render on
+// Sales Overview instead (per explicit request), so this page only ever
+// asks for the same /api/hrh-sales-analytics payload to read its
+// voucherAssistedSales field.
 export default function SalesAnalytics({ filters }) {
   const { channel, dateRange } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [trendBucket, setTrendBucket] = useState("day");
   const [voucherBucket, setVoucherBucket] = useState("day");
 
   const ready = isDateRangeReady(dateRange);
@@ -249,86 +216,18 @@ export default function SalesAnalytics({ filters }) {
     return () => controller.abort();
   }, [channel, dateRange, ready, load]);
 
-  // Fixed trailing window, independent of the Date Range filter — see
-  // TRAILING_BUCKET_COUNT comment. Same bucketRows pattern Executive
-  // Overview's own Sales Trend uses, just summing 3 per-channel GMV keys
-  // instead of gmv/orders/units.
-  const salesTrend = bucketRows(
-    data?.salesTrendTrailing,
-    trendBucket,
-    SALES_TREND_CHANNEL_SERIES.map((s) => s.key),
-  ).slice(-TRAILING_BUCKET_COUNT[trendBucket]);
-
   return (
     <div>
       <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Sales Analytics
+        Voucher
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
-      {ready && loading && !data && <LoadingState label="Loading Sales Analytics…" />}
-      {error && <ErrorState label={`Couldn't load Sales Analytics: ${error}`} />}
+      {ready && loading && !data && <LoadingState label="Loading Voucher…" />}
+      {error && <ErrorState label={`Couldn't load Voucher: ${error}`} />}
 
       {data && !error && (
-        <>
-          <Panel
-            title="Sales Trend"
-            subtitle={`GMV by channel — last ${TRAILING_BUCKET_COUNT[trendBucket]} ${trendBucket === "day" ? "days" : trendBucket + "s"}, ending today, independent of the Date Range filter above`}
-            action={<TrendBucketPills value={trendBucket} onChange={setTrendBucket} />}
-            className="mb-4"
-          >
-            <BarComparisonChart
-              data={salesTrend}
-              series={SALES_TREND_CHANNEL_SERIES}
-              xKey="dateLabel"
-              valueFormatter={formatCompactPeso}
-              stacked={trendBucket === "day"}
-            />
-          </Panel>
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4">
-            <div className="xl:col-span-2">
-              <Panel title="Channel Comparison" className="h-full">
-                <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={data.channelComparison} />
-              </Panel>
-            </div>
-            <div className="flex flex-col gap-4 h-full">
-              <Panel
-                title="Payment Type"
-                subtitle={data.meta?.checkoutCoverageNote || "Orders share by payment method"}
-                className="flex-1 flex flex-col"
-              >
-                <div className="flex-1 flex items-center">
-                  <DonutChart
-                    segments={data.paymentType}
-                    size={84}
-                    centerValue={formatNum(data.paymentType.reduce((s, x) => s + x.value, 0))}
-                    centerLabel="Orders"
-                  />
-                </div>
-              </Panel>
-              <Panel
-                title="Checkout / Fulfillment Method"
-                subtitle={data.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}
-                className="flex-1 flex flex-col"
-              >
-                <div className="flex-1 flex items-center">
-                  <DonutChart
-                    segments={data.fulfillmentMethod}
-                    size={84}
-                    centerValue={formatNum(data.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
-                    centerLabel="Orders"
-                  />
-                </div>
-                <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
-                  A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
-                </p>
-              </Panel>
-            </div>
-          </div>
-
-          <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
-        </>
+        <VoucherAssistedSalesPanel voucherAssistedSales={data.voucherAssistedSales} bucket={voucherBucket} onBucketChange={setVoucherBucket} />
       )}
     </div>
   );

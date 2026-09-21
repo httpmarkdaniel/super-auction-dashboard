@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
+import DataTable from "../components/DataTable";
 import { LoadingState, ErrorState } from "../components/States";
-import { SalesTrendComboChart, DonutChart } from "../components/Charts";
+import { SalesTrendComboChart, DonutChart, BarComparisonChart } from "../components/Charts";
 import TrendBucketPills from "../components/TrendBucketPills";
 import { bucketRows, bucketArrayField } from "../trendBucket";
 import { hrh } from "../theme";
-import { formatPeso, formatCompactPeso, formatNum } from "../format";
+import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
 // Small inline stroke icons, same feather-style convention as
 // Sidebar.jsx's nav icons / TrafficConversion.jsx's KPI icons — kept
@@ -90,6 +91,36 @@ const CHANNEL_LABEL = {
   TIKTOK: "TikTok",
   SHOPEE: "Shopee",
 };
+
+// Moved here from the Voucher page (formerly Sales Analytics) per explicit
+// request — Sales Trend (GMV by channel)/Channel Comparison/Payment Type/
+// Checkout Method now render on Sales Overview instead, appended below this
+// page's own existing sections. Same /api/hrh-sales-analytics payload
+// (default report, no `report=executiveOverview`), fetched separately below
+// since it's a different response shape from this page's own data.
+const CHANNEL_TREND_TRAILING_BUCKET_COUNT = { day: 30, week: 4, month: 6 };
+// Colors per explicit request, not each brand's own real color — just this
+// chart's own consistent code: HMRPH Online = dark blue, TikTok = orange
+// (hrh.accent, HMR's own brand orange), Shopee = green (hrh.good).
+const SALES_TREND_CHANNEL_SERIES = [
+  { key: "gmvHmrphOnline", name: "HMRPH Online", color: hrh.series[0] },
+  { key: "gmvTiktok", name: "TikTok", color: hrh.accent },
+  { key: "gmvShopee", name: "Shopee", color: hrh.good },
+];
+function formatRateWithCount(rate, count) {
+  if (rate === null || rate === undefined) return "—";
+  return `${formatPct(rate)} (${formatNum(count)})`;
+}
+const CHANNEL_TABLE_COLUMNS = [
+  { key: "channel", label: "Channel" },
+  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
+  { key: "nmv", label: "NMV", render: (r) => formatPeso(r.nmv) },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
+  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
+  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatRateWithCount(r.cancellationRate, r.cancellations) },
+  { key: "returnRate", label: "Return Rate", render: (r) => formatRateWithCount(r.returnRate, r.returns) },
+];
 
 // Sales Trend is now a fixed trailing window (see
 // api/_hrh-executive-overview.js's trailingFrom/trailingTo), independent of the page's Date
@@ -217,6 +248,47 @@ export default function ExecutiveOverview({ filters }) {
     return () => controller.abort();
   }, [channel, params, compareTo, ready, load]);
 
+  // Second, independent fetch for the sections moved over from the Voucher
+  // page (Sales Trend by channel/Channel Comparison/Payment Type/Checkout
+  // Method) — same endpoint, default report (no report=executiveOverview),
+  // so it's a different response shape from `data` above and needs its own
+  // state/effect rather than being merged into the call above.
+  const [channelData, setChannelData] = useState(null);
+  const [channelLoading, setChannelLoading] = useState(true);
+  const [channelError, setChannelError] = useState(null);
+  const [channelTrendBucket, setChannelTrendBucket] = useState("day");
+
+  const loadChannelData = useCallback(async (ch, p, signal) => {
+    setChannelLoading(true);
+    setChannelError(null);
+    try {
+      const qs = new URLSearchParams({ channel: ch, ...p });
+      const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setChannelData(json);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setChannelError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChannelLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    loadChannelData(channel, params, controller.signal);
+    return () => controller.abort();
+  }, [channel, params, ready, loadChannelData]);
+
+  const channelSalesTrend = bucketRows(
+    channelData?.salesTrendTrailing,
+    channelTrendBucket,
+    SALES_TREND_CHANNEL_SERIES.map((s) => s.key),
+  ).slice(-CHANNEL_TREND_TRAILING_BUCKET_COUNT[channelTrendBucket]);
+
   // Fixed trailing window, independent of the Date Range filter — see
   // TRAILING_BUCKET_COUNT comment. bucketArrayField merges the per-day
   // channelBreakdown array into whichever bucket each day lands in, keyed
@@ -241,7 +313,7 @@ export default function ExecutiveOverview({ filters }) {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-            Executive Overview
+            Sales Overview
           </div>
           <p className="text-[12px] mt-0.5" style={{ color: "#5b6573" }}>
             Key performance metrics and trends for HRH Online
@@ -334,6 +406,72 @@ export default function ExecutiveOverview({ filters }) {
             <Panel title="Customer Segments" subtitle="HMRPH Online only — not affected by the Channel filter above">
               <DonutChart segments={customerSegments} centerValue={formatNum(totalCustomerSegmentCount)} centerLabel="HMRPH Online Orders" />
             </Panel>
+          </div>
+        </>
+      )}
+
+      {/* Moved from the Voucher page (formerly Sales Analytics) per explicit
+          request — own fetch/loading/error state (channelData/channelLoading/
+          channelError above), independent of this page's own `data`. */}
+      {channelError && <ErrorState label={`Couldn't load Sales Trend/Channel Comparison: ${channelError}`} />}
+      {ready && channelLoading && !channelData && <LoadingState label="Loading Channel Comparison…" />}
+
+      {channelData && !channelError && (
+        <>
+          <Panel
+            title="Sales Trend"
+            subtitle={`GMV by channel — last ${CHANNEL_TREND_TRAILING_BUCKET_COUNT[channelTrendBucket]} ${channelTrendBucket === "day" ? "days" : channelTrendBucket + "s"}, ending today, independent of the Date Range filter above`}
+            action={<TrendBucketPills value={channelTrendBucket} onChange={setChannelTrendBucket} />}
+            className="mb-4"
+          >
+            <BarComparisonChart
+              data={channelSalesTrend}
+              series={SALES_TREND_CHANNEL_SERIES}
+              xKey="dateLabel"
+              valueFormatter={formatCompactPeso}
+              stacked={channelTrendBucket === "day"}
+            />
+          </Panel>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div className="xl:col-span-2">
+              <Panel title="Channel Comparison" className="h-full">
+                <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={channelData.channelComparison} />
+              </Panel>
+            </div>
+            <div className="flex flex-col gap-4 h-full">
+              <Panel
+                title="Payment Type"
+                subtitle={channelData.meta?.checkoutCoverageNote || "Orders share by payment method"}
+                className="flex-1 flex flex-col"
+              >
+                <div className="flex-1 flex items-center">
+                  <DonutChart
+                    segments={channelData.paymentType}
+                    size={84}
+                    centerValue={formatNum(channelData.paymentType.reduce((s, x) => s + x.value, 0))}
+                    centerLabel="Orders"
+                  />
+                </div>
+              </Panel>
+              <Panel
+                title="Checkout / Fulfillment Method"
+                subtitle={channelData.meta?.checkoutCoverageNote || "Orders share by fulfillment method"}
+                className="flex-1 flex flex-col"
+              >
+                <div className="flex-1 flex items-center">
+                  <DonutChart
+                    segments={channelData.fulfillmentMethod}
+                    size={84}
+                    centerValue={formatNum(channelData.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
+                    centerLabel="Orders"
+                  />
+                </div>
+                <p className="text-[11px] mt-2.5" style={{ color: "#94a0ae" }}>
+                  A separate dimension from Payment Type above — Pickup is fulfillment behavior, not a payment method.
+                </p>
+              </Panel>
+            </div>
           </div>
         </>
       )}

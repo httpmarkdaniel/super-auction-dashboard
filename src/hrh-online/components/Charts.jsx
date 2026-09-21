@@ -348,6 +348,7 @@ export function PairedBarLineChart({
   lineLabel = "Orders",
   lineName = (name) => `${name} (${lineLabel})`,
   showLines = false,
+  stacked = false,
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -369,8 +370,17 @@ export function PairedBarLineChart({
         )}
         <Tooltip content={<PairedComboTooltip barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} lineLabel={lineLabel} />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
-        {series.map((s) => (
-          <Bar key={`${s.key}__bar`} yAxisId="bar" dataKey={`${s.key}__bar`} name={s.name} fill={s.color} radius={[2, 2, 0, 0]} maxBarSize={18} />
+        {series.map((s, i) => (
+          <Bar
+            key={`${s.key}__bar`}
+            yAxisId="bar"
+            dataKey={`${s.key}__bar`}
+            name={s.name}
+            stackId={stacked ? "1" : undefined}
+            fill={s.color}
+            radius={stacked && i < series.length - 1 ? [0, 0, 0, 0] : [2, 2, 0, 0]}
+            maxBarSize={18}
+          />
         ))}
         {showLines &&
           series.map((s) => (
