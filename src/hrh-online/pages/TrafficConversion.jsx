@@ -220,8 +220,8 @@ export default function TrafficConversion({ filters }) {
 
   const hrhData = data?.hrh;
   const hrhTrend = hrhData?.dailyTrend || [];
-  const wholeExclHrh = data?.wholeExclHrh;
-  const wholeTrend = wholeExclHrh?.dailyTrend || [];
+  const wholeSite = data?.wholeSite;
+  const wholeTrend = wholeSite?.dailyTrend || [];
   const branchData = data?.branch;
   const branchTrend = branchData?.dailyTrend || [];
   const branches = data?.meta?.branches || [];
@@ -238,11 +238,12 @@ export default function TrafficConversion({ filters }) {
 
       {data && !error && (
         <>
-          {/* Whole Site (excluding HRH Online) — added on top, per explicit
-              request, so it's a direct comparison against the HRH-Online-
-              scoped section below rather than a separate page. See
-              api/_hrh-traffic-analytics.js's wholeSiteRows/otherBranches*
-              comments for the source and how "excluding HRH" is computed. */}
+          {/* Whole Site — the sum of the 6 OTHER branches that currently
+              have a real online store (Pioneer/Cainta/Sucat/Mabalacat/Santa
+              Rosa Road/Subic — never HRH Online), added on top per explicit
+              request so it's a direct comparison against the HRH-Online-
+              scoped section below. See api/_hrh-traffic-analytics.js's
+              BRANCHES/wholeSiteRows comments. */}
           <div className="flex items-start justify-between gap-3 mb-3">
             <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
               Whole Site
@@ -251,7 +252,7 @@ export default function TrafficConversion({ filters }) {
               className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
               style={{ background: hrh.blueSoft, color: hrh.blueText }}
             >
-              All of hmr.ph, Excluding HRH Online
+              Pioneer + Cainta + Sucat + Mabalacat + Santa Rosa Road + Subic
             </span>
           </div>
           <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
@@ -259,13 +260,13 @@ export default function TrafficConversion({ filters }) {
           </div>
 
           <TrafficKpiFunnelSection
-            kpis={wholeExclHrh.kpis}
+            kpis={wholeSite.kpis}
             trend={wholeTrend}
-            funnelStages={wholeExclHrh.funnel}
-            funnelSubtitle="Page Views -> Users -> Add to Cart -> Begin Checkout -> Checkout -> Completed Order"
-            totalRevenue={wholeExclHrh.totalRevenue}
-            newVsReturning={wholeExclHrh.newVsReturning}
-            newVsReturningSubtitle="Share of users in this period, whole site excluding HRH Online — 'New' is a real first_visit event."
+            funnelStages={wholeSite.funnel}
+            funnelSubtitle="Page Views -> Users -> Checkout -> Completed Order"
+            totalRevenue={wholeSite.totalRevenue}
+            newVsReturning={wholeSite.newVsReturning}
+            newVsReturningSubtitle="Share of users in this period, across all 6 branches — see api file comment: GA4's “new” is whole-property, not per-branch, so this skews heavily Returning"
           />
 
           <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />

@@ -449,54 +449,42 @@ export async function handleTrafficAnalytics(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      // WHOLE-SITE (all of hmr.ph, every page/store — not just HRH Online's
-      // /shop/ONP pages) — added for direct comparison against the
-      // HRH-scoped numbers above. ga4_events_report is (date, eventName)
-      // grain with NO page dimension, so it can't be scoped to one store —
-      // but that's exactly what makes it the right source for a genuine
-      // whole-site total (see file-header comment on why this table was
-      // originally tried and reverted for the HRH-only numbers specifically).
-      // Verified directly against production ClickHouse before writing this:
-      // for 2026-09-15, sum(eventCount) WHERE eventName='page_view' = 32,931,
-      // an EXACT match to sum(screenPageViews) across every pagePath row in
-      // ga4_pages_path_report for that same date — confirming this table's
-      // page_view eventCount really is whole-site Page Views, not a
-      // different/incompatible number. totalUsers, by contrast, is NOT
-      // safe to sum across ga4_pages_path_report's many pagePath rows (a
-      // user who viewed 2 pages gets counted twice) — that inflated 23,780
-      // vs this table's real distinct 12,917 page_view users for the same
-      // day, so Users/New Users below come from here, not that table.
-      // 'first_visit' fires exactly once per user, on their first-ever
-      // session — so its totalUsers IS that day's New Users, whole-site.
+      // WHOLE SITE — per explicit correction, this means the sum of the 6
+      // OTHER branches that currently have a real online store (see
+      // BRANCHES), NOT literally every page/store on hmr.ph. Same table/
+      // shape as HRH Online's own Users/Page Views query above, just with
+      // every branch's /shop/{code} + /search/stores/{code} pages instead
+      // of ONP's — same real GA4 data, same methodology, just a wider (but
+      // still exactly enumerated) page scope. Summing Users across these 12
+      // pages has the same small multi-page double-count caveat HRH
+      // Online's own 2-page sum already carries — just scaled up slightly
+      // (6 known stores, not "every page on the site").
       client
         .query({
           query: `
             SELECT
               date,
-              eventName,
               sum(totalUsers) AS users,
-              sum(eventCount) AS events,
-              sum(totalRevenue) AS revenue
-            FROM ga4.ga4_events_report FINAL
+              sum(newUsers) AS newUsers,
+              sum(screenPageViews) AS pageViews
+            FROM ga4.ga4_pages_path_report FINAL
             WHERE property_id = {propertyId:String}
-              AND eventName IN {events:Array(String)}
+              AND pagePath IN {paths:Array(String)}
               AND date BETWEEN {superFrom:String} AND {superTo:String}
-            GROUP BY date, eventName
+            GROUP BY date
           `,
           query_params: {
             propertyId: GA4_PROPERTY_ID,
-            events: ["page_view", "first_visit", "add_to_cart", "begin_checkout", "purchase"],
+            paths: BRANCHES.flatMap((b) => [`/shop/${b.code}`, `/search/stores/${b.code}`]),
             superFrom: superFromKey,
             superTo: superToKey,
           },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      // Real GMV for EVERY OTHER branch's website channel, i.e. "whole site
-      // excluding HRH Online" Revenue — same table/shape as the HRH-only
-      // sales query above, just `!=` instead of `=`. Real order records
-      // carry store_name, so this is an exact subtraction (unlike Users
-      // below, which has no store dimension to filter on directly).
+      // Real GMV (Revenue) for those same 6 branches' website channel — same
+      // table/shape as the HRH-only sales query above, just `IN` the 6
+      // branch store names instead of `=` HRH_STORE.
       client
         .query({
           query: `
@@ -504,20 +492,23 @@ export async function handleTrafficAnalytics(req, res) {
               transaction_date AS d,
               sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
             FROM xv3.mart_net_sales
-            WHERE store_name != {store:String}
+            WHERE store_name IN {stores:Array(String)}
               AND sales_channel IN {channels:Array(String)}
               AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
             GROUP BY transaction_date
           `,
-          query_params: { store: HRH_STORE, channels: HMRPH_ONLINE_CHANNEL, prevFrom: previous.from, curTo: current.to },
+          query_params: {
+            stores: BRANCHES.map((b) => b.storeName),
+            channels: HMRPH_ONLINE_CHANNEL,
+            prevFrom: previous.from,
+            curTo: current.to,
+          },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       // Orders (raw, every checkout regardless of outcome) + Completed
-      // Order (payment_status = 'Paid') for EVERY OTHER branch — same table/
-      // shape as the HRH-only order-status query above. mart_xv3_order_report
-      // carries store_name for every branch (verified), so — like GMV above
-      // — this is a real, exact "not HRH" count, not a GA4-event approximation.
+      // Order (payment_status = 'Paid') for those same 6 branches — same
+      // table/shape as the HRH-only order-status query above.
       client
         .query({
           query: `
@@ -526,11 +517,11 @@ export async function handleTrafficAnalytics(req, res) {
               count() AS orders,
               countIf(payment_status = 'Paid') AS paid
             FROM xv3.mart_xv3_order_report
-            WHERE store_name != {store:String}
+            WHERE store_name IN {stores:Array(String)}
               AND toDate(created_at) BETWEEN {prevFrom:String} AND {curTo:String}
             GROUP BY d
           `,
-          query_params: { store: HRH_STORE, prevFrom: previous.from, curTo: current.to },
+          query_params: { stores: BRANCHES.map((b) => b.storeName), prevFrom: previous.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -594,8 +585,8 @@ export async function handleTrafficAnalytics(req, res) {
       salesRows,
       orderStatusRows,
       wholeSiteRows,
-      otherBranchesSalesRows,
-      otherBranchesOrderStatusRows,
+      wholeSiteSalesRows,
+      wholeSiteOrderStatusRows,
       branchPageRows = [],
       branchSalesRows = [],
       branchOrderStatusRows = [],
@@ -607,68 +598,14 @@ export async function handleTrafficAnalytics(req, res) {
     const hrhOrderAgg = aggregateOrderStatusRows(orderStatusRows, current, previous);
     const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current);
 
-    // --- WHOLE SITE EXCLUDING HRH ONLINE ---
-    // Users/Page Views: ga4_events_report's whole-property totals (no page
-    // dimension) minus HRH's own page-scoped totals above — valid, exact
-    // subtraction for Page Views (both sides are the same "page_view"
-    // metric, verified equal in the comment below); Users/New Users are
-    // subtracted the same way but are a small approximation (a visitor who
-    // viewed both HRH's pages and other pages this window is removed
-    // entirely, not split between the two sides) — negligible in practice
-    // since HRH is a small fraction of whole-site traffic, but not exact
-    // the way Page Views is.
-    // Orders/Completed Order/Revenue: real order records (mart_xv3_order_
-    // report / mart_net_sales) filtered to store_name != 'HRH ONLINE' — an
-    // exact "not HRH" subtraction, no GA4-event mixing at all.
-    const wholeSiteAgg = { pageViewUsers: 0, pageViews: 0, firstVisitUsers: 0, addToCart: 0, beginCheckout: 0 };
-    const wholeSitePrevAgg = { pageViewUsers: 0, pageViews: 0 };
-    const wholeSitePageViewsByDate = new Map(); // date (yyyymmdd) -> whole-site page views (current window only)
-    const wholeSiteUsersByDate = new Map(); // date (yyyymmdd) -> whole-site page_view users (current window only)
-    for (const r of wholeSiteRows) {
-      const users = toNum(r.users);
-      const events = toNum(r.events);
-      const inCurrent = r.date >= curFromKey && r.date <= curToKey;
-      const inPrevious = r.date >= prevFromKey && r.date <= prevToKey;
-      if (inCurrent) {
-        if (r.eventName === "page_view") {
-          wholeSiteAgg.pageViewUsers += users;
-          wholeSiteAgg.pageViews += events;
-          wholeSitePageViewsByDate.set(r.date, events);
-          wholeSiteUsersByDate.set(r.date, users);
-        } else if (r.eventName === "first_visit") wholeSiteAgg.firstVisitUsers += users;
-        else if (r.eventName === "add_to_cart") wholeSiteAgg.addToCart += events;
-        else if (r.eventName === "begin_checkout") wholeSiteAgg.beginCheckout += events;
-      } else if (inPrevious && r.eventName === "page_view") {
-        wholeSitePrevAgg.pageViewUsers += users;
-        wholeSitePrevAgg.pageViews += events;
-      }
-    }
-    const exclPageAgg = {
-      curUsers: Math.max(wholeSiteAgg.pageViewUsers - hrhPageAgg.curUsers, 0),
-      curNewUsers: Math.max(wholeSiteAgg.firstVisitUsers - hrhPageAgg.curNewUsers, 0),
-      curPageViews: wholeSiteAgg.pageViews - hrhPageAgg.curPageViews,
-      prevUsers: Math.max(wholeSitePrevAgg.pageViewUsers - hrhPageAgg.prevUsers, 0),
-      prevPageViews: wholeSitePrevAgg.pageViews - hrhPageAgg.prevPageViews,
-      usersByDate: new Map(
-        enumerateDatesISO(current.from, current.to).map((iso) => {
-          const key = isoToYyyymmdd(iso);
-          return [key, Math.max((wholeSiteUsersByDate.get(key) || 0) - (hrhPageAgg.usersByDate.get(key) || 0), 0)];
-        }),
-      ),
-      pageViewsByDate: new Map(
-        enumerateDatesISO(current.from, current.to).map((iso) => {
-          const key = isoToYyyymmdd(iso);
-          return [key, (wholeSitePageViewsByDate.get(key) || 0) - (hrhPageAgg.pageViewsByDate.get(key) || 0)];
-        }),
-      ),
-    };
-    exclPageAgg.curReturningUsers = Math.max(exclPageAgg.curUsers - exclPageAgg.curNewUsers, 0);
-    const exclGmvAgg = aggregateGmvRows(otherBranchesSalesRows, current, previous);
-    const exclOrderAgg = aggregateOrderStatusRows(otherBranchesOrderStatusRows, current, previous);
-    const wholeExclHrhSection = buildTrafficSection(exclPageAgg, exclGmvAgg, exclOrderAgg, current, [
-      { stage: "Add to Cart", count: wholeSiteAgg.addToCart },
-      { stage: "Begin Checkout", count: wholeSiteAgg.beginCheckout },
-    ]);
+    // --- WHOLE SITE — the 6 other branches with a real online store, see
+    // BRANCHES/wholeSiteRows query comment. Identical methodology to HRH
+    // Online, just a wider (still exactly enumerated) page/store scope, so
+    // this reuses the exact same aggregation helpers. ---
+    const wholeSitePageAgg = aggregatePageRows(wholeSiteRows, curFromKey, curToKey, prevFromKey, prevToKey);
+    const wholeSiteGmvAgg = aggregateGmvRows(wholeSiteSalesRows, current, previous);
+    const wholeSiteOrderAgg = aggregateOrderStatusRows(wholeSiteOrderStatusRows, current, previous);
+    const wholeSiteSection = buildTrafficSection(wholeSitePageAgg, wholeSiteGmvAgg, wholeSiteOrderAgg, current);
 
     // --- Optional selected Branch — identical shape/methodology to HRH
     // Online above, just a different code/store_name (see BRANCHES). ---
@@ -692,13 +629,13 @@ export async function handleTrafficAnalytics(req, res) {
         scopeNote:
           "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Orders/Completed Order: real order-status counts from HRH Online's own order records (Orders = every checkout regardless of later cancellation; Completed Order = payment_status 'Paid' — a different question from Real Orders Received elsewhere, which nets out cancellations). Revenue: real HRH Online website sales (HMRPH Online channel). Add to Cart is omitted, not zeroed: no scoped source exists for it anywhere in this warehouse.",
         wholeSiteScopeNote:
-          "Whole Site: every page/branch on hmr.ph EXCEPT HRH Online. Users/Page Views come from GA4's whole-property event totals minus HRH Online's own page-scoped totals (Page Views: exact; Users/New Users: a small approximation — see code comment). Orders/Completed Order/Revenue come from real order records (mart_xv3_order_report/mart_net_sales) filtered to every branch except HRH Online — an exact subtraction, not a GA4-event approximation.",
+          "Whole Site: the sum of the 6 OTHER branches that currently have a real online store — Pioneer, Cainta, Sucat, Mabalacat, Santa Rosa Road, Subic (not HRH Online, and not literally every page on hmr.ph) — same methodology as HRH Online below (real GA4 page traffic for each branch's own /shop/{code} + /search/stores/{code} pages, real order records for Orders/Completed Order/Revenue), just summed across all 6.",
         branchScopeNote:
           "Branch: same methodology as HRH Online above (real GA4 page traffic for that branch's own /shop/{code} + /search/stores/{code} pages, real order records for Orders/Completed Order/Revenue) — a different store_name, not an approximation.",
         generatedAt: new Date().toISOString(),
       },
       hrh: hrhSection,
-      wholeExclHrh: wholeExclHrhSection,
+      wholeSite: wholeSiteSection,
       branch: branchSection,
     });
   } catch (err) {
