@@ -103,7 +103,6 @@ export default function SalesOverview({ filters }) {
         stats={[
           { label: "Total Sales", value: formatCompactPeso(data.hero.totalSales.value), delta: data.hero.totalSales.delta, sub: "vs previous period" },
           { label: "Units Sold", value: formatNum(data.hero.unitsSold.value), delta: data.hero.unitsSold.delta, sub: "vs previous period" },
-          { label: "Sell-Through Rate", value: data.hero.sellThroughPct === null ? "—" : formatPct(data.hero.sellThroughPct), sub: "vs current inventory" },
         ]}
       />
 
