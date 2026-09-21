@@ -238,6 +238,61 @@ export default function TrafficConversion({ filters }) {
 
       {data && !error && (
         <>
+          {/* Branch picker — moved to the very TOP of the page (was
+              previously the 3rd section, after two full KPI/trend/funnel
+              blocks — easy to miss without a lot of scrolling) so it's the
+              first thing visible, no scrolling required. HRH Online is
+              never an option here (see api file's BRANCHES comment). */}
+          <div
+            className="rounded-lg p-4 mb-6 flex items-center justify-between gap-3 flex-wrap"
+            style={{ border: `1px solid ${hrh.border}`, background: hrh.surface }}
+          >
+            <div>
+              <div className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
+                Compare a Branch
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: hrh.muted }}>
+                Pick any one other branch to see its Traffic &amp; Conversion below, using the same methodology as HRH Online.
+              </p>
+            </div>
+            <select
+              value={branchCode}
+              onChange={(e) => setBranchCode(e.target.value)}
+              className="text-[13px] rounded-md px-3 py-2 outline-none font-medium"
+              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+            >
+              <option value="">Select a branch…</option>
+              {branches.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {branchCode && branchData && (
+            <>
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
+                  Branch — {branchData.label}
+                </span>
+              </div>
+              <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
+                {data.meta?.branchScopeNote}
+              </div>
+              <TrafficKpiFunnelSection
+                kpis={branchData.kpis}
+                trend={branchTrend}
+                funnelStages={branchData.funnel}
+                funnelSubtitle={`Page Views -> Users -> Checkout -> Completed Order (${branchData.label})`}
+                totalRevenue={branchData.totalRevenue}
+                newVsReturning={branchData.newVsReturning}
+                newVsReturningSubtitle={`Share of users in this period (${branchData.label}) — same GA4 "new" caveat as HRH Online below.`}
+              />
+              <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
+            </>
+          )}
+
           {/* Whole Site — the sum of the 6 OTHER branches that currently
               have a real online store (Pioneer/Cainta/Sucat/Mabalacat/Santa
               Rosa Road/Subic — never HRH Online), added on top per explicit
@@ -295,51 +350,6 @@ export default function TrafficConversion({ filters }) {
             newVsReturning={hrhData.newVsReturning}
             newVsReturningSubtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning"
           />
-
-          <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
-
-          {/* Branch — pick any ONE other branch with its own real online
-              store (HRH Online is never an option here, see api file's
-              BRANCHES comment) for the same comparison, one at a time. */}
-          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-            <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
-              Branch
-            </span>
-            <select
-              value={branchCode}
-              onChange={(e) => setBranchCode(e.target.value)}
-              className="text-[12px] rounded-md px-2.5 py-1.5 outline-none"
-              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
-            >
-              <option value="">Select a branch…</option>
-              {branches.map((b) => (
-                <option key={b.code} value={b.code}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {!branchCode && (
-            <EmptyState label="Pick a branch above to see its Traffic & Conversion, using the same methodology as HRH Online." />
-          )}
-
-          {branchCode && branchData && (
-            <>
-              <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
-                {data.meta?.branchScopeNote}
-              </div>
-              <TrafficKpiFunnelSection
-                kpis={branchData.kpis}
-                trend={branchTrend}
-                funnelStages={branchData.funnel}
-                funnelSubtitle={`Page Views -> Users -> Checkout -> Completed Order (${branchData.label})`}
-                totalRevenue={branchData.totalRevenue}
-                newVsReturning={branchData.newVsReturning}
-                newVsReturningSubtitle={`Share of users in this period (${branchData.label}) — same GA4 "new" caveat as HRH Online above.`}
-              />
-            </>
-          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
