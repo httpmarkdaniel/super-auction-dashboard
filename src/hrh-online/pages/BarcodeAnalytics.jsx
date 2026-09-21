@@ -66,16 +66,42 @@ const STAGE_ITEM_COLUMNS = [
   { key: "timestamp", label: "Timestamp", render: (r) => formatStageTime(r.stageAt) },
 ];
 
+// Clickable column header for the On-Hand Stock table's two sortable
+// columns (Qty/Stock Value) — click toggles asc/desc, an arrow marks
+// whichever column is currently active. Plain label text for every other
+// DataTable on this page/site — this is the only table on this page that
+// needs sorting, so it's kept page-local rather than a generic DataTable feature.
+function SortableHeader({ label, active, dir, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1 uppercase tracking-[0.04em]" style={{ color: "#fff" }}>
+      {label}
+      <span style={{ opacity: active ? 1 : 0.35 }}>{active && dir === "asc" ? "▲" : "▼"}</span>
+    </button>
+  );
+}
+
 // On-Hand Stock table columns — Product/Qty/Stock Value, per explicit
 // request. `onHandStock` is a live current-inventory snapshot (see
 // api/_hrh-barcode-analytics.js's computeOnHandStock), independent of the
 // page's Date Range filter, so it's rendered above the lifecycle funnel
-// (which IS date-scoped) rather than mixed into it.
-const ON_HAND_STOCK_COLUMNS = [
-  { key: "product", label: "Product", maxWidth: 360 },
-  { key: "qty", label: "On-Hand Qty", render: (r) => formatNum(r.qty) },
-  { key: "stockValue", label: "On-Hand Stock Value", render: (r) => formatPeso(r.stockValue) },
-];
+// (which IS date-scoped) rather than mixed into it. Qty/Stock Value are
+// both sortable (click the header); Product isn't, per explicit request
+// ("sort by value and qty").
+function onHandStockColumns(sortKey, sortDir, onSort) {
+  return [
+    { key: "product", label: "Product", maxWidth: 360 },
+    {
+      key: "qty",
+      label: <SortableHeader label="On-Hand Qty" active={sortKey === "qty"} dir={sortDir} onClick={() => onSort("qty")} />,
+      render: (r) => formatNum(r.qty),
+    },
+    {
+      key: "stockValue",
+      label: <SortableHeader label="On-Hand Stock Value" active={sortKey === "stockValue"} dir={sortDir} onClick={() => onSort("stockValue")} />,
+      render: (r) => formatPeso(r.stockValue),
+    },
+  ];
+}
 
 function formatDays(days) {
   if (days === null || days === undefined) return "—";
@@ -211,6 +237,8 @@ export default function BarcodeAnalytics({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [stockSortKey, setStockSortKey] = useState("stockValue");
+  const [stockSortDir, setStockSortDir] = useState("desc");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -242,6 +270,19 @@ export default function BarcodeAnalytics({ filters }) {
 
   const funnel = data?.lifecycleFunnel;
   const onHandStock = data?.onHandStock;
+  const sortedOnHandStockItems = useMemo(() => {
+    if (!onHandStock?.items) return [];
+    const sign = stockSortDir === "asc" ? 1 : -1;
+    return [...onHandStock.items].sort((a, b) => sign * (a[stockSortKey] - b[stockSortKey]));
+  }, [onHandStock, stockSortKey, stockSortDir]);
+  function toggleStockSort(key) {
+    if (key === stockSortKey) {
+      setStockSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setStockSortKey(key);
+      setStockSortDir("desc");
+    }
+  }
 
   return (
     <div>
@@ -261,8 +302,8 @@ export default function BarcodeAnalytics({ filters }) {
           </KpiRow>
           <div className="mt-4">
             <DataTable
-              columns={ON_HAND_STOCK_COLUMNS}
-              rows={onHandStock.items}
+              columns={onHandStockColumns(stockSortKey, stockSortDir, toggleStockSort)}
+              rows={sortedOnHandStockItems}
               paginate
               pageSize={10}
               emptyLabel="No products currently on hand."
