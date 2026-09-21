@@ -84,6 +84,28 @@ const ONP_PAGE_PATHS = ["/shop/ONP", "/search/stores/ONP"];
 const HRH_STORE = "HRH ONLINE";
 const HMRPH_ONLINE_CHANNEL = ["HMRPH ONLINE"];
 
+// Other branches that currently have their own real online store, per
+// explicit list — same /shop/{code} + /search/stores/{code} GA4 page
+// pattern as HRH Online's own ONP, and a real xv3.stores row mapping each
+// code to its current store_name (used to scope the Orders/Revenue
+// queries the same way HRH_STORE does above). Several OTHER codes
+// (CUB/CEBU/RCDO/HCM/FVT/HTO) also have real GA4 traffic on this same
+// page pattern, but were deliberately left out — not currently real
+// online stores, per explicit correction — so this list is intentionally
+// narrower than "every code with GA4 traffic." Deliberately excludes HRH
+// Online itself (that's the section above, not a dropdown option).
+const BRANCHES = [
+  { code: "PIO", storeName: "PIONEER", label: "Pioneer" },
+  { code: "CTA", storeName: "S AND C CAINTA", label: "Cainta" },
+  { code: "HSR", storeName: "HMR SUCAT", label: "Sucat" },
+  { code: "MAB", storeName: "MABALACAT", label: "Mabalacat" },
+  { code: "SRR", storeName: "HMR TAGAYTAY ROAD", label: "Santa Rosa Road" },
+  { code: "SUB", storeName: "SUBIC MAIN", label: "Subic" },
+];
+function findBranch(code) {
+  return BRANCHES.find((b) => b.code === code) || null;
+}
+
 function toNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -94,6 +116,134 @@ function safeDivide(a, b) {
 function pctDelta(current, previous) {
   if (!previous) return null;
   return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+// ---------------------------------------------------------------------
+// Shared per-scope aggregation — the exact same shape of work (GA4 page
+// rows -> Users/Page Views, real GMV rows -> Revenue, real order-status
+// rows -> Orders/Completed Order) now happens for 3 scopes (HRH Online,
+// Whole Site excluding HRH, and an optional selected Branch), so it's
+// factored into these 3 functions rather than copy-pasted 3 times.
+// ---------------------------------------------------------------------
+function aggregatePageRows(rows, curFromKey, curToKey, prevFromKey, prevToKey) {
+  let curUsers = 0;
+  let curNewUsers = 0;
+  let curPageViews = 0;
+  let prevUsers = 0;
+  let prevPageViews = 0;
+  const usersByDate = new Map(); // date (yyyymmdd) -> users (current window only)
+  const pageViewsByDate = new Map(); // date (yyyymmdd) -> page views (current window only)
+  for (const r of rows) {
+    const users = toNum(r.users);
+    const newUsers = toNum(r.newUsers);
+    const pageViews = toNum(r.pageViews);
+    if (r.date >= curFromKey && r.date <= curToKey) {
+      curUsers += users;
+      curNewUsers += newUsers;
+      curPageViews += pageViews;
+      usersByDate.set(r.date, (usersByDate.get(r.date) || 0) + users);
+      pageViewsByDate.set(r.date, (pageViewsByDate.get(r.date) || 0) + pageViews);
+    } else if (r.date >= prevFromKey && r.date <= prevToKey) {
+      prevUsers += users;
+      prevPageViews += pageViews;
+    }
+  }
+  // See the ONP-scoped comment this was lifted from: GA4's `newUsers` is
+  // scoped to the WHOLE property, not to these specific pages, so this
+  // skews heavily Returning for any specific page/store scope.
+  const curReturningUsers = Math.max(curUsers - curNewUsers, 0);
+  return { curUsers, curNewUsers, curReturningUsers, curPageViews, prevUsers, prevPageViews, usersByDate, pageViewsByDate };
+}
+function aggregateGmvRows(rows, current, previous) {
+  let curGmv = 0;
+  let prevGmv = 0;
+  const gmvByDate = new Map(); // date (ISO) -> gmv (current window only)
+  for (const r of rows) {
+    const gmv = toNum(r.gmv);
+    if (r.d >= current.from && r.d <= current.to) {
+      curGmv += gmv;
+      gmvByDate.set(r.d, (gmvByDate.get(r.d) || 0) + gmv);
+    } else if (r.d >= previous.from && r.d <= previous.to) {
+      prevGmv += gmv;
+    }
+  }
+  return { curGmv, prevGmv, gmvByDate };
+}
+function aggregateOrderStatusRows(rows, current, previous) {
+  let curOrders = 0;
+  let curPaidOrders = 0;
+  let prevOrders = 0;
+  const ordersByDate = new Map(); // date (ISO) -> orders (current window only)
+  for (const r of rows) {
+    const orders = toNum(r.orders);
+    const paid = toNum(r.paid);
+    if (r.d >= current.from && r.d <= current.to) {
+      curOrders += orders;
+      curPaidOrders += paid;
+      ordersByDate.set(r.d, (ordersByDate.get(r.d) || 0) + orders);
+    } else if (r.d >= previous.from && r.d <= previous.to) {
+      prevOrders += orders;
+    }
+  }
+  return { curOrders, curPaidOrders, prevOrders, ordersByDate };
+}
+
+// Builds the {kpis, funnel, totalRevenue, newVsReturning, dailyTrend} shape
+// every section (HRH Online, Whole Site excl. HRH, a selected Branch)
+// renders with the same frontend component. `extraFunnelStages` (e.g. Add
+// to Cart for Whole Site, which has no page-dimension limitation) are
+// inserted between Users and Checkout.
+function buildTrafficSection(pageAgg, gmvAgg, orderAgg, current, extraFunnelStages = []) {
+  const conversionRate = safeDivide(orderAgg.curOrders, pageAgg.curPageViews) * 100;
+  const prevConversionRate = safeDivide(orderAgg.prevOrders, pageAgg.prevPageViews) * 100;
+  const revPerView = safeDivide(gmvAgg.curGmv, pageAgg.curPageViews);
+  const prevRevPerView = safeDivide(gmvAgg.prevGmv, pageAgg.prevPageViews);
+  const viewsPerUser = safeDivide(pageAgg.curPageViews, pageAgg.curUsers);
+  const prevViewsPerUser = safeDivide(pageAgg.prevPageViews, pageAgg.prevUsers);
+
+  const kpis = {
+    users: { value: pageAgg.curUsers, delta: pctDelta(pageAgg.curUsers, pageAgg.prevUsers) },
+    pageViews: { value: pageAgg.curPageViews, delta: pctDelta(pageAgg.curPageViews, pageAgg.prevPageViews) },
+    // "Orders" — raw checkout count, regardless of outcome (see
+    // aggregateOrderStatusRows' source comment). Replaces the old
+    // net-of-cancellation "Purchases" KPI per explicit request.
+    orders: { value: orderAgg.curOrders, delta: pctDelta(orderAgg.curOrders, orderAgg.prevOrders) },
+    conversionRate: { value: conversionRate, delta: pctDelta(conversionRate, prevConversionRate) },
+    revenuePerView: { value: revPerView, delta: pctDelta(revPerView, prevRevPerView) },
+    pageViewsPerUser: { value: viewsPerUser, delta: pctDelta(viewsPerUser, prevViewsPerUser) },
+  };
+
+  const funnel = [
+    { stage: "Page Views", count: pageAgg.curPageViews },
+    { stage: "Users", count: pageAgg.curUsers },
+    ...extraFunnelStages,
+    { stage: "Checkout", count: orderAgg.curOrders },
+    { stage: "Completed Order", count: orderAgg.curPaidOrders },
+  ];
+
+  const newVsReturning = [
+    { label: "New Users", value: pageAgg.curNewUsers },
+    { label: "Returning Users", value: pageAgg.curReturningUsers },
+  ];
+
+  const dailyTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
+    const key = isoToYyyymmdd(iso);
+    const users = pageAgg.usersByDate.get(key) || 0;
+    const pageViews = pageAgg.pageViewsByDate.get(key) || 0;
+    const orders = orderAgg.ordersByDate.get(iso) || 0;
+    const gmv = gmvAgg.gmvByDate.get(iso) || 0;
+    return {
+      date: iso,
+      users,
+      pageViews,
+      orders,
+      conversionRate: safeDivide(orders, pageViews) * 100,
+      revenuePerView: safeDivide(gmv, pageViews),
+      pageViewsPerUser: safeDivide(pageViews, users),
+    };
+  });
+
+  return { kpis, funnel, totalRevenue: gmvAgg.curGmv, newVsReturning, dailyTrend };
 }
 
 // ---------------------------------------------------------------------
@@ -214,6 +364,7 @@ export async function handleTrafficAnalytics(req, res) {
   try {
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
+    const branch = findBranch(req.query.branch);
 
     let current;
     let previous;
@@ -229,7 +380,10 @@ export async function handleTrafficAnalytics(req, res) {
     const prevFromKey = isoToYyyymmdd(previous.from);
     const prevToKey = isoToYyyymmdd(previous.to);
 
-    const [pageRows, salesRows, orderStatusRows, wholeSiteRows] = await Promise.all([
+    // Base queries (always run) + optional branch-scoped ones, appended
+    // conditionally so a request with no `branch` selected doesn't pay for
+    // 3 extra round-trips it won't use.
+    const queryResults = await Promise.all([
       // Users + Page Views on HRH Online's own storefront pages only (see
       // file-header comment) — one query spanning the whole
       // previous+current super-range, grouped by date.
@@ -251,15 +405,15 @@ export async function handleTrafficAnalytics(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      // Real orders + GMV for HRH Online's own website channel (see
-      // file-header comment on why this replaces GA4 purchase events) — one
+      // Real GMV (Revenue) for HRH Online's own website channel — one
       // query spanning the same super-range, grouped by transaction_date.
+      // Orders/Completed Order (below) are the order-COUNT metrics; this is
+      // only ever used for the Revenue/Revenue-per-View numbers.
       client
         .query({
           query: `
             SELECT
               transaction_date AS d,
-              uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
               sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
@@ -271,9 +425,14 @@ export async function handleTrafficAnalytics(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      // Checkout + Payment Confirmed funnel stages (see file-header comment
-      // on why these deliberately count every order regardless of later
-      // cancellation, unlike Purchases/Real Orders Received elsewhere).
+      // Orders (raw, every checkout regardless of outcome) + Completed
+      // Order (payment_status = 'Paid') — the funnel's Checkout/Completed
+      // Order stages, and now also the "Orders" KPI/Conversion Rate's
+      // source (previously a net-of-cancellation Purchases count from
+      // mart_net_sales; replaced with this raw+completed pair per explicit
+      // request). Deliberately counts every order regardless of later
+      // cancellation — a different question from Real Orders Received
+      // elsewhere on the dashboard, which nets cancellations out.
       client
         .query({
           query: `
@@ -333,222 +492,193 @@ export async function handleTrafficAnalytics(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
+      // Real GMV for EVERY OTHER branch's website channel, i.e. "whole site
+      // excluding HRH Online" Revenue — same table/shape as the HRH-only
+      // sales query above, just `!=` instead of `=`. Real order records
+      // carry store_name, so this is an exact subtraction (unlike Users
+      // below, which has no store dimension to filter on directly).
+      client
+        .query({
+          query: `
+            SELECT
+              transaction_date AS d,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            FROM xv3.mart_net_sales
+            WHERE store_name != {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+            GROUP BY transaction_date
+          `,
+          query_params: { store: HRH_STORE, channels: HMRPH_ONLINE_CHANNEL, prevFrom: previous.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Orders (raw, every checkout regardless of outcome) + Completed
+      // Order (payment_status = 'Paid') for EVERY OTHER branch — same table/
+      // shape as the HRH-only order-status query above. mart_xv3_order_report
+      // carries store_name for every branch (verified), so — like GMV above
+      // — this is a real, exact "not HRH" count, not a GA4-event approximation.
+      client
+        .query({
+          query: `
+            SELECT
+              toDate(created_at) AS d,
+              count() AS orders,
+              countIf(payment_status = 'Paid') AS paid
+            FROM xv3.mart_xv3_order_report
+            WHERE store_name != {store:String}
+              AND toDate(created_at) BETWEEN {prevFrom:String} AND {curTo:String}
+            GROUP BY d
+          `,
+          query_params: { store: HRH_STORE, prevFrom: previous.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Optional: one specific OTHER branch, selected via the Branch
+      // dropdown (see BRANCHES above) — same 3-query shape as HRH Online's
+      // own section (pages_path_report for Users/Page Views, mart_net_sales
+      // for Revenue, mart_xv3_order_report for Orders/Completed Order),
+      // just swapping in that branch's own page paths/store_name. Only run
+      // when a branch is actually selected.
+      ...(branch
+        ? [
+            client
+              .query({
+                query: `
+                  SELECT date, sum(totalUsers) AS users, sum(newUsers) AS newUsers, sum(screenPageViews) AS pageViews
+                  FROM ga4.ga4_pages_path_report FINAL
+                  WHERE property_id = {propertyId:String}
+                    AND pagePath IN {paths:Array(String)}
+                    AND date BETWEEN {superFrom:String} AND {superTo:String}
+                  GROUP BY date
+                `,
+                query_params: {
+                  propertyId: GA4_PROPERTY_ID,
+                  paths: [`/shop/${branch.code}`, `/search/stores/${branch.code}`],
+                  superFrom: superFromKey,
+                  superTo: superToKey,
+                },
+                format: "JSONEachRow",
+              })
+              .then((r) => r.json()),
+            client
+              .query({
+                query: `
+                  SELECT transaction_date AS d, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+                  FROM xv3.mart_net_sales
+                  WHERE store_name = {store:String} AND sales_channel IN {channels:Array(String)}
+                    AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+                  GROUP BY transaction_date
+                `,
+                query_params: { store: branch.storeName, channels: HMRPH_ONLINE_CHANNEL, prevFrom: previous.from, curTo: current.to },
+                format: "JSONEachRow",
+              })
+              .then((r) => r.json()),
+            client
+              .query({
+                query: `
+                  SELECT toDate(created_at) AS d, count() AS orders, countIf(payment_status = 'Paid') AS paid
+                  FROM xv3.mart_xv3_order_report
+                  WHERE store_name = {store:String} AND toDate(created_at) BETWEEN {prevFrom:String} AND {curTo:String}
+                  GROUP BY d
+                `,
+                query_params: { store: branch.storeName, prevFrom: previous.from, curTo: current.to },
+                format: "JSONEachRow",
+              })
+              .then((r) => r.json()),
+          ]
+        : []),
     ]);
+    const [
+      pageRows,
+      salesRows,
+      orderStatusRows,
+      wholeSiteRows,
+      otherBranchesSalesRows,
+      otherBranchesOrderStatusRows,
+      branchPageRows = [],
+      branchSalesRows = [],
+      branchOrderStatusRows = [],
+    ] = queryResults;
 
-    // --- Aggregate pageRows into current/previous totals + daily users/page views ---
-    let curUsers = 0;
-    let curNewUsers = 0;
-    let curPageViews = 0;
-    let prevUsers = 0;
-    let prevPageViews = 0;
-    const usersByDate = new Map(); // date (yyyymmdd) -> users (current window only)
-    const pageViewsByDate = new Map(); // date (yyyymmdd) -> page views (current window only)
-    for (const r of pageRows) {
-      const users = toNum(r.users);
-      const newUsers = toNum(r.newUsers);
-      const pageViews = toNum(r.pageViews);
-      if (r.date >= curFromKey && r.date <= curToKey) {
-        curUsers += users;
-        curNewUsers += newUsers;
-        curPageViews += pageViews;
-        usersByDate.set(r.date, (usersByDate.get(r.date) || 0) + users);
-        pageViewsByDate.set(r.date, (pageViewsByDate.get(r.date) || 0) + pageViews);
-      } else if (r.date >= prevFromKey && r.date <= prevToKey) {
-        prevUsers += users;
-        prevPageViews += pageViews;
-      }
-    }
-    // "Returning" is derived (Users - New Users), summed the same way Users
-    // itself already is across the window (day-grain totals, so a visitor
-    // active on 2 different days is counted twice in both — consistent with
-    // itself, not a new precision issue introduced here).
-    //
-    // Caveat worth knowing before reading this split: GA4's `newUsers` is
-    // scoped to the WHOLE property (first-ever visit to any hmr.ph page,
-    // not first visit to /shop/ONP specifically) — so a longtime hmr.ph
-    // visitor landing on this store page for the first time still counts as
-    // "returning" here. Expect this to skew heavily toward Returning even
-    // for a genuinely new-to-this-store audience.
-    const curReturningUsers = Math.max(curUsers - curNewUsers, 0);
+    // --- HRH Online (scoped to /shop/ONP + /search/stores/ONP) ---
+    const hrhPageAgg = aggregatePageRows(pageRows, curFromKey, curToKey, prevFromKey, prevToKey);
+    const hrhGmvAgg = aggregateGmvRows(salesRows, current, previous);
+    const hrhOrderAgg = aggregateOrderStatusRows(orderStatusRows, current, previous);
+    const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current);
 
-    // --- Aggregate salesRows into current/previous totals + daily orders ---
-    let curOrders = 0;
-    let curGmv = 0;
-    let prevOrders = 0;
-    let prevGmv = 0;
-    const ordersByDate = new Map(); // date (ISO) -> orders (current window only)
-    const gmvByDate = new Map(); // date (ISO) -> gmv (current window only)
-    for (const r of salesRows) {
-      const orders = toNum(r.orders);
-      const gmv = toNum(r.gmv);
-      if (r.d >= current.from && r.d <= current.to) {
-        curOrders += orders;
-        curGmv += gmv;
-        ordersByDate.set(r.d, (ordersByDate.get(r.d) || 0) + orders);
-        gmvByDate.set(r.d, (gmvByDate.get(r.d) || 0) + gmv);
-      } else if (r.d >= previous.from && r.d <= previous.to) {
-        prevOrders += orders;
-        prevGmv += gmv;
-      }
-    }
-
-    // --- Aggregate orderStatusRows into current-window Checkout/Payment
-    // Confirmed funnel counts (see file-header comment on scope). ---
-    let curCheckoutOrders = 0;
-    let curPaidOrders = 0;
-    for (const r of orderStatusRows) {
-      if (r.d >= current.from && r.d <= current.to) {
-        curCheckoutOrders += toNum(r.orders);
-        curPaidOrders += toNum(r.paid);
-      }
-    }
-
-    // --- Aggregate wholeSiteRows (ga4_events_report, all of hmr.ph) into
-    // current/previous totals + a daily trend, same shape as the HRH-scoped
-    // aggregation above so the frontend can render both with the same
-    // components. Keyed by (date, eventName) — pull each event's users/
-    // eventCount/revenue into its own running total. ---
-    const wholeByDateEvent = new Map(); // `${date}|${eventName}` -> row (current window only, for the daily trend)
-    const wholeCur = { pageViewUsers: 0, pageViews: 0, firstVisitUsers: 0, addToCart: 0, beginCheckout: 0, purchases: 0, revenue: 0 };
-    const wholePrev = { pageViewUsers: 0, pageViews: 0, purchases: 0 };
+    // --- WHOLE SITE EXCLUDING HRH ONLINE ---
+    // Users/Page Views: ga4_events_report's whole-property totals (no page
+    // dimension) minus HRH's own page-scoped totals above — valid, exact
+    // subtraction for Page Views (both sides are the same "page_view"
+    // metric, verified equal in the comment below); Users/New Users are
+    // subtracted the same way but are a small approximation (a visitor who
+    // viewed both HRH's pages and other pages this window is removed
+    // entirely, not split between the two sides) — negligible in practice
+    // since HRH is a small fraction of whole-site traffic, but not exact
+    // the way Page Views is.
+    // Orders/Completed Order/Revenue: real order records (mart_xv3_order_
+    // report / mart_net_sales) filtered to store_name != 'HRH ONLINE' — an
+    // exact "not HRH" subtraction, no GA4-event mixing at all.
+    const wholeSiteAgg = { pageViewUsers: 0, pageViews: 0, firstVisitUsers: 0, addToCart: 0, beginCheckout: 0 };
+    const wholeSitePrevAgg = { pageViewUsers: 0, pageViews: 0 };
+    const wholeSitePageViewsByDate = new Map(); // date (yyyymmdd) -> whole-site page views (current window only)
+    const wholeSiteUsersByDate = new Map(); // date (yyyymmdd) -> whole-site page_view users (current window only)
     for (const r of wholeSiteRows) {
       const users = toNum(r.users);
       const events = toNum(r.events);
-      const revenue = toNum(r.revenue);
       const inCurrent = r.date >= curFromKey && r.date <= curToKey;
       const inPrevious = r.date >= prevFromKey && r.date <= prevToKey;
       if (inCurrent) {
-        wholeByDateEvent.set(`${r.date}|${r.eventName}`, { users, events, revenue });
         if (r.eventName === "page_view") {
-          wholeCur.pageViewUsers += users;
-          wholeCur.pageViews += events;
-        } else if (r.eventName === "first_visit") {
-          wholeCur.firstVisitUsers += users;
-        } else if (r.eventName === "add_to_cart") {
-          wholeCur.addToCart += events;
-        } else if (r.eventName === "begin_checkout") {
-          wholeCur.beginCheckout += events;
-        } else if (r.eventName === "purchase") {
-          wholeCur.purchases += events;
-          wholeCur.revenue += revenue;
-        }
-      } else if (inPrevious) {
-        if (r.eventName === "page_view") {
-          wholePrev.pageViewUsers += users;
-          wholePrev.pageViews += events;
-        } else if (r.eventName === "purchase") {
-          wholePrev.purchases += events;
-        }
+          wholeSiteAgg.pageViewUsers += users;
+          wholeSiteAgg.pageViews += events;
+          wholeSitePageViewsByDate.set(r.date, events);
+          wholeSiteUsersByDate.set(r.date, users);
+        } else if (r.eventName === "first_visit") wholeSiteAgg.firstVisitUsers += users;
+        else if (r.eventName === "add_to_cart") wholeSiteAgg.addToCart += events;
+        else if (r.eventName === "begin_checkout") wholeSiteAgg.beginCheckout += events;
+      } else if (inPrevious && r.eventName === "page_view") {
+        wholeSitePrevAgg.pageViewUsers += users;
+        wholeSitePrevAgg.pageViews += events;
       }
     }
-    const wholeCurReturningUsers = Math.max(wholeCur.pageViewUsers - wholeCur.firstVisitUsers, 0);
-
-    const curConversionRate = safeDivide(curOrders, curPageViews) * 100;
-    const prevConversionRate = safeDivide(prevOrders, prevPageViews) * 100;
-    const curRevPerView = safeDivide(curGmv, curPageViews);
-    const prevRevPerView = safeDivide(prevGmv, prevPageViews);
-    const curViewsPerUser = safeDivide(curPageViews, curUsers);
-    const prevViewsPerUser = safeDivide(prevPageViews, prevUsers);
-
-    const kpis = {
-      users: { value: curUsers, delta: pctDelta(curUsers, prevUsers) },
-      pageViews: { value: curPageViews, delta: pctDelta(curPageViews, prevPageViews) },
-      purchases: { value: curOrders, delta: pctDelta(curOrders, prevOrders) },
-      conversionRate: { value: curConversionRate, delta: pctDelta(curConversionRate, prevConversionRate) },
-      revenuePerView: { value: curRevPerView, delta: pctDelta(curRevPerView, prevRevPerView) },
-      pageViewsPerUser: { value: curViewsPerUser, delta: pctDelta(curViewsPerUser, prevViewsPerUser) },
+    const exclPageAgg = {
+      curUsers: Math.max(wholeSiteAgg.pageViewUsers - hrhPageAgg.curUsers, 0),
+      curNewUsers: Math.max(wholeSiteAgg.firstVisitUsers - hrhPageAgg.curNewUsers, 0),
+      curPageViews: wholeSiteAgg.pageViews - hrhPageAgg.curPageViews,
+      prevUsers: Math.max(wholeSitePrevAgg.pageViewUsers - hrhPageAgg.prevUsers, 0),
+      prevPageViews: wholeSitePrevAgg.pageViews - hrhPageAgg.prevPageViews,
+      usersByDate: new Map(
+        enumerateDatesISO(current.from, current.to).map((iso) => {
+          const key = isoToYyyymmdd(iso);
+          return [key, Math.max((wholeSiteUsersByDate.get(key) || 0) - (hrhPageAgg.usersByDate.get(key) || 0), 0)];
+        }),
+      ),
+      pageViewsByDate: new Map(
+        enumerateDatesISO(current.from, current.to).map((iso) => {
+          const key = isoToYyyymmdd(iso);
+          return [key, (wholeSitePageViewsByDate.get(key) || 0) - (hrhPageAgg.pageViewsByDate.get(key) || 0)];
+        }),
+      ),
     };
+    exclPageAgg.curReturningUsers = Math.max(exclPageAgg.curUsers - exclPageAgg.curNewUsers, 0);
+    const exclGmvAgg = aggregateGmvRows(otherBranchesSalesRows, current, previous);
+    const exclOrderAgg = aggregateOrderStatusRows(otherBranchesOrderStatusRows, current, previous);
+    const wholeExclHrhSection = buildTrafficSection(exclPageAgg, exclGmvAgg, exclOrderAgg, current, [
+      { stage: "Add to Cart", count: wholeSiteAgg.addToCart },
+      { stage: "Begin Checkout", count: wholeSiteAgg.beginCheckout },
+    ]);
 
-    // --- Conversion Funnel (current window only) — 4 count-based stages,
-    // see file-header comment on why Add to Cart is omitted and why
-    // Checkout/Payment Confirmed come from a different table (and can
-    // legitimately differ from the Purchases KPI). Revenue is NOT a stage
-    // here — shown as `totalRevenue` instead, see file-header comment.
-    // Dropoff % is computed client-side by FunnelList, not here. ---
-    const funnel = [
-      { stage: "Page Views", count: curPageViews },
-      { stage: "Users", count: curUsers },
-      { stage: "Checkout", count: curCheckoutOrders },
-      { stage: "Payment Confirmed", count: curPaidOrders },
-    ];
-
-    // New vs Returning Users (current window only) — see the curReturningUsers
-    // comment above on how "Returning" is derived.
-    const newVsReturning = [
-      { label: "New Users", value: curNewUsers },
-      { label: "Returning Users", value: curReturningUsers },
-    ];
-
-    // --- Daily trend (current window, zero-filled) — single source for both
-    // trend charts and every KPI card's sparkline, rather than two
-    // near-duplicate per-chart arrays. ---
-    const dailyTrend = enumerateDatesISO(current.from, current.to).map((iso) => {
-      const key = isoToYyyymmdd(iso);
-      const users = usersByDate.get(key) || 0;
-      const pageViews = pageViewsByDate.get(key) || 0;
-      const purchases = ordersByDate.get(iso) || 0;
-      const gmv = gmvByDate.get(iso) || 0;
-      return {
-        date: iso,
-        users,
-        pageViews,
-        purchases,
-        conversionRate: safeDivide(purchases, pageViews) * 100,
-        revenuePerView: safeDivide(gmv, pageViews),
-        pageViewsPerUser: safeDivide(pageViews, users),
-      };
-    });
-
-    // --- WHOLE SITE — same kpis/funnel/newVsReturning/dailyTrend shape as
-    // the HRH-scoped block above, so the frontend can render both with the
-    // same components, side by side for comparison (see file-header comment
-    // on wholeSiteRows for the source/validation). Purchases/Revenue here
-    // ARE GA4 purchase events (unlike the HRH-scoped Purchases KPI, which
-    // deliberately avoids GA4 events in favor of real order records) —
-    // whole-site has no page dimension to lose by using events directly, so
-    // there's no reason to substitute a different source here.
-    const wholeConversionRate = safeDivide(wholeCur.purchases, wholeCur.pageViews) * 100;
-    const wholePrevConversionRate = safeDivide(wholePrev.purchases, wholePrev.pageViews) * 100;
-    const wholeRevPerView = safeDivide(wholeCur.revenue, wholeCur.pageViews);
-    const wholeViewsPerUser = safeDivide(wholeCur.pageViews, wholeCur.pageViewUsers);
-    const whole = {
-      kpis: {
-        users: { value: wholeCur.pageViewUsers, delta: pctDelta(wholeCur.pageViewUsers, wholePrev.pageViewUsers) },
-        pageViews: { value: wholeCur.pageViews, delta: pctDelta(wholeCur.pageViews, wholePrev.pageViews) },
-        purchases: { value: wholeCur.purchases, delta: pctDelta(wholeCur.purchases, wholePrev.purchases) },
-        conversionRate: { value: wholeConversionRate, delta: pctDelta(wholeConversionRate, wholePrevConversionRate) },
-        revenuePerView: { value: wholeRevPerView, delta: null },
-        pageViewsPerUser: { value: wholeViewsPerUser, delta: null },
-      },
-      funnel: [
-        { stage: "Page Views", count: wholeCur.pageViews },
-        { stage: "Add to Cart", count: wholeCur.addToCart },
-        { stage: "Begin Checkout", count: wholeCur.beginCheckout },
-        { stage: "Purchase", count: wholeCur.purchases },
-      ],
-      totalRevenue: wholeCur.revenue,
-      newVsReturning: [
-        { label: "New Users", value: wholeCur.firstVisitUsers },
-        { label: "Returning Users", value: wholeCurReturningUsers },
-      ],
-      dailyTrend: enumerateDatesISO(current.from, current.to).map((iso) => {
-        const key = isoToYyyymmdd(iso);
-        const pv = wholeByDateEvent.get(`${key}|page_view`);
-        const pu = wholeByDateEvent.get(`${key}|purchase`);
-        const users = pv?.users || 0;
-        const pageViews = pv?.events || 0;
-        const purchases = pu?.events || 0;
-        return {
-          date: iso,
-          users,
-          pageViews,
-          purchases,
-          conversionRate: safeDivide(purchases, pageViews) * 100,
-          revenuePerView: safeDivide(pu?.revenue || 0, pageViews),
-          pageViewsPerUser: safeDivide(pageViews, users),
-        };
-      }),
-    };
+    // --- Optional selected Branch — identical shape/methodology to HRH
+    // Online above, just a different code/store_name (see BRANCHES). ---
+    let branchSection = null;
+    if (branch) {
+      const branchPageAgg = aggregatePageRows(branchPageRows, curFromKey, curToKey, prevFromKey, prevToKey);
+      const branchGmvAgg = aggregateGmvRows(branchSalesRows, current, previous);
+      const branchOrderAgg = aggregateOrderStatusRows(branchOrderStatusRows, current, previous);
+      branchSection = { code: branch.code, label: branch.label, ...buildTrafficSection(branchPageAgg, branchGmvAgg, branchOrderAgg, current) };
+    }
 
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
@@ -557,18 +687,19 @@ export async function handleTrafficAnalytics(req, res) {
         current,
         previous,
         property: GA4_PROPERTY_ID,
+        branches: BRANCHES.map((b) => ({ code: b.code, label: b.label })),
+        selectedBranch: branch?.code || null,
         scopeNote:
-          "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Checkout/Payment Confirmed: real order-status counts from HRH Online's own order records (every order regardless of later cancellation — a different question from the Purchases KPI, which nets out cancellations). Purchases/Revenue: real HRH Online website orders (HMRPH Online channel), not GA4 purchase events — those can't be scoped to a single store in this data source. Add to Cart is omitted, not zeroed: no scoped source exists for it anywhere in this warehouse.",
+          "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Orders/Completed Order: real order-status counts from HRH Online's own order records (Orders = every checkout regardless of later cancellation; Completed Order = payment_status 'Paid' — a different question from Real Orders Received elsewhere, which nets out cancellations). Revenue: real HRH Online website sales (HMRPH Online channel). Add to Cart is omitted, not zeroed: no scoped source exists for it anywhere in this warehouse.",
         wholeSiteScopeNote:
-          "Whole Site: every page on hmr.ph (all stores/channels), from GA4's (date, eventName) event totals — no page dimension, so unlike the HRH-scoped section above, this genuinely can't be narrowed to one store. Users/Page Views are directly comparable in methodology to the HRH-scoped numbers (same GA4 metrics, just unfiltered by page). Purchases/Revenue here ARE GA4 purchase events (not real order records, unlike the HRH-scoped Purchases KPI) — expect this to differ from Real Orders Received/GMV elsewhere on the dashboard, which are net of cancellations and use HRH Online's own order data.",
+          "Whole Site: every page/branch on hmr.ph EXCEPT HRH Online. Users/Page Views come from GA4's whole-property event totals minus HRH Online's own page-scoped totals (Page Views: exact; Users/New Users: a small approximation — see code comment). Orders/Completed Order/Revenue come from real order records (mart_xv3_order_report/mart_net_sales) filtered to every branch except HRH Online — an exact subtraction, not a GA4-event approximation.",
+        branchScopeNote:
+          "Branch: same methodology as HRH Online above (real GA4 page traffic for that branch's own /shop/{code} + /search/stores/{code} pages, real order records for Orders/Completed Order/Revenue) — a different store_name, not an approximation.",
         generatedAt: new Date().toISOString(),
       },
-      kpis,
-      funnel,
-      totalRevenue: curGmv,
-      newVsReturning,
-      dailyTrend,
-      whole,
+      hrh: hrhSection,
+      wholeExclHrh: wholeExclHrhSection,
+      branch: branchSection,
     });
   } catch (err) {
     console.error("HRH Traffic & Conversion API error:", err);

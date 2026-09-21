@@ -92,11 +92,11 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
           sparkline={trend.map((d) => d.pageViews)}
         />
         <KpiCard
-          label="Purchases"
+          label="Orders"
           icon={ICONS.cart}
-          value={formatNum(kpis.purchases.value)}
-          delta={kpis.purchases.delta}
-          sparkline={trend.map((d) => d.purchases)}
+          value={formatNum(kpis.orders.value)}
+          delta={kpis.orders.delta}
+          sparkline={trend.map((d) => d.orders)}
         />
         <KpiCard
           label="Conversion Rate"
@@ -186,14 +186,18 @@ export default function TrafficConversion({ filters }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Branch dropdown — every option EXCLUDES HRH Online (that's its own
+  // fixed section below, not a dropdown choice) per explicit request.
+  // Options come from data.meta.branches once loaded; "" means none picked.
+  const [branchCode, setBranchCode] = useState("");
 
   const ready = isDateRangeReady(dateRange);
 
-  const load = useCallback(async (params, signal) => {
+  const load = useCallback(async (params, br, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ report: "traffic", ...params });
+      const qs = new URLSearchParams({ report: "traffic", ...params, ...(br ? { branch: br } : {}) });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -210,14 +214,17 @@ export default function TrafficConversion({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    load(dateRangeParams(dateRange), controller.signal);
+    load(dateRangeParams(dateRange), branchCode, controller.signal);
     return () => controller.abort();
-  }, [dateRange, ready, load]);
+  }, [dateRange, branchCode, ready, load]);
 
-  const kpis = data?.kpis;
-  const trend = data?.dailyTrend || [];
-  const whole = data?.whole;
-  const wholeTrend = whole?.dailyTrend || [];
+  const hrhData = data?.hrh;
+  const hrhTrend = hrhData?.dailyTrend || [];
+  const wholeExclHrh = data?.wholeExclHrh;
+  const wholeTrend = wholeExclHrh?.dailyTrend || [];
+  const branchData = data?.branch;
+  const branchTrend = branchData?.dailyTrend || [];
+  const branches = data?.meta?.branches || [];
 
   return (
     <div>
@@ -231,12 +238,11 @@ export default function TrafficConversion({ filters }) {
 
       {data && !error && (
         <>
-          {/* Whole Site — added on top, per explicit request, so it's a direct
-              comparison against the HRH-Online-scoped section below rather
-              than a separate page. See api/_hrh-traffic-analytics.js's
-              wholeSiteRows comment for the source (ga4_events_report,
-              unfiltered by page) and its validation against the HRH-scoped
-              numbers. */}
+          {/* Whole Site (excluding HRH Online) — added on top, per explicit
+              request, so it's a direct comparison against the HRH-Online-
+              scoped section below rather than a separate page. See
+              api/_hrh-traffic-analytics.js's wholeSiteRows/otherBranches*
+              comments for the source and how "excluding HRH" is computed. */}
           <div className="flex items-start justify-between gap-3 mb-3">
             <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
               Whole Site
@@ -245,7 +251,7 @@ export default function TrafficConversion({ filters }) {
               className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
               style={{ background: hrh.blueSoft, color: hrh.blueText }}
             >
-              All of hmr.ph · Every Store/Channel
+              All of hmr.ph, Excluding HRH Online
             </span>
           </div>
           <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
@@ -253,13 +259,13 @@ export default function TrafficConversion({ filters }) {
           </div>
 
           <TrafficKpiFunnelSection
-            kpis={whole.kpis}
+            kpis={wholeExclHrh.kpis}
             trend={wholeTrend}
-            funnelStages={whole.funnel}
-            funnelSubtitle="Page Views -> Add to Cart -> Begin Checkout -> Purchase"
-            totalRevenue={whole.totalRevenue}
-            newVsReturning={whole.newVsReturning}
-            newVsReturningSubtitle="Share of users in this period, whole site — 'New' is a real first_visit event, so unlike the HRH-scoped section below, this split is genuinely accurate for this scope."
+            funnelStages={wholeExclHrh.funnel}
+            funnelSubtitle="Page Views -> Users -> Add to Cart -> Begin Checkout -> Checkout -> Completed Order"
+            totalRevenue={wholeExclHrh.totalRevenue}
+            newVsReturning={wholeExclHrh.newVsReturning}
+            newVsReturningSubtitle="Share of users in this period, whole site excluding HRH Online — 'New' is a real first_visit event."
           />
 
           <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
@@ -280,14 +286,59 @@ export default function TrafficConversion({ filters }) {
           </div>
 
           <TrafficKpiFunnelSection
-            kpis={kpis}
-            trend={trend}
-            funnelStages={data.funnel}
-            funnelSubtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
-            totalRevenue={data.totalRevenue}
-            newVsReturning={data.newVsReturning}
+            kpis={hrhData.kpis}
+            trend={hrhTrend}
+            funnelStages={hrhData.funnel}
+            funnelSubtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Completed Order"
+            totalRevenue={hrhData.totalRevenue}
+            newVsReturning={hrhData.newVsReturning}
             newVsReturningSubtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning"
           />
+
+          <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
+
+          {/* Branch — pick any ONE other branch with its own real online
+              store (HRH Online is never an option here, see api file's
+              BRANCHES comment) for the same comparison, one at a time. */}
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
+              Branch
+            </span>
+            <select
+              value={branchCode}
+              onChange={(e) => setBranchCode(e.target.value)}
+              className="text-[12px] rounded-md px-2.5 py-1.5 outline-none"
+              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+            >
+              <option value="">Select a branch…</option>
+              {branches.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {!branchCode && (
+            <EmptyState label="Pick a branch above to see its Traffic & Conversion, using the same methodology as HRH Online." />
+          )}
+
+          {branchCode && branchData && (
+            <>
+              <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
+                {data.meta?.branchScopeNote}
+              </div>
+              <TrafficKpiFunnelSection
+                kpis={branchData.kpis}
+                trend={branchTrend}
+                funnelStages={branchData.funnel}
+                funnelSubtitle={`Page Views -> Users -> Checkout -> Completed Order (${branchData.label})`}
+                totalRevenue={branchData.totalRevenue}
+                newVsReturning={branchData.newVsReturning}
+                newVsReturningSubtitle={`Share of users in this period (${branchData.label}) — same GA4 "new" caveat as HRH Online above.`}
+              />
+            </>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
