@@ -229,7 +229,7 @@ export async function handleTrafficAnalytics(req, res) {
     const prevFromKey = isoToYyyymmdd(previous.from);
     const prevToKey = isoToYyyymmdd(previous.to);
 
-    const [pageRows, salesRows, orderStatusRows] = await Promise.all([
+    const [pageRows, salesRows, orderStatusRows, wholeSiteRows] = await Promise.all([
       // Users + Page Views on HRH Online's own storefront pages only (see
       // file-header comment) — one query spanning the whole
       // previous+current super-range, grouped by date.
@@ -287,6 +287,49 @@ export async function handleTrafficAnalytics(req, res) {
             GROUP BY d
           `,
           query_params: { store: HRH_STORE, prevFrom: previous.from, curTo: current.to },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // WHOLE-SITE (all of hmr.ph, every page/store — not just HRH Online's
+      // /shop/ONP pages) — added for direct comparison against the
+      // HRH-scoped numbers above. ga4_events_report is (date, eventName)
+      // grain with NO page dimension, so it can't be scoped to one store —
+      // but that's exactly what makes it the right source for a genuine
+      // whole-site total (see file-header comment on why this table was
+      // originally tried and reverted for the HRH-only numbers specifically).
+      // Verified directly against production ClickHouse before writing this:
+      // for 2026-09-15, sum(eventCount) WHERE eventName='page_view' = 32,931,
+      // an EXACT match to sum(screenPageViews) across every pagePath row in
+      // ga4_pages_path_report for that same date — confirming this table's
+      // page_view eventCount really is whole-site Page Views, not a
+      // different/incompatible number. totalUsers, by contrast, is NOT
+      // safe to sum across ga4_pages_path_report's many pagePath rows (a
+      // user who viewed 2 pages gets counted twice) — that inflated 23,780
+      // vs this table's real distinct 12,917 page_view users for the same
+      // day, so Users/New Users below come from here, not that table.
+      // 'first_visit' fires exactly once per user, on their first-ever
+      // session — so its totalUsers IS that day's New Users, whole-site.
+      client
+        .query({
+          query: `
+            SELECT
+              date,
+              eventName,
+              sum(totalUsers) AS users,
+              sum(eventCount) AS events,
+              sum(totalRevenue) AS revenue
+            FROM ga4.ga4_events_report FINAL
+            WHERE property_id = {propertyId:String}
+              AND eventName IN {events:Array(String)}
+              AND date BETWEEN {superFrom:String} AND {superTo:String}
+            GROUP BY date, eventName
+          `,
+          query_params: {
+            propertyId: GA4_PROPERTY_ID,
+            events: ["page_view", "first_visit", "add_to_cart", "begin_checkout", "purchase"],
+            superFrom: superFromKey,
+            superTo: superToKey,
+          },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -360,6 +403,46 @@ export async function handleTrafficAnalytics(req, res) {
       }
     }
 
+    // --- Aggregate wholeSiteRows (ga4_events_report, all of hmr.ph) into
+    // current/previous totals + a daily trend, same shape as the HRH-scoped
+    // aggregation above so the frontend can render both with the same
+    // components. Keyed by (date, eventName) — pull each event's users/
+    // eventCount/revenue into its own running total. ---
+    const wholeByDateEvent = new Map(); // `${date}|${eventName}` -> row (current window only, for the daily trend)
+    const wholeCur = { pageViewUsers: 0, pageViews: 0, firstVisitUsers: 0, addToCart: 0, beginCheckout: 0, purchases: 0, revenue: 0 };
+    const wholePrev = { pageViewUsers: 0, pageViews: 0, purchases: 0 };
+    for (const r of wholeSiteRows) {
+      const users = toNum(r.users);
+      const events = toNum(r.events);
+      const revenue = toNum(r.revenue);
+      const inCurrent = r.date >= curFromKey && r.date <= curToKey;
+      const inPrevious = r.date >= prevFromKey && r.date <= prevToKey;
+      if (inCurrent) {
+        wholeByDateEvent.set(`${r.date}|${r.eventName}`, { users, events, revenue });
+        if (r.eventName === "page_view") {
+          wholeCur.pageViewUsers += users;
+          wholeCur.pageViews += events;
+        } else if (r.eventName === "first_visit") {
+          wholeCur.firstVisitUsers += users;
+        } else if (r.eventName === "add_to_cart") {
+          wholeCur.addToCart += events;
+        } else if (r.eventName === "begin_checkout") {
+          wholeCur.beginCheckout += events;
+        } else if (r.eventName === "purchase") {
+          wholeCur.purchases += events;
+          wholeCur.revenue += revenue;
+        }
+      } else if (inPrevious) {
+        if (r.eventName === "page_view") {
+          wholePrev.pageViewUsers += users;
+          wholePrev.pageViews += events;
+        } else if (r.eventName === "purchase") {
+          wholePrev.purchases += events;
+        }
+      }
+    }
+    const wholeCurReturningUsers = Math.max(wholeCur.pageViewUsers - wholeCur.firstVisitUsers, 0);
+
     const curConversionRate = safeDivide(curOrders, curPageViews) * 100;
     const prevConversionRate = safeDivide(prevOrders, prevPageViews) * 100;
     const curRevPerView = safeDivide(curGmv, curPageViews);
@@ -416,6 +499,57 @@ export async function handleTrafficAnalytics(req, res) {
       };
     });
 
+    // --- WHOLE SITE — same kpis/funnel/newVsReturning/dailyTrend shape as
+    // the HRH-scoped block above, so the frontend can render both with the
+    // same components, side by side for comparison (see file-header comment
+    // on wholeSiteRows for the source/validation). Purchases/Revenue here
+    // ARE GA4 purchase events (unlike the HRH-scoped Purchases KPI, which
+    // deliberately avoids GA4 events in favor of real order records) —
+    // whole-site has no page dimension to lose by using events directly, so
+    // there's no reason to substitute a different source here.
+    const wholeConversionRate = safeDivide(wholeCur.purchases, wholeCur.pageViews) * 100;
+    const wholePrevConversionRate = safeDivide(wholePrev.purchases, wholePrev.pageViews) * 100;
+    const wholeRevPerView = safeDivide(wholeCur.revenue, wholeCur.pageViews);
+    const wholeViewsPerUser = safeDivide(wholeCur.pageViews, wholeCur.pageViewUsers);
+    const whole = {
+      kpis: {
+        users: { value: wholeCur.pageViewUsers, delta: pctDelta(wholeCur.pageViewUsers, wholePrev.pageViewUsers) },
+        pageViews: { value: wholeCur.pageViews, delta: pctDelta(wholeCur.pageViews, wholePrev.pageViews) },
+        purchases: { value: wholeCur.purchases, delta: pctDelta(wholeCur.purchases, wholePrev.purchases) },
+        conversionRate: { value: wholeConversionRate, delta: pctDelta(wholeConversionRate, wholePrevConversionRate) },
+        revenuePerView: { value: wholeRevPerView, delta: null },
+        pageViewsPerUser: { value: wholeViewsPerUser, delta: null },
+      },
+      funnel: [
+        { stage: "Page Views", count: wholeCur.pageViews },
+        { stage: "Add to Cart", count: wholeCur.addToCart },
+        { stage: "Begin Checkout", count: wholeCur.beginCheckout },
+        { stage: "Purchase", count: wholeCur.purchases },
+      ],
+      totalRevenue: wholeCur.revenue,
+      newVsReturning: [
+        { label: "New Users", value: wholeCur.firstVisitUsers },
+        { label: "Returning Users", value: wholeCurReturningUsers },
+      ],
+      dailyTrend: enumerateDatesISO(current.from, current.to).map((iso) => {
+        const key = isoToYyyymmdd(iso);
+        const pv = wholeByDateEvent.get(`${key}|page_view`);
+        const pu = wholeByDateEvent.get(`${key}|purchase`);
+        const users = pv?.users || 0;
+        const pageViews = pv?.events || 0;
+        const purchases = pu?.events || 0;
+        return {
+          date: iso,
+          users,
+          pageViews,
+          purchases,
+          conversionRate: safeDivide(purchases, pageViews) * 100,
+          revenuePerView: safeDivide(pu?.revenue || 0, pageViews),
+          pageViewsPerUser: safeDivide(pageViews, users),
+        };
+      }),
+    };
+
     res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
     return res.status(200).json({
       meta: {
@@ -425,6 +559,8 @@ export async function handleTrafficAnalytics(req, res) {
         property: GA4_PROPERTY_ID,
         scopeNote:
           "Users/Page Views: GA4 pagePath scoped to hmr.ph/shop/ONP (HRH Online's storefront) — real, store-specific data, but GA4 has no 'sessions' metric at this grain. Checkout/Payment Confirmed: real order-status counts from HRH Online's own order records (every order regardless of later cancellation — a different question from the Purchases KPI, which nets out cancellations). Purchases/Revenue: real HRH Online website orders (HMRPH Online channel), not GA4 purchase events — those can't be scoped to a single store in this data source. Add to Cart is omitted, not zeroed: no scoped source exists for it anywhere in this warehouse.",
+        wholeSiteScopeNote:
+          "Whole Site: every page on hmr.ph (all stores/channels), from GA4's (date, eventName) event totals — no page dimension, so unlike the HRH-scoped section above, this genuinely can't be narrowed to one store. Users/Page Views are directly comparable in methodology to the HRH-scoped numbers (same GA4 metrics, just unfiltered by page). Purchases/Revenue here ARE GA4 purchase events (not real order records, unlike the HRH-scoped Purchases KPI) — expect this to differ from Real Orders Received/GMV elsewhere on the dashboard, which are net of cancellations and use HRH Online's own order data.",
         generatedAt: new Date().toISOString(),
       },
       kpis,
@@ -432,6 +568,7 @@ export async function handleTrafficAnalytics(req, res) {
       totalRevenue: curGmv,
       newVsReturning,
       dailyTrend,
+      whole,
     });
   } catch (err) {
     console.error("HRH Traffic & Conversion API error:", err);

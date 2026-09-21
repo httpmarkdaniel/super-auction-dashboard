@@ -74,6 +74,97 @@ const ICONS = {
   ),
 };
 
+// Shared KPI row + Traffic Trend + Funnel + New/Returning block, used for
+// both the Whole Site section (added on top, per explicit request, for
+// direct comparison) and the original HRH-Online-scoped section below it —
+// same components/layout, different data + labels, so the two read as a
+// clean before/after rather than two differently-shaped panels.
+function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, totalRevenue, newVsReturning, newVsReturningSubtitle }) {
+  return (
+    <>
+      <KpiRow>
+        <KpiCard label="Users" icon={ICONS.users} value={formatNum(kpis.users.value)} delta={kpis.users.delta} sparkline={trend.map((d) => d.users)} />
+        <KpiCard
+          label="Page Views"
+          icon={ICONS.eye}
+          value={formatNum(kpis.pageViews.value)}
+          delta={kpis.pageViews.delta}
+          sparkline={trend.map((d) => d.pageViews)}
+        />
+        <KpiCard
+          label="Purchases"
+          icon={ICONS.cart}
+          value={formatNum(kpis.purchases.value)}
+          delta={kpis.purchases.delta}
+          sparkline={trend.map((d) => d.purchases)}
+        />
+        <KpiCard
+          label="Conversion Rate"
+          icon={ICONS.percent}
+          value={formatPct(kpis.conversionRate.value, 2)}
+          delta={kpis.conversionRate.delta}
+          sparkline={trend.map((d) => d.conversionRate)}
+        />
+        <KpiCard
+          label="Revenue / Page View"
+          icon={ICONS.peso}
+          value={formatPeso(kpis.revenuePerView.value)}
+          delta={kpis.revenuePerView.delta}
+          sparkline={trend.map((d) => d.revenuePerView)}
+        />
+        <KpiCard
+          label="Page Views / User"
+          icon={ICONS.layers}
+          value={kpis.pageViewsPerUser.value.toFixed(2)}
+          delta={kpis.pageViewsPerUser.delta}
+          sparkline={trend.map((d) => d.pageViewsPerUser)}
+        />
+      </KpiRow>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
+        <div className="xl:col-span-2">
+          <Panel title="Traffic Trend" subtitle="Daily Users and Page Views" className="h-full">
+            <TrendChart
+              data={trend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
+              series={[
+                { key: "pageViews", name: "Page Views", color: hrh.accent },
+                { key: "users", name: "Users", color: hrh.series[0] },
+              ]}
+              xKey="dateLabel"
+              valueFormatter={formatNum}
+            />
+          </Panel>
+        </div>
+        <div className="xl:col-span-3">
+          <Panel title="Conversion Funnel" subtitle={funnelSubtitle} className="h-full">
+            <FunnelList stages={funnelStages.map((f) => ({ label: f.stage, value: f.count }))} stageHeight={76} gap={8} />
+            <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
+                Total Revenue
+              </span>
+              <span className="font-display text-[18px] tabular-nums" style={{ color: hrh.ink }}>
+                {formatPeso(totalRevenue)}
+              </span>
+            </div>
+            <p className="text-[10.5px] mt-1.5" style={{ color: hrh.muted }}>
+              Not a funnel stage — pesos aren't the same unit as the counts above, so it's shown separately rather than distorting the bar widths.
+            </p>
+          </Panel>
+        </div>
+      </div>
+
+      <Panel title="New vs Returning Users" subtitle={newVsReturningSubtitle}>
+        <ShareBar
+          segments={[
+            { label: "New Users", value: newVsReturning[0].value, color: hrh.series[0] },
+            { label: "Returning Users", value: newVsReturning[1].value, color: hrh.accent },
+          ]}
+        />
+      </Panel>
+    </>
+  );
+}
+
 // Real, HRH-Online-scoped Traffic & Conversion — see
 // api/_hrh-traffic-analytics.js's file-header comment for the full scoping
 // investigation. Short version: Users/Page Views are GA4 data filtered to
@@ -125,19 +216,13 @@ export default function TrafficConversion({ filters }) {
 
   const kpis = data?.kpis;
   const trend = data?.dailyTrend || [];
+  const whole = data?.whole;
+  const wholeTrend = whole?.dailyTrend || [];
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Traffic &amp; Conversion
-        </div>
-        <span
-          className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
-          style={{ background: hrh.blueSoft, color: hrh.blueText }}
-        >
-          HRH Online Only · hmr.ph/shop/ONP
-        </span>
+      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
+        Traffic &amp; Conversion
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
@@ -146,92 +231,65 @@ export default function TrafficConversion({ filters }) {
 
       {data && !error && (
         <>
+          {/* Whole Site — added on top, per explicit request, so it's a direct
+              comparison against the HRH-Online-scoped section below rather
+              than a separate page. See api/_hrh-traffic-analytics.js's
+              wholeSiteRows comment for the source (ga4_events_report,
+              unfiltered by page) and its validation against the HRH-scoped
+              numbers. */}
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
+              Whole Site
+            </span>
+            <span
+              className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
+              style={{ background: hrh.blueSoft, color: hrh.blueText }}
+            >
+              All of hmr.ph · Every Store/Channel
+            </span>
+          </div>
+          <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
+            {data.meta?.wholeSiteScopeNote}
+          </div>
+
+          <TrafficKpiFunnelSection
+            kpis={whole.kpis}
+            trend={wholeTrend}
+            funnelStages={whole.funnel}
+            funnelSubtitle="Page Views -> Add to Cart -> Begin Checkout -> Purchase"
+            totalRevenue={whole.totalRevenue}
+            newVsReturning={whole.newVsReturning}
+            newVsReturningSubtitle="Share of users in this period, whole site — 'New' is a real first_visit event, so unlike the HRH-scoped section below, this split is genuinely accurate for this scope."
+          />
+
+          <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
+
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
+              HRH Online
+            </span>
+            <span
+              className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
+              style={{ background: hrh.blueSoft, color: hrh.blueText }}
+            >
+              HRH Online Only · hmr.ph/shop/ONP
+            </span>
+          </div>
           <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
             {data.meta?.scopeNote}
           </div>
 
-          <KpiRow>
-            <KpiCard
-              label="Users"
-              icon={ICONS.users}
-              value={formatNum(kpis.users.value)}
-              delta={kpis.users.delta}
-              sparkline={trend.map((d) => d.users)}
-            />
-            <KpiCard
-              label="Page Views"
-              icon={ICONS.eye}
-              value={formatNum(kpis.pageViews.value)}
-              delta={kpis.pageViews.delta}
-              sparkline={trend.map((d) => d.pageViews)}
-            />
-            <KpiCard
-              label="Purchases"
-              icon={ICONS.cart}
-              value={formatNum(kpis.purchases.value)}
-              delta={kpis.purchases.delta}
-              sparkline={trend.map((d) => d.purchases)}
-            />
-            <KpiCard
-              label="Conversion Rate"
-              icon={ICONS.percent}
-              value={formatPct(kpis.conversionRate.value, 2)}
-              delta={kpis.conversionRate.delta}
-              sparkline={trend.map((d) => d.conversionRate)}
-            />
-            <KpiCard
-              label="Revenue / Page View"
-              icon={ICONS.peso}
-              value={formatPeso(kpis.revenuePerView.value)}
-              delta={kpis.revenuePerView.delta}
-              sparkline={trend.map((d) => d.revenuePerView)}
-            />
-            <KpiCard
-              label="Page Views / User"
-              icon={ICONS.layers}
-              value={kpis.pageViewsPerUser.value.toFixed(2)}
-              delta={kpis.pageViewsPerUser.delta}
-              sparkline={trend.map((d) => d.pageViewsPerUser)}
-            />
-          </KpiRow>
+          <TrafficKpiFunnelSection
+            kpis={kpis}
+            trend={trend}
+            funnelStages={data.funnel}
+            funnelSubtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
+            totalRevenue={data.totalRevenue}
+            newVsReturning={data.newVsReturning}
+            newVsReturningSubtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning"
+          />
 
-          <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-4">
-            <div className="xl:col-span-2">
-              <Panel title="Traffic Trend" subtitle="Daily Users and Page Views (hmr.ph/shop/ONP)" className="h-full">
-                <TrendChart
-                  data={trend.map((d) => ({ ...d, dateLabel: formatShortDateLabel(d.date) }))}
-                  series={[
-                    { key: "pageViews", name: "Page Views", color: hrh.accent },
-                    { key: "users", name: "Users", color: hrh.series[0] },
-                  ]}
-                  xKey="dateLabel"
-                  valueFormatter={formatNum}
-                />
-              </Panel>
-            </div>
-            <div className="xl:col-span-3">
-              <Panel
-                title="Scoped Conversion Funnel"
-                subtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Payment Confirmed"
-                className="h-full"
-              >
-                <FunnelList stages={data.funnel.map((f) => ({ label: f.stage, value: f.count }))} stageHeight={76} gap={8} />
-                <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
-                    Total Revenue
-                  </span>
-                  <span className="font-display text-[18px] tabular-nums" style={{ color: hrh.ink }}>
-                    {formatPeso(data.totalRevenue)}
-                  </span>
-                </div>
-                <p className="text-[10.5px] mt-1.5" style={{ color: hrh.muted }}>
-                  Not a funnel stage — pesos aren't the same unit as the counts above, so it's shown separately rather than distorting the bar widths.
-                </p>
-              </Panel>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
               <EmptyState label="No ClickHouse table crosses this store's pages with device type — would need a direct GA4 Data API query, not yet wired up." />
             </Panel>
@@ -242,15 +300,6 @@ export default function TrafficConversion({ filters }) {
               <EmptyState label="This warehouse's GA4 data is daily-grain only, everywhere — no hour-of-day dimension exists at all yet, scoped or not." />
             </Panel>
           </div>
-
-          <Panel title="New vs Returning Users" subtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning">
-            <ShareBar
-              segments={[
-                { label: "New Users", value: data.newVsReturning[0].value, color: hrh.series[0] },
-                { label: "Returning Users", value: data.newVsReturning[1].value, color: hrh.accent },
-              ]}
-            />
-          </Panel>
         </>
       )}
     </div>
