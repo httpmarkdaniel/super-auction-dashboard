@@ -52,11 +52,24 @@ function mondayOfWeek(iso) {
 function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
 }
+// Store drill-down, layered on the segment's own store list — see
+// api/_retail-sales-overview.js's resolveStores for the full reasoning
+// (only honored when actually IN the segment's list). Date Range is
+// deliberately NOT threaded into this file — Daily/Weekly here are fixed
+// trailing windows (this month to date / last 4 weeks), same "independent
+// of the Date Range filter" convention as HRH Online's own trailing Sales
+// Trend panels (see api/_hrh-executive-overview.js's TRAILING_BUCKET_COUNT
+// comment) — a free-form range would break the "always current" premise
+// this trend view is built around.
+function resolveStores(segmentStores, storeParam) {
+  if (storeParam && segmentStores.includes(storeParam)) return [storeParam];
+  return segmentStores;
+}
 
 export async function handleRetailTrend(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
-    const stores = resolveSegment(segment);
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
     const today = manilaTodayISODate();
 
     // Day-click item detail — a separate lightweight branch, fetched
@@ -139,7 +152,7 @@ export async function handleRetailTrend(req, res) {
     });
 
     return res.status(200).json({
-      meta: { segment, stores, monthStart, today },
+      meta: { segment, store: req.query.store || "", stores, monthStart, today },
       daily,
       weekly,
     });

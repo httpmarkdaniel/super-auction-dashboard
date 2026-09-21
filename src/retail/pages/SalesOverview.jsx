@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ToggleSm from "../components/ToggleSm";
 import Hero from "../components/Hero";
 import { InsightList } from "../components/InsightCard";
 import { LoadingState, ErrorState } from "../components/States";
@@ -10,10 +9,12 @@ import { DonutChart, BarComparisonChart, DualAxisComboChart } from "../component
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
-const VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly (WoW)" },
-  { key: "mtd", label: "MTD" },
-];
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
 
 const AGE_BUCKET_COLOR = {
   "0-30 days": retail.blue,
@@ -40,27 +41,30 @@ function AgeBar({ label, pct, color }) {
 }
 
 // Real ClickHouse-backed Sales Overview — see api/_retail-sales-overview.js
-// (dispatched via ?report=salesOverview). "Weekly" compares the last full
-// Mon-Sun week against the week before (not week-to-date); "MTD" compares
-// month-to-date against the same elapsed span last month. Inventory
-// figures are a CURRENT point-in-time snapshot, independent of this
-// toggle. Two mockup sections are deliberately NOT included — see
-// Data Quality Notes at the bottom for why (Sales by Payment Method:
-// the only real payment-method field covers ~4% of actual transaction
-// volume; Products to Watch/days-of-supply: the sales↔inventory
-// product-name join is too weak to trust per-product).
+// (dispatched via ?report=salesOverview). Date Range (WTD/MTD/YTD/Previous
+// Week/Month/Year/Custom) is now the dashboard-wide Header filter, same as
+// every other retail page — replaces the old page-local Weekly/MTD toggle.
+// "MTD" is still a real, specific preset: month-to-date against the same
+// elapsed span last month, and the only preset MTD Attainment applies to
+// (see api file comment — no such thing as a weekly/arbitrary-range sales
+// target). Inventory figures are a CURRENT point-in-time snapshot,
+// independent of the Date Range filter. Two mockup sections are
+// deliberately NOT included — see Data Quality Notes at the bottom for why
+// (Sales by Payment Method: the only real payment-method field covers ~4%
+// of actual transaction volume; Products to Watch/days-of-supply: the
+// sales↔inventory product-name join is too weak to trust per-product).
 export default function SalesOverview({ filters }) {
-  const { segment } = filters;
+  const { segment, dateRange, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState("weekly");
+  const isMtd = dateRange === "mtd";
 
-  const load = useCallback(async (seg, v, signal) => {
+  const load = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, view: v, report: "salesOverview" });
+      const qs = new URLSearchParams({ segment: seg, ...dateRangeParams(dr), ...(st ? { store: st } : {}), report: "salesOverview" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -76,9 +80,9 @@ export default function SalesOverview({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(segment, view, controller.signal);
+    load(segment, dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [segment, view, load]);
+  }, [segment, dateRange, store, load]);
 
   if (loading && !data) return <LoadingState label="Loading Sales Overview…" />;
   if (error) return <ErrorState label={`Couldn't load Sales Overview: ${error}`} />;
@@ -103,21 +107,21 @@ export default function SalesOverview({ filters }) {
         ]}
       />
 
-      <Panel action={<ToggleSm value={view} onChange={setView} options={VIEW_OPTIONS} />} className="mb-3.5">
+      <Panel className="mb-3.5">
         <KpiRow>
-          <KpiCard label={view === "mtd" ? "MTD Revenue" : "Revenue"} value={formatPeso(data.kpis.revenue.value)} delta={data.kpis.revenue.delta} previousLabel={formatPeso(data.kpis.revenue.previous)} />
+          <KpiCard label={isMtd ? "MTD Revenue" : "Revenue"} value={formatPeso(data.kpis.revenue.value)} delta={data.kpis.revenue.delta} previousLabel={formatPeso(data.kpis.revenue.previous)} />
           <KpiCard
-            label={view === "mtd" ? "MTD Transactions" : "Transactions"}
+            label={isMtd ? "MTD Transactions" : "Transactions"}
             value={formatNum(data.kpis.transactions.value)}
             delta={data.kpis.transactions.delta}
             previousLabel={formatNum(data.kpis.transactions.previous)}
           />
-          <KpiCard label={view === "mtd" ? "MTD ABS" : "ABS"} value={formatPeso(data.kpis.abs.value)} delta={data.kpis.abs.delta} previousLabel={formatPeso(data.kpis.abs.previous)} sub="Avg Basket Size" />
+          <KpiCard label={isMtd ? "MTD ABS" : "ABS"} value={formatPeso(data.kpis.abs.value)} delta={data.kpis.abs.delta} previousLabel={formatPeso(data.kpis.abs.previous)} sub="Avg Basket Size" />
           <KpiCard label="Active SKUs" value={formatNum(data.moreKpis.activeSkus)} sub="Distinct products sold" />
           <KpiCard label="Total Customers" value={formatNum(data.moreKpis.totalCustomers)} sub="Named customers, current period" />
           <KpiCard label="New / Returning" value={`${formatNum(data.moreKpis.newCustomers)} / ${formatNum(data.moreKpis.returningCustomers)}`} sub="Named customers" />
         </KpiRow>
-        {view === "mtd" && data.kpis.attainment && (
+        {isMtd && data.kpis.attainment && (
           <div className="mt-1">
             <KpiRow>
               <KpiCard

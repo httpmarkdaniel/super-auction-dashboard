@@ -34,7 +34,7 @@ function formatWeekLabel(weekStart, weekEnd) {
 // Daily chart for that day's top items (a separate on-demand fetch, see
 // ?day=YYYY-MM-DD).
 export default function Trend({ filters }) {
-  const { segment } = filters;
+  const { segment, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -43,11 +43,11 @@ export default function Trend({ filters }) {
   const [dayDetail, setDayDetail] = useState(null);
   const [dayLoading, setDayLoading] = useState(false);
 
-  const load = useCallback(async (seg, signal) => {
+  const load = useCallback(async (seg, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, report: "trend" });
+      const qs = new URLSearchParams({ segment: seg, ...(st ? { store: st } : {}), report: "trend" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -66,14 +66,14 @@ export default function Trend({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(segment, controller.signal);
+    load(segment, store, controller.signal);
     return () => controller.abort();
-  }, [segment, load]);
+  }, [segment, store, load]);
 
-  const loadDayDetail = useCallback(async (seg, day, signal) => {
+  const loadDayDetail = useCallback(async (seg, st, day, signal) => {
     setDayLoading(true);
     try {
-      const qs = new URLSearchParams({ segment: seg, report: "trend", day });
+      const qs = new URLSearchParams({ segment: seg, ...(st ? { store: st } : {}), report: "trend", day });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
@@ -88,9 +88,9 @@ export default function Trend({ filters }) {
   useEffect(() => {
     if (!selectedDay) return;
     const controller = new AbortController();
-    loadDayDetail(segment, selectedDay, controller.signal);
+    loadDayDetail(segment, store, selectedDay, controller.signal);
     return () => controller.abort();
-  }, [segment, selectedDay, loadDayDetail]);
+  }, [segment, store, selectedDay, loadDayDetail]);
 
   const dailyByLabel = useMemo(() => {
     const map = new Map();
@@ -103,8 +103,13 @@ export default function Trend({ filters }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Trend
+        <div>
+          <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
+            Trend
+          </div>
+          <p className="text-[11.5px] mt-0.5" style={{ color: retail.muted }}>
+            Fixed trailing windows (this month to date / last 4 weeks) — not affected by the Date Range filter above.
+          </p>
         </div>
       </div>
 

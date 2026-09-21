@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ToggleSm from "../components/ToggleSm";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart, BarComparisonChart } from "../components/Charts";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum } from "../format";
 
-const VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly" },
-  { key: "mtd", label: "MTD" },
-];
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
 
 const SEG_COLUMNS = [
   { key: "segment", label: "Segment" },
@@ -41,17 +42,16 @@ const SEG_COLOR = { New: retail.good, Retained: retail.navy, Reactivated: retail
 // invoices with a real customer name — see that file's own comment for
 // why totals don't match Sales Overview's revenue total.
 export default function CustomerSegments({ filters }) {
-  const { segment } = filters;
+  const { segment, dateRange, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState("weekly");
 
-  const load = useCallback(async (seg, v, signal) => {
+  const load = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, view: v, report: "customerSegments" });
+      const qs = new URLSearchParams({ segment: seg, ...dateRangeParams(dr), ...(st ? { store: st } : {}), report: "customerSegments" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -67,9 +67,9 @@ export default function CustomerSegments({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(segment, view, controller.signal);
+    load(segment, dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [segment, view, load]);
+  }, [segment, dateRange, store, load]);
 
   const donutSegments = data
     ? ["New", "Retained", "Reactivated"].map((k) => ({ label: k, value: data.segments[k].revenue, color: SEG_COLOR[k] }))
@@ -91,7 +91,7 @@ export default function CustomerSegments({ filters }) {
 
       {data && !error && (
         <>
-          <Panel title="Customer Segments — Revenue Contribution" action={<ToggleSm value={view} onChange={setView} options={VIEW_OPTIONS} />} className="mb-4">
+          <Panel title="Customer Segments — Revenue Contribution" className="mb-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               <DonutChart segments={donutSegments} centerValue={formatCompactPeso(data.namedTotalRevenue)} centerLabel="Named" size={200} />
               <div>

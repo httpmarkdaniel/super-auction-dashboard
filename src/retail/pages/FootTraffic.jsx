@@ -12,10 +12,6 @@ const CHART_VIEW_OPTIONS = [
   { key: "daily", label: "Daily (This Month)" },
   { key: "weekly", label: "Weekly (Last 4 Weeks)" },
 ];
-const TABLE_VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly" },
-  { key: "mtd", label: "MTD" },
-];
 
 const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function formatWeekLabel(weekStart) {
@@ -23,22 +19,34 @@ function formatWeekLabel(weekStart) {
   return `${SHORT_MONTHS[sm - 1]} ${sd}`;
 }
 
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
+
 // Real ClickHouse-backed Foot Traffic — see api/_retail-foot-traffic.js
 // (dispatched via ?report=footTraffic). Always the 9 core walk-in
 // branches, regardless of the page's segment toggle — Wholesale/HRH
-// Online have no foot-traffic concept (see that file's own comment).
-export default function FootTraffic() {
+// Online have no foot-traffic concept (see that file's own comment). Store
+// drill-down still applies (narrows to one of those 9, if picked). The
+// "By Store" table's comparison window follows the dashboard-wide Date
+// Range filter now; the trend chart above it stays a fixed trailing
+// window (Daily/Weekly toggle), same convention as Trend.jsx.
+export default function FootTraffic({ filters }) {
+  const { dateRange, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [chartView, setChartView] = useState("daily");
-  const [tableView, setTableView] = useState("weekly");
+  const isMtd = dateRange === "mtd";
 
-  const load = useCallback(async (v, signal) => {
+  const load = useCallback(async (dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ view: v, report: "footTraffic" });
+      const qs = new URLSearchParams({ ...dateRangeParams(dr), ...(st ? { store: st } : {}), report: "footTraffic" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -54,20 +62,20 @@ export default function FootTraffic() {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(tableView, controller.signal);
+    load(dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [tableView, load]);
+  }, [dateRange, store, load]);
 
   const dailyChart = (data?.daily || []).map((r) => ({ dateLabel: formatShortDateLabel(r.date), traffic: r.traffic }));
   const weeklyChart = (data?.weekly || []).map((r) => ({ label: formatWeekLabel(r.weekStart), value: r.traffic }));
 
   const TABLE_COLUMNS = [
     { key: "store", label: "Store" },
-    { key: "traffic", label: tableView === "weekly" ? "Traffic (TW/LW)" : "Traffic (MTD/Last Month)", render: (r) => `${formatNum(r.curTraffic)} / ${formatNum(r.prevTraffic)}` },
-    { key: "txn", label: tableView === "weekly" ? "Txn (TW/LW)" : "Txn (MTD/Last Month)", render: (r) => `${formatNum(r.curTransactions)} / ${formatNum(r.prevTransactions)}` },
+    { key: "traffic", label: isMtd ? "Traffic (MTD/Last Month)" : "Traffic (Cur/Prev)", render: (r) => `${formatNum(r.curTraffic)} / ${formatNum(r.prevTraffic)}` },
+    { key: "txn", label: isMtd ? "Txn (MTD/Last Month)" : "Txn (Cur/Prev)", render: (r) => `${formatNum(r.curTransactions)} / ${formatNum(r.prevTransactions)}` },
     {
       key: "conv",
-      label: tableView === "weekly" ? "Conversion (TW/LW)" : "Conversion (MTD/Last Month)",
+      label: isMtd ? "Conversion (MTD/Last Month)" : "Conversion (Cur/Prev)",
       render: (r) => `${formatPct(r.curConversionPct)} / ${formatPct(r.prevConversionPct)}`,
     },
   ];
@@ -93,7 +101,7 @@ export default function FootTraffic() {
             )}
           </Panel>
 
-          <Panel title="Foot Traffic &amp; Conversion (By Store)" action={<ToggleSm value={tableView} onChange={setTableView} options={TABLE_VIEW_OPTIONS} />}>
+          <Panel title="Foot Traffic &amp; Conversion (By Store)">
             <DataTable columns={TABLE_COLUMNS} rows={data.table} paginate pageSize={9} emptyLabel="No foot traffic in this period." />
           </Panel>
 

@@ -67,28 +67,86 @@ function shiftMonthsClampedISO(iso, deltaMonths) {
   const nd = Math.min(d, daysInMonth(ny, nm1));
   return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
-function resolveView(view) {
+function shiftYearsClampedISO(iso, deltaYears) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const ny = y + deltaYears;
+  const nd = Math.min(d, daysInMonth(ny, m));
+  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function daysBetweenISO(fromIso, toIso) {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+// Dashboard-wide Date Range filter — see api/_retail-sales-overview.js's
+// resolveRange for the full comment (same shape/semantics, replacing this
+// page's old fixed Weekly/MTD toggle). MTD Attainment below still only
+// applies when this exact preset is selected.
+function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
-  if (view === "mtd") {
-    const current = { from: firstOfMonthISO(today), to: today };
-    const previous = { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) };
-    return { current, previous };
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    const lengthDays = daysBetweenISO(from, to) + 1;
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
   }
-  const thisWeekMonday = mondayOfWeek(today);
-  const current = { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
-  const previous = { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
-  return { current, previous };
+  if (range === "mtd") {
+    const to = today;
+    const from = firstOfMonthISO(to);
+    const prevAnchor = shiftMonthsClampedISO(to, -1);
+    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+  }
+  if (range === "ytd") {
+    const to = today;
+    const from = `${to.slice(0, 4)}-01-01`;
+    const prevTo = shiftYearsClampedISO(to, -1);
+    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    const from = addDaysISO(thisWeekMonday, -7);
+    const to = addDaysISO(thisWeekMonday, -1);
+    return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    const from = firstOfMonthISO(to);
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = firstOfMonthISO(prevTo);
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { current: { from: `${y}-01-01`, to: `${y}-12-31` }, previous: { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` } };
+  }
+  const to = today;
+  const from = mondayOfWeek(to);
+  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
 }
 function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
+}
+function resolveStores(segmentStores, storeParam) {
+  if (storeParam && segmentStores.includes(storeParam)) return [storeParam];
+  return segmentStores;
 }
 
 export async function handleRetailStorePerformance(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
-    const view = req.query.view === "mtd" ? "mtd" : "weekly";
-    const stores = resolveSegment(segment);
-    const { current, previous } = resolveView(view);
+    const range = req.query.range || "wtd";
+    let current;
+    let previous;
+    try {
+      ({ current, previous } = resolveRange(range, req.query.from, req.query.to));
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
 
     const [salesRows, targetRows] = await Promise.all([
       client
@@ -151,7 +209,7 @@ export async function handleRetailStorePerformance(req, res) {
     const totalTarget = table.reduce((s, r) => s + r.target, 0);
 
     return res.status(200).json({
-      meta: { view, current, previous, segment, stores },
+      meta: { range, current, previous, segment, store: req.query.store || "", stores },
       table,
       totals: { curRev: totalCur, prevRev: totalPrev, deltaPct: pctDelta(totalCur, totalPrev), target: totalTarget, attainmentPct: totalTarget > 0 ? safeDivide(totalCur, totalTarget) * 100 : null },
       dataQuality: ["Verified 2026-09-17: xv3.mart_sales_target currently has exactly one row per store/date (no duplicates), so a plain sum(daily_target) is correct — a duplicate-row bug was reported in an earlier version of this table but isn't present in the data this dashboard reads."],

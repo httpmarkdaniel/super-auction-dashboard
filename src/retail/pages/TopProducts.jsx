@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
-import ToggleSm from "../components/ToggleSm";
 import SubTabNav from "../components/SubTabNav";
 import { LoadingState, ErrorState } from "../components/States";
 import { retail } from "../theme";
@@ -12,10 +11,13 @@ const SUBVIEW_TABS = [
   { key: "item", label: "Item" },
   { key: "category", label: "Category" },
 ];
-const VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly" },
-  { key: "mtd", label: "MTD" },
-];
+
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
 
 function fmtQty(v, q) {
   return `${formatPeso(v)} (${formatNum(q)})`;
@@ -80,20 +82,19 @@ const CATEGORY_ITEM_COLUMNS = [
 // large window (4 weeks x up to 12 stores) and can take 15-25s to load —
 // this is a real data-volume constraint, not a stuck request.
 export default function TopProducts({ filters }) {
-  const { segment } = filters;
+  const { segment, dateRange, store } = filters;
   const [subview, setSubview] = useState("item");
   const [itemData, setItemData] = useState(null);
   const [categoryData, setCategoryData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [categoryView, setCategoryView] = useState("weekly");
   const [drilldownCategory, setDrilldownCategory] = useState(null);
 
-  const loadItem = useCallback(async (seg, signal) => {
+  const loadItem = useCallback(async (seg, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, subview: "item", report: "topProducts" });
+      const qs = new URLSearchParams({ segment: seg, ...(st ? { store: st } : {}), subview: "item", report: "topProducts" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -107,11 +108,11 @@ export default function TopProducts({ filters }) {
     }
   }, []);
 
-  const loadCategory = useCallback(async (seg, v, signal) => {
+  const loadCategory = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, subview: "category", view: v, report: "topProducts" });
+      const qs = new URLSearchParams({ segment: seg, ...dateRangeParams(dr), ...(st ? { store: st } : {}), subview: "category", report: "topProducts" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -127,10 +128,10 @@ export default function TopProducts({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    if (subview === "item") loadItem(segment, controller.signal);
-    else loadCategory(segment, categoryView, controller.signal);
+    if (subview === "item") loadItem(segment, store, controller.signal);
+    else loadCategory(segment, dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [segment, subview, categoryView, loadItem, loadCategory]);
+  }, [segment, dateRange, store, subview, loadItem, loadCategory]);
 
   const drilldownItems = drilldownCategory ? categoryData?.itemsByCategory?.[drilldownCategory] || [] : [];
 
@@ -178,7 +179,7 @@ export default function TopProducts({ filters }) {
           <>
             {loading && !categoryData && <LoadingState label="Loading Top Categories…" />}
             {categoryData && !error && (
-              <Panel title="Top Categories" subtitle="Click a row for its top 5 items" action={<ToggleSm value={categoryView} onChange={setCategoryView} options={VIEW_OPTIONS} />}>
+              <Panel title="Top Categories" subtitle="Click a row for its top 5 items">
                 <DataTable columns={CATEGORY_COLUMNS} rows={categoryData.categories} onRowClick={(r) => setDrilldownCategory(r.category)} paginate pageSize={12} emptyLabel="No sales in this period." />
               </Panel>
             )}

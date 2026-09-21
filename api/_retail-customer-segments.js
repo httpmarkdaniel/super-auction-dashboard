@@ -52,14 +52,38 @@ function firstOfMonthISO(iso) {
   const [y, m] = iso.split("-").map(Number);
   return `${y}-${String(m).padStart(2, "0")}-01`;
 }
-function resolveView(view) {
+// Dashboard-wide Date Range filter, current window only (this page's own
+// weekly 3R trend below is a separate, fixed trailing computation,
+// unaffected by this) — see api/_retail-sales-overview.js's resolveRange
+// for the full comment on each preset.
+function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
-  if (view === "mtd") return { from: firstOfMonthISO(today), to: today };
-  const thisWeekMonday = mondayOfWeek(today);
-  return { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    return { from: fromParam <= toParam ? fromParam : toParam, to: fromParam <= toParam ? toParam : fromParam };
+  }
+  if (range === "mtd") return { from: firstOfMonthISO(today), to: today };
+  if (range === "ytd") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    return { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    return { from: firstOfMonthISO(to), to };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { from: `${y}-01-01`, to: `${y}-12-31` };
+  }
+  return { from: mondayOfWeek(today), to: today };
 }
 function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
+}
+function resolveStores(segmentStores, storeParam) {
+  if (storeParam && segmentStores.includes(storeParam)) return [storeParam];
+  return segmentStores;
 }
 
 // New/Retained/Reactivated — same cohort methodology as
@@ -141,9 +165,14 @@ async function classifyCustomerSegments(stores, from, to) {
 export async function handleRetailCustomerSegments(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
-    const view = req.query.view === "mtd" ? "mtd" : "weekly";
-    const stores = resolveSegment(segment);
-    const current = resolveView(view);
+    const range = req.query.range || "wtd";
+    let current;
+    try {
+      current = resolveRange(range, req.query.from, req.query.to);
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
     const today = manilaTodayISODate();
 
     // classification (current window) + revenue-by-invoice (current
@@ -253,7 +282,7 @@ export async function handleRetailCustomerSegments(req, res) {
     }));
 
     return res.status(200).json({
-      meta: { view, current, segment, stores },
+      meta: { range, current, segment, store: req.query.store || "", stores },
       segments: {
         New: { revenue: segTotals.New.rev, customers: segTotals.New.customerSet.size, sharePct: safeDivide(segTotals.New.rev, namedTotal) * 100 },
         Retained: { revenue: segTotals.Retained.rev, customers: segTotals.Retained.customerSet.size, sharePct: safeDivide(segTotals.Retained.rev, namedTotal) * 100 },

@@ -59,17 +59,74 @@ function shiftMonthsClampedISO(iso, deltaMonths) {
   const nd = Math.min(d, daysInMonth(ny, nm1));
   return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
-function resolveTableView(view) {
+function shiftYearsClampedISO(iso, deltaYears) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const ny = y + deltaYears;
+  const nd = Math.min(d, daysInMonth(ny, m));
+  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function daysBetweenISO(fromIso, toIso) {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+// Dashboard-wide Date Range filter — controls the `table` (per-store
+// traffic + conversion, current vs previous) below only. `daily`/`weekly`
+// stay fixed trailing windows (this month to date / last 4 weeks),
+// independent of this filter, same convention as Trend.jsx's own charts.
+// See api/_retail-sales-overview.js's resolveRange for the full comment.
+function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
-  if (view === "mtd") {
-    const current = { from: firstOfMonthISO(today), to: today };
-    const previous = { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) };
-    return { current, previous };
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    const lengthDays = daysBetweenISO(from, to) + 1;
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
   }
-  const thisWeekMonday = mondayOfWeek(today);
-  const current = { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
-  const previous = { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
-  return { current, previous };
+  if (range === "mtd") {
+    const to = today;
+    const from = firstOfMonthISO(to);
+    const prevAnchor = shiftMonthsClampedISO(to, -1);
+    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+  }
+  if (range === "ytd") {
+    const to = today;
+    const from = `${to.slice(0, 4)}-01-01`;
+    const prevTo = shiftYearsClampedISO(to, -1);
+    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    const from = addDaysISO(thisWeekMonday, -7);
+    const to = addDaysISO(thisWeekMonday, -1);
+    return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    const from = firstOfMonthISO(to);
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = firstOfMonthISO(prevTo);
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { current: { from: `${y}-01-01`, to: `${y}-12-31` }, previous: { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` } };
+  }
+  const to = today;
+  const from = mondayOfWeek(to);
+  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+}
+// Store drill-down — only honored when it's actually one of the 9 core
+// walk-in branches (see file-header comment: Wholesale/HRH Online have no
+// foot traffic at all), otherwise every core branch is shown, same as
+// before this filter existed.
+function resolveStores(storeParam) {
+  if (storeParam && CORE_RETAIL_STORES.includes(storeParam)) return [storeParam];
+  return CORE_RETAIL_STORES;
 }
 
 // This tab only ever applies to the 9 core walk-in branches, regardless
@@ -80,8 +137,15 @@ function resolveTableView(view) {
 // ... This tab only applies to Retail").
 export async function handleRetailFootTraffic(req, res) {
   try {
-    const view = req.query.view === "mtd" ? "mtd" : "weekly";
-    const { current, previous } = resolveTableView(view);
+    const range = req.query.range || "wtd";
+    let current;
+    let previous;
+    try {
+      ({ current, previous } = resolveRange(range, req.query.from, req.query.to));
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const stores = resolveStores(req.query.store);
     const today = manilaTodayISODate();
     const monthStart = firstOfMonthISO(today);
     const fourWeeksAgoMonday = addDaysISO(mondayOfWeek(today), -28);
@@ -90,14 +154,14 @@ export async function handleRetailFootTraffic(req, res) {
       client
         .query({
           query: `SELECT date, sum(traffic_count) AS traffic FROM xv3.mart_foot_traffic_masterlist WHERE store_name IN {stores:Array(String)} AND date BETWEEN {from:String} AND {today:String} GROUP BY date`,
-          query_params: { stores: CORE_RETAIL_STORES, from: monthStart, today },
+          query_params: { stores, from: monthStart, today },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       client
         .query({
           query: `SELECT toMonday(date) AS weekStart, sum(traffic_count) AS traffic FROM xv3.mart_foot_traffic_masterlist WHERE store_name IN {stores:Array(String)} AND date BETWEEN {from:String} AND {to:String} GROUP BY weekStart ORDER BY weekStart`,
-          query_params: { stores: CORE_RETAIL_STORES, from: fourWeeksAgoMonday, to: addDaysISO(mondayOfWeek(today), -1) },
+          query_params: { stores, from: fourWeeksAgoMonday, to: addDaysISO(mondayOfWeek(today), -1) },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -111,7 +175,7 @@ export async function handleRetailFootTraffic(req, res) {
             WHERE store_name IN {stores:Array(String)} AND date BETWEEN {prevFrom:String} AND {curTo:String}
             GROUP BY store_name
           `,
-          query_params: { stores: CORE_RETAIL_STORES, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
+          query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -125,7 +189,7 @@ export async function handleRetailFootTraffic(req, res) {
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
             GROUP BY store_name
           `,
-          query_params: { stores: CORE_RETAIL_STORES, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
+          query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
@@ -156,7 +220,7 @@ export async function handleRetailFootTraffic(req, res) {
       .sort((a, b) => b.curTraffic - a.curTraffic);
 
     return res.status(200).json({
-      meta: { view, current, previous, stores: CORE_RETAIL_STORES },
+      meta: { range, current, previous, store: req.query.store || "", stores },
       daily,
       weekly,
       table,

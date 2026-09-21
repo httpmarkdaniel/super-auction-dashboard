@@ -52,14 +52,41 @@ function firstOfMonthISO(iso) {
   const [y, m] = iso.split("-").map(Number);
   return `${y}-${String(m).padStart(2, "0")}-01`;
 }
-function resolveView(view) {
+// Dashboard-wide Date Range filter, current window only — used by the
+// Category subview only (handleCategoryView). The Item subview
+// (handleItemView) deliberately stays fixed to This Week vs Last Week
+// regardless of this filter — see that function's own comment (the
+// reference report's "This Week vs Last Week" framing has no MTD/
+// arbitrary-range equivalent). See api/_retail-sales-overview.js's
+// resolveRange for the full comment on each preset.
+function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
-  if (view === "mtd") return { from: firstOfMonthISO(today), to: today };
-  const thisWeekMonday = mondayOfWeek(today);
-  return { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    return { from: fromParam <= toParam ? fromParam : toParam, to: fromParam <= toParam ? toParam : fromParam };
+  }
+  if (range === "mtd") return { from: firstOfMonthISO(today), to: today };
+  if (range === "ytd") return { from: `${today.slice(0, 4)}-01-01`, to: today };
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    return { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    return { from: firstOfMonthISO(to), to };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { from: `${y}-01-01`, to: `${y}-12-31` };
+  }
+  return { from: mondayOfWeek(today), to: today };
 }
 function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
+}
+function resolveStores(segmentStores, storeParam) {
+  if (storeParam && segmentStores.includes(storeParam)) return [storeParam];
+  return segmentStores;
 }
 
 async function stockStatusFor(productNames, stores) {
@@ -184,8 +211,7 @@ async function handleItemView(req, res, stores) {
   });
 }
 
-async function handleCategoryView(req, res, stores, view) {
-  const current = resolveView(view);
+async function handleCategoryView(req, res, stores, range, current) {
   const TOP_N = 12;
   const TOP_ITEMS_PER_CATEGORY = 5;
 
@@ -237,7 +263,7 @@ async function handleCategoryView(req, res, stores, view) {
   }
 
   return res.status(200).json({
-    meta: { view, current, stores },
+    meta: { range, current, stores },
     categories,
     itemsByCategory: Object.fromEntries(itemsByCategory),
   });
@@ -253,12 +279,18 @@ async function handleCategoryView(req, res, stores, view) {
 export async function handleRetailTopProducts(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
-    const stores = resolveSegment(segment);
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
     const subview = req.query.subview === "category" ? "category" : "item";
 
     if (subview === "category") {
-      const view = req.query.view === "mtd" ? "mtd" : "weekly";
-      return handleCategoryView(req, res, stores, view);
+      const range = req.query.range || "wtd";
+      let current;
+      try {
+        current = resolveRange(range, req.query.from, req.query.to);
+      } catch (rangeErr) {
+        return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+      }
+      return handleCategoryView(req, res, stores, range, current);
     }
     return handleItemView(req, res, stores);
   } catch (err) {

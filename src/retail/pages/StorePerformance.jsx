@@ -1,31 +1,34 @@
 import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ToggleSm from "../components/ToggleSm";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart } from "../components/Charts";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
-const VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly (WoW)" },
-  { key: "mtd", label: "MTD (vs Last Month)" },
-];
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
 
 // Real ClickHouse-backed Store Performance — see
 // api/_retail-store-performance.js (dispatched via ?report=storePerformance).
+// Date Range is now the dashboard-wide Header filter; "MTD" is still the
+// one preset with a real target/attainment column (see api file comment).
 export default function StorePerformance({ filters }) {
-  const { segment } = filters;
+  const { segment, dateRange, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState("weekly");
+  const isMtd = dateRange === "mtd";
 
-  const load = useCallback(async (seg, v, signal) => {
+  const load = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, view: v, report: "storePerformance" });
+      const qs = new URLSearchParams({ segment: seg, ...dateRangeParams(dr), ...(st ? { store: st } : {}), report: "storePerformance" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -41,17 +44,17 @@ export default function StorePerformance({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(segment, view, controller.signal);
+    load(segment, dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [segment, view, load]);
+  }, [segment, dateRange, store, load]);
 
-  const WEEKLY_COLUMNS = [
+  const CURRENT_PERIOD_COLUMNS = [
     { key: "store", label: "Store" },
-    { key: "curRev", label: "This Week", render: (r) => formatPeso(r.curRev) },
-    { key: "prevRev", label: "Last Week", render: (r) => formatPeso(r.prevRev) },
-    { key: "deltaPct", label: "WoW %", render: (r) => (r.deltaPct === null ? "—" : `${r.deltaPct >= 0 ? "▲" : "▼"} ${Math.abs(r.deltaPct).toFixed(1)}%`) },
-    { key: "txn", label: "Txn (TW/LW)", render: (r) => `${formatNum(r.curTxn)} / ${formatNum(r.prevTxn)}` },
-    { key: "units", label: "Units (TW/LW)", render: (r) => `${formatNum(r.curUnits)} / ${formatNum(r.prevUnits)}` },
+    { key: "curRev", label: "Current Period", render: (r) => formatPeso(r.curRev) },
+    { key: "prevRev", label: "Previous Period", render: (r) => formatPeso(r.prevRev) },
+    { key: "deltaPct", label: "Change %", render: (r) => (r.deltaPct === null ? "—" : `${r.deltaPct >= 0 ? "▲" : "▼"} ${Math.abs(r.deltaPct).toFixed(1)}%`) },
+    { key: "txn", label: "Txn (Cur/Prev)", render: (r) => `${formatNum(r.curTxn)} / ${formatNum(r.prevTxn)}` },
+    { key: "units", label: "Units (Cur/Prev)", render: (r) => `${formatNum(r.curUnits)} / ${formatNum(r.prevUnits)}` },
   ];
   const MTD_COLUMNS = [
     { key: "store", label: "Store" },
@@ -77,14 +80,14 @@ export default function StorePerformance({ filters }) {
 
       {data && !error && (
         <>
-          <Panel title="Store-Level Performance" action={<ToggleSm value={view} onChange={setView} options={VIEW_OPTIONS} />} className="mb-4">
+          <Panel title="Store-Level Performance" className="mb-4">
             <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 items-start">
-              <DataTable columns={view === "weekly" ? WEEKLY_COLUMNS : MTD_COLUMNS} rows={data.table} paginate pageSize={12} emptyLabel="No sales in this period." />
+              <DataTable columns={isMtd ? MTD_COLUMNS : CURRENT_PERIOD_COLUMNS} rows={data.table} paginate pageSize={12} emptyLabel="No sales in this period." />
               <DonutChart segments={donutSegments} centerValue={formatCompactPeso(data.totals.curRev)} centerLabel="Total" />
             </div>
           </Panel>
 
-          <Panel title="MTD Target Achievement (Always MTD)">
+          <Panel title="MTD Target Achievement">
             <DataTable
               columns={[
                 { key: "store", label: "Store" },
@@ -92,8 +95,8 @@ export default function StorePerformance({ filters }) {
                 { key: "target", label: "Full Month Target", render: (r) => (r.target > 0 ? formatPeso(r.target) : "—") },
                 { key: "attainmentPct", label: "Attainment", render: (r) => (r.attainmentPct === null ? "—" : formatPct(r.attainmentPct)) },
               ]}
-              rows={view === "mtd" ? data.table : []}
-              emptyLabel={view === "mtd" ? "No sales this month." : "Switch to the MTD toggle above to see target achievement."}
+              rows={isMtd ? data.table : []}
+              emptyLabel={isMtd ? "No sales this month." : "Select the Month to Date preset in the Date Range filter above to see target achievement."}
               paginate
               pageSize={12}
             />

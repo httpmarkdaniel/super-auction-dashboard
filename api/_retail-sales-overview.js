@@ -70,28 +70,82 @@ function shiftMonthsClampedISO(iso, deltaMonths) {
   const nd = Math.min(d, daysInMonth(ny, nm1));
   return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
 }
-// "Weekly" = the last FULL completed Mon-Sun calendar week ("This Week"),
-// vs the week before ("Last Week") — NOT week-to-date. "MTD" = 1st of
-// this month through today, vs the same elapsed span last month. Both
-// views reuse this dashboard's existing prevWeek/mtd preset math (same
-// resolveRange/resolveComparisonWindow shape as every other api/_*.js
-// file), just fixed to one specific preset per view instead of a
-// free-form Date Range filter, per the reference report's own two-toggle
-// (Weekly/MTD) pattern.
-function resolveView(view) {
+function shiftYearsClampedISO(iso, deltaYears) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const ny = y + deltaYears;
+  const nd = Math.min(d, daysInMonth(ny, m));
+  return `${ny}-${String(m).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+function daysBetweenISO(fromIso, toIso) {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+// Dashboard-wide Date Range filter (WTD/MTD/YTD/Previous Week/Month/Year/
+// Custom) — same resolveRange shape/semantics as every api/_hrh-*.js file
+// (see api/_hrh-traffic-analytics.js's own resolveRange), replacing this
+// page's old fixed Weekly/MTD toggle (view="mtd"|"weekly") now that the
+// filter lives dashboard-wide in the Header instead of per-page. "mtd" is
+// still a real preset (1st of month through today vs same elapsed span
+// last month) — MTD Attainment below still only applies when this exact
+// preset is selected, since there's no such thing as a "weekly" or
+// arbitrary-range sales target in xv3.mart_sales_target.
+function resolveRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
-  if (view === "mtd") {
-    const current = { from: firstOfMonthISO(today), to: today };
-    const previous = { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) };
-    return { current, previous };
+  if (range === "custom") {
+    if (!fromParam || !toParam) throw new RangeError("Custom range requires both from and to");
+    const from = fromParam <= toParam ? fromParam : toParam;
+    const to = fromParam <= toParam ? toParam : fromParam;
+    const lengthDays = daysBetweenISO(from, to) + 1;
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = addDaysISO(prevTo, -(lengthDays - 1));
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
   }
-  const thisWeekMonday = mondayOfWeek(today);
-  const current = { from: addDaysISO(thisWeekMonday, -7), to: addDaysISO(thisWeekMonday, -1) };
-  const previous = { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
-  return { current, previous };
+  if (range === "mtd") {
+    const to = today;
+    const from = firstOfMonthISO(to);
+    const prevAnchor = shiftMonthsClampedISO(to, -1);
+    return { current: { from, to }, previous: { from: firstOfMonthISO(prevAnchor), to: prevAnchor } };
+  }
+  if (range === "ytd") {
+    const to = today;
+    const from = `${to.slice(0, 4)}-01-01`;
+    const prevTo = shiftYearsClampedISO(to, -1);
+    const prevFrom = `${Number(to.slice(0, 4)) - 1}-01-01`;
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevWeek") {
+    const thisWeekMonday = mondayOfWeek(today);
+    const from = addDaysISO(thisWeekMonday, -7);
+    const to = addDaysISO(thisWeekMonday, -1);
+    return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
+  }
+  if (range === "prevMonth") {
+    const to = addDaysISO(firstOfMonthISO(today), -1);
+    const from = firstOfMonthISO(to);
+    const prevTo = addDaysISO(from, -1);
+    const prevFrom = firstOfMonthISO(prevTo);
+    return { current: { from, to }, previous: { from: prevFrom, to: prevTo } };
+  }
+  if (range === "prevYear") {
+    const y = Number(today.slice(0, 4)) - 1;
+    return { current: { from: `${y}-01-01`, to: `${y}-12-31` }, previous: { from: `${y - 1}-01-01`, to: `${y - 1}-12-31` } };
+  }
+  // Default/"wtd": Monday of this week through today.
+  const to = today;
+  const from = mondayOfWeek(to);
+  return { current: { from, to }, previous: { from: addDaysISO(from, -7), to: addDaysISO(to, -7) } };
 }
 function resolveSegment(segment) {
   return SEGMENTS[segment] || SEGMENTS.all;
+}
+// Store drill-down, layered on top of the segment's own store list — only
+// honored when the requested store is actually IN that list, so a
+// mismatched segment/store combination (e.g. a stale `store` param after
+// switching segment) can't silently leak stores outside the segment.
+function resolveStores(segmentStores, storeParam) {
+  if (storeParam && segmentStores.includes(storeParam)) return [storeParam];
+  return segmentStores;
 }
 
 // Store -> region — see src/retail/storeRegions.js for the full writeup
@@ -116,14 +170,20 @@ const STORE_REGIONS = {
 export async function handleRetailSalesOverview(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
-    const view = req.query.view === "mtd" ? "mtd" : "weekly";
-    const stores = resolveSegment(segment);
-    const { current, previous } = resolveView(view);
+    const range = req.query.range || "wtd";
+    let current;
+    let previous;
+    try {
+      ({ current, previous } = resolveRange(range, req.query.from, req.query.to));
+    } catch (rangeErr) {
+      return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
+    }
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
 
-    // MTD Attainment needs a target — only queried for the "mtd" view (the
-    // reference report only ever shows Attainment on the MTD toggle, never
-    // Weekly, since there's no such thing as a "weekly target" in
-    // xv3.mart_sales_target).
+    // MTD Attainment needs a target — only queried when the "mtd" preset is
+    // selected (the reference report only ever shows Attainment for that
+    // preset, since there's no such thing as a "weekly" or arbitrary-range
+    // target in xv3.mart_sales_target).
     const [kpiRows, targetRows, storeRows, channelRows, productRows, recencyRows] = await Promise.all([
       client
         .query({
@@ -143,7 +203,7 @@ export async function handleRetailSalesOverview(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      view === "mtd"
+      range === "mtd"
         ? client
             .query({
               query: `SELECT sum(daily_target) AS target FROM xv3.mart_sales_target WHERE store_name IN {stores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String}`,
@@ -227,7 +287,7 @@ export async function handleRetailSalesOverview(req, res) {
     const curAbs = safeDivide(curRev, curTxn);
     const prevAbs = safeDivide(prevRev, prevTxn);
     const target = toNum(targetRows[0]?.target);
-    const attainment = view === "mtd" && target > 0 ? safeDivide(curRev, target) * 100 : null;
+    const attainment = range === "mtd" && target > 0 ? safeDivide(curRev, target) * 100 : null;
 
     const storeDeltas = storeRows.map((r) => ({ store: r.store_name, cur: toNum(r.cur_rev), prev: toNum(r.prev_rev), deltaPct: pctDelta(toNum(r.cur_rev), toNum(r.prev_rev)) }));
     const withDelta = storeDeltas.filter((s) => s.deltaPct !== null);
@@ -447,7 +507,7 @@ export async function handleRetailSalesOverview(req, res) {
     // query, so this dashboard states what changed and leaves the
     // "what to do about it" to the reader).
     const notableChanges = [];
-    if (topStore) notableChanges.push(`${topStore.store} had the strongest ${view === "mtd" ? "vs-last-month" : "week-over-week"} change: ${topStore.deltaPct >= 0 ? "+" : ""}${topStore.deltaPct.toFixed(1)}%.`);
+    if (topStore) notableChanges.push(`${topStore.store} had the strongest ${range === "mtd" ? "vs-last-month" : "vs previous period"} change: ${topStore.deltaPct >= 0 ? "+" : ""}${topStore.deltaPct.toFixed(1)}%.`);
     if (worstStore && worstStore.store !== topStore?.store) {
       notableChanges.push(`${worstStore.store} had the steepest decline: ${worstStore.deltaPct.toFixed(1)}%.`);
     }
@@ -455,13 +515,13 @@ export async function handleRetailSalesOverview(req, res) {
     if (topProduct) notableChanges.push(`${topProduct.product} was the top-selling product this period.`);
 
     return res.status(200).json({
-      meta: { view, current, previous, segment, stores },
+      meta: { range, current, previous, segment, store: req.query.store || "", stores },
       kpis: {
         revenue: { value: curRev, previous: prevRev, delta: pctDelta(curRev, prevRev) },
         transactions: { value: curTxn, previous: prevTxn, delta: pctDelta(curTxn, prevTxn) },
         units: { value: curUnits, previous: prevUnits, delta: pctDelta(curUnits, prevUnits) },
         abs: { value: curAbs, previous: prevAbs, delta: pctDelta(curAbs, prevAbs) },
-        attainment: view === "mtd" ? { value: attainment, target } : null,
+        attainment: range === "mtd" ? { value: attainment, target } : null,
       },
       atAGlance: {
         topStore,

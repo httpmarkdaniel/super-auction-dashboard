@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
-import ToggleSm from "../components/ToggleSm";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart } from "../components/Charts";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
-const VIEW_OPTIONS = [
-  { key: "weekly", label: "Weekly" },
-  { key: "mtd", label: "MTD" },
-];
+function dateRangeParams(dateRange) {
+  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
+    return { range: "custom", from: dateRange.from, to: dateRange.to };
+  }
+  return { range: dateRange };
+}
 
 const CHANNEL_COLUMNS = [
   { key: "channel", label: "Channel" },
@@ -24,17 +25,16 @@ const CHANNEL_COLUMNS = [
 // (dispatched via ?report=salesChannel). Channel comes directly from
 // xv3.mart_net_sales' own sales_channel field.
 export default function SalesChannel({ filters }) {
-  const { segment } = filters;
+  const { segment, dateRange, store } = filters;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [view, setView] = useState("weekly");
 
-  const load = useCallback(async (seg, v, signal) => {
+  const load = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ segment: seg, view: v, report: "salesChannel" });
+      const qs = new URLSearchParams({ segment: seg, ...dateRangeParams(dr), ...(st ? { store: st } : {}), report: "salesChannel" });
       const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -50,9 +50,9 @@ export default function SalesChannel({ filters }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    load(segment, view, controller.signal);
+    load(segment, dateRange, store, controller.signal);
     return () => controller.abort();
-  }, [segment, view, load]);
+  }, [segment, dateRange, store, load]);
 
   const segments = (data?.channels || []).map((c, i) => ({ label: c.channel, value: c.gmv, color: retail.series[i % retail.series.length] }));
 
@@ -69,7 +69,7 @@ export default function SalesChannel({ filters }) {
 
       {data && !error && (
         <>
-          <Panel action={<ToggleSm value={view} onChange={setView} options={VIEW_OPTIONS} />} className="mb-4">
+          <Panel className="mb-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
               <DonutChart segments={segments} centerValue={formatCompactPeso(data.totalGmv)} centerLabel="Total" size={200} />
               <DataTable columns={CHANNEL_COLUMNS} rows={data.channels} emptyLabel="No sales in this period." />
