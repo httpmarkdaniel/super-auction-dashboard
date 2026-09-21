@@ -17,6 +17,7 @@ const TAB_ICONS = {
   footTraffic: "🚶",
   customerSegments: "👥",
   topProducts: "🏷️",
+  stocks: "📦",
   methodology: "📝",
 };
 

@@ -8,6 +8,7 @@ import SalesChannel from "./pages/SalesChannel";
 import FootTraffic from "./pages/FootTraffic";
 import CustomerSegments from "./pages/CustomerSegments";
 import TopProducts from "./pages/TopProducts";
+import Stocks from "./pages/Stocks";
 import Methodology from "./pages/Methodology";
 import { retail } from "./theme";
 import { SEGMENTS } from "./segments";
@@ -21,6 +22,7 @@ const PAGES = {
   footTraffic: FootTraffic,
   customerSegments: CustomerSegments,
   topProducts: TopProducts,
+  stocks: Stocks,
   methodology: Methodology,
 };
 

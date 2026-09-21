@@ -5,6 +5,7 @@ import { handleRetailSalesChannel } from "./_retail-sales-channel.js";
 import { handleRetailFootTraffic } from "./_retail-foot-traffic.js";
 import { handleRetailCustomerSegments } from "./_retail-customer-segments.js";
 import { handleRetailTopProducts } from "./_retail-top-products.js";
+import { handleRetailStocks } from "./_retail-stocks.js";
 
 // Retail's own dispatch entrypoint — same report=X pattern as
 // api/hrh-sales-analytics.js, fanning out to _retail-*.js handlers. One
@@ -18,5 +19,6 @@ export default async function handler(req, res) {
   if (req.query.report === "footTraffic") return handleRetailFootTraffic(req, res);
   if (req.query.report === "customerSegments") return handleRetailCustomerSegments(req, res);
   if (req.query.report === "topProducts") return handleRetailTopProducts(req, res);
+  if (req.query.report === "stocks") return handleRetailStocks(req, res);
   return res.status(400).json({ error: "Unknown report", message: `report=${req.query.report}` });
 }
