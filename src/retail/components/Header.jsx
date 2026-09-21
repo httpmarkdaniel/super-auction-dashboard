@@ -16,7 +16,7 @@ export default function Header({ segment, onSegmentChange, dateRange, onDateRang
   const lastUpdated = now.toLocaleString("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
   return (
-    <div className="sticky top-0 z-20 flex items-center justify-between gap-[18px] px-6 py-[18px] flex-wrap" style={{ background: retail.surface, borderBottom: `1px solid ${retail.border}` }}>
+    <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-5 md:px-6 py-3.5 flex-wrap" style={{ background: retail.surface, borderBottom: `1px solid ${retail.border}` }}>
       <div>
         <h2 className="m-0 text-[22px] font-bold" style={{ color: retail.ink }}>
           Retail Dashboard
@@ -25,7 +25,7 @@ export default function Header({ segment, onSegmentChange, dateRange, onDateRang
           Sales, foot traffic, and customers — All Stores, Retail, and Wholesale in one view.
         </p>
       </div>
-      <div className="flex items-center gap-3.5 flex-wrap justify-end">
+      <div className="flex items-center gap-3 flex-wrap justify-end">
         <SegmentToggle value={segment} onChange={onSegmentChange} />
         <StoreSelect value={store} onChange={onStoreChange} stores={storeOptions} />
         <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
