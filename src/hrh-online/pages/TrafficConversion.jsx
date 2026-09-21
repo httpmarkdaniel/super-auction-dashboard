@@ -256,72 +256,10 @@ export default function TrafficConversion({ filters }) {
 
       {data && !error && (
         <>
-          {/* One dropdown — "Whole Site" (sum of the 6 real-online-store
-              branches) plus each branch individually. HRH Online is never
-              an option here (it's its own fixed section below). Moved to
-              the very TOP of the page so it's the first thing visible, no
-              scrolling required. */}
-          <div
-            className="rounded-lg p-4 mb-6 flex items-center justify-between gap-3 flex-wrap"
-            style={{ border: `1px solid ${hrh.border}`, background: hrh.surface }}
-          >
-            <div>
-              <div className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
-                Compare
-              </div>
-              <p className="text-[11px] mt-0.5" style={{ color: hrh.muted }}>
-                Pick Whole Site or any one branch to see its Traffic &amp; Conversion below, using the same methodology as HRH Online.
-              </p>
-            </div>
-            <select
-              value={selectedOption}
-              onChange={(e) => setSelectedOption(e.target.value)}
-              className="text-[13px] rounded-md px-3 py-2 outline-none font-medium"
-              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
-            >
-              <option value="">Select…</option>
-              <option value={WHOLE_SITE_OPTION}>Whole Site</option>
-              {branches.map((b) => (
-                <option key={b.code} value={b.code}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedOption && selectedResult && (
-            <>
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
-                  {selectedLabel}
-                </span>
-                {selectedIsWholeSite && (
-                  <span
-                    className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
-                    style={{ background: hrh.blueSoft, color: hrh.blueText }}
-                  >
-                    Pioneer + Cainta + Sucat + Mabalacat + Santa Rosa Road + Subic
-                  </span>
-                )}
-              </div>
-              <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
-                {selectedScopeNote}
-              </div>
-              <TrafficKpiFunnelSection
-                kpis={selectedResult.kpis}
-                trend={selectedTrend}
-                funnelStages={selectedResult.funnel}
-                funnelSubtitle={selectedFunnelSubtitle}
-                totalRevenue={selectedResult.totalRevenue}
-                newVsReturning={selectedResult.newVsReturning}
-                newVsReturningSubtitle={`Share of users in this period (${selectedLabel}) — same GA4 "new" caveat as HRH Online below.`}
-              />
-              <div className="my-6 pt-1" style={{ borderTop: `1px solid ${hrh.border}` }} />
-            </>
-          )}
-
+          {/* SECTION 1 of 2 — HRH Online. Always visible, its own fixed
+              section, never mixed with the Whole Site/Branch picker below. */}
           <div className="flex items-start justify-between gap-3 mb-3">
-            <span className="text-[11.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.ink2 }}>
+            <span className="text-[13px] font-bold uppercase tracking-[0.04em]" style={{ color: hrh.ink }}>
               HRH Online
             </span>
             <span
@@ -345,7 +283,75 @@ export default function TrafficConversion({ filters }) {
             newVsReturningSubtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning"
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="my-8 pt-1" style={{ borderTop: `2px solid ${hrh.border}` }} />
+
+          {/* SECTION 2 of 2 — Whole Site & Branches. A completely separate
+              section from HRH Online above: one dropdown picks EITHER
+              "Whole Site" (the sum of the 6 real-online-store branches) OR
+              one specific branch, sharing the same result display below it.
+              HRH Online is never an option in this dropdown. */}
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <span className="text-[13px] font-bold uppercase tracking-[0.04em]" style={{ color: hrh.ink }}>
+              Whole Site &amp; Branches
+            </span>
+            <span
+              className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
+              style={{ background: hrh.blueSoft, color: hrh.blueText }}
+            >
+              Everything Except HRH Online
+            </span>
+          </div>
+
+          <div
+            className="rounded-lg p-4 mb-4 flex items-center justify-between gap-3 flex-wrap"
+            style={{ border: `1px solid ${hrh.border}`, background: hrh.surface }}
+          >
+            <div>
+              <div className="text-[12.5px] font-semibold" style={{ color: hrh.ink }}>
+                Compare
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: hrh.muted }}>
+                Whole Site = Pioneer + Cainta + Sucat + Mabalacat + Santa Rosa Road + Subic combined. Or pick just one of them.
+              </p>
+            </div>
+            <select
+              value={selectedOption}
+              onChange={(e) => setSelectedOption(e.target.value)}
+              className="text-[13px] rounded-md px-3 py-2 outline-none font-medium"
+              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+            >
+              <option value="">Select…</option>
+              <option value={WHOLE_SITE_OPTION}>Whole Site</option>
+              {branches.map((b) => (
+                <option key={b.code} value={b.code}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {!selectedOption && (
+            <EmptyState label="Pick Whole Site or a branch above to see its Traffic & Conversion." />
+          )}
+
+          {selectedOption && selectedResult && (
+            <>
+              <div className="rounded-md px-3.5 py-2.5 mb-4 text-[11.5px]" style={{ background: hrh.blueSoft, color: hrh.blueText }}>
+                {selectedScopeNote}
+              </div>
+              <TrafficKpiFunnelSection
+                kpis={selectedResult.kpis}
+                trend={selectedTrend}
+                funnelStages={selectedResult.funnel}
+                funnelSubtitle={selectedFunnelSubtitle}
+                totalRevenue={selectedResult.totalRevenue}
+                newVsReturning={selectedResult.newVsReturning}
+                newVsReturningSubtitle={`Share of users in this period (${selectedLabel}) — same GA4 "new" caveat as HRH Online above.`}
+              />
+            </>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             <Panel title="Device Mix" subtitle="Share of users by device type" badge={<DemoBadge text="Needs GA4 Data API" />}>
               <EmptyState label="No ClickHouse table crosses this store's pages with device type — would need a direct GA4 Data API query, not yet wired up." />
             </Panel>
