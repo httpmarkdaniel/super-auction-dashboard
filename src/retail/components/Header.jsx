@@ -23,9 +23,6 @@ export default function Header({ segment, onSegmentChange, dateRange, onDateRang
         <h2 className="m-0 text-[22px] font-bold" style={{ color: retail.ink }}>
           Retail Dashboard
         </h2>
-        <p className="mt-1.5 mb-0" style={{ color: retail.muted }}>
-          Sales, foot traffic, and customers — All Stores, Retail, and Wholesale in one view.
-        </p>
       </div>
 
       <div className="order-3 w-full flex justify-center gap-3 flex-wrap md:order-none md:w-auto md:absolute md:left-1/2 md:-translate-x-1/2">
