@@ -34,6 +34,10 @@ function expandStoreAliases(stores) {
   return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
 }
 const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
+// GROUP BY must reference the `store_name` ALIAS below, not repeat
+// STORE_NAME_EXPR — ClickHouse errors ("not under aggregate function and
+// not in GROUP BY keys") when the raw multiIf(...) is repeated verbatim in
+// GROUP BY, but resolves it correctly through the SELECT alias.
 
 function toNum(v) {
   const n = Number(v);
@@ -200,7 +204,7 @@ export async function handleRetailFootTraffic(req, res) {
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_txn
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            GROUP BY ${STORE_NAME_EXPR}
+            GROUP BY store_name
           `,
           query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",
