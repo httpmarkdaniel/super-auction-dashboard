@@ -7,6 +7,8 @@ const client = createClient({
   database: process.env.CLICKHOUSE_DATABASE,
 });
 
+// See api/_retail-sales-overview.js's own comment for the full writeup —
+// verified 2026-09-22 against the business's own YTD query.
 const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -18,6 +20,9 @@ const CORE_RETAIL_STORES = [
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
   "HMR CUBAO",
+  "HARRINGTON PIONEER",
+  "HMR BULACAN",
+  "MAIN",
 ];
 const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 const HRH_ONLINE_STORE = "HRH ONLINE";
@@ -26,19 +31,6 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
-
-// See api/_retail-sales-overview.js's own comment for the full writeup —
-// "SUCAT, PARANAQUE"/"HARRINGTON PIONEER" are confirmed earlier names for
-// HMR SUCAT/PIONEER, still present historically in mart_invoice_items.
-const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
-function expandStoreAliases(stores) {
-  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
-}
-const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
-// GROUP BY must reference the `store_name` ALIAS, not repeat
-// STORE_NAME_EXPR — ClickHouse errors ("not under aggregate function and
-// not in GROUP BY keys") when the raw multiIf(...) is repeated verbatim in
-// GROUP BY, but resolves it correctly through the SELECT alias.
 
 function toNum(v) {
   const n = Number(v);
@@ -186,7 +178,7 @@ export async function handleRetailCustomerSegments(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = expandStoreAliases(resolveStores(resolveSegment(segment), req.query.store));
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
     const today = manilaTodayISODate();
 
     // classification (current window) + revenue-by-invoice (current
@@ -198,7 +190,7 @@ export async function handleRetailCustomerSegments(req, res) {
       classifyCustomerSegments(stores, current.from, current.to),
       client
         .query({
-          query: `SELECT invoice_id, ${STORE_NAME_EXPR} AS store_name, sum(invoice_item_sold_amount) AS amount FROM xv3.mart_invoice_items WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String} AND invoice_item_is_voided = 0 AND invoice_is_voided = 0 GROUP BY invoice_id, store_name`,
+          query: `SELECT invoice_id, store_name, sum(invoice_item_sold_amount) AS amount FROM xv3.mart_invoice_items WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String} AND invoice_item_is_voided = 0 AND invoice_is_voided = 0 GROUP BY invoice_id, store_name`,
           query_params: { stores, from: current.from, to: current.to },
           format: "JSONEachRow",
         })
@@ -218,7 +210,7 @@ export async function handleRetailCustomerSegments(req, res) {
       client
         .query({
           query: `
-            SELECT customer_name, any(customer_recency) AS recency, sum(invoice_item_sold_amount) AS spend, argMax(${STORE_NAME_EXPR}, invoice_item_sold_amount) AS top_store
+            SELECT customer_name, any(customer_recency) AS recency, sum(invoice_item_sold_amount) AS spend, argMax(store_name, invoice_item_sold_amount) AS top_store
             FROM xv3.mart_invoice_items
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String}
               AND invoice_item_is_voided = 0 AND invoice_is_voided = 0

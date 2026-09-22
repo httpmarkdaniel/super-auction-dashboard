@@ -8,6 +8,14 @@
 // accounts (10-70x larger average tickets, zero foot-traffic tracking) —
 // "Wholesale" is the correct real-world label for what CORE_RETAIL_STORES'
 // original writeup called "ambiguous, no-foot-traffic stores."
+// Verified 2026-09-22 against the business's own YTD sales query (exact
+// match). HARRINGTON PIONEER is a distinct Mandaluyong branch (not the
+// same store as PIONEER despite the similar name), and MAIN is a legacy/
+// system store bucket (xv3.stores shows division "Auction", no real
+// address) that still carries real revenue — see
+// api/_retail-sales-overview.js's own comment for the full writeup. None
+// of these 3 have foot-traffic or sales-target rows, so they're absent
+// from api/_retail-foot-traffic.js's own (separate) store list.
 export const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -19,6 +27,9 @@ export const CORE_RETAIL_STORES = [
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
   "HMR CUBAO",
+  "HARRINGTON PIONEER",
+  "HMR BULACAN",
+  "MAIN",
 ];
 export const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 export const HRH_ONLINE_STORE = "HRH ONLINE";

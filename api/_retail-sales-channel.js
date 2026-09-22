@@ -7,6 +7,8 @@ const client = createClient({
   database: process.env.CLICKHOUSE_DATABASE,
 });
 
+// See api/_retail-sales-overview.js's own comment for the full writeup —
+// verified 2026-09-22 against the business's own YTD query.
 const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -18,6 +20,9 @@ const CORE_RETAIL_STORES = [
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
   "HMR CUBAO",
+  "HARRINGTON PIONEER",
+  "HMR BULACAN",
+  "MAIN",
 ];
 const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 const HRH_ONLINE_STORE = "HRH ONLINE";
@@ -26,16 +31,6 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
-
-// See api/_retail-sales-overview.js's own comment for the full writeup —
-// "SUCAT, PARANAQUE"/"HARRINGTON PIONEER" are confirmed earlier names for
-// HMR SUCAT/PIONEER, still present historically in mart_net_sales. This
-// page never groups by store_name, so only the WHERE...IN filter needs
-// the widened list — no STORE_NAME_EXPR normalization required here.
-const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
-function expandStoreAliases(stores) {
-  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
-}
 
 function toNum(v) {
   const n = Number(v);
@@ -106,7 +101,7 @@ export async function handleRetailSalesChannel(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = expandStoreAliases(resolveStores(resolveSegment(segment), req.query.store));
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
 
     const rows = await client
       .query({

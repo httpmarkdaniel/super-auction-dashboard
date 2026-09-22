@@ -9,6 +9,16 @@ const client = createClient({
 
 // See src/retail/segments.js for the full All/Retail/Wholesale writeup.
 // Duplicated per this dashboard's per-file store/date-helper convention.
+// Verified 2026-09-22 against the business's own YTD sales query (exact
+// match: ₱961,774,257.55) — the real store universe includes 3 stores this
+// list was previously missing entirely: HMR CUBAO (a real, active branch
+// since 2020 — 96K+ transactions/₱52M YTD), HARRINGTON PIONEER (a distinct
+// branch in Mandaluyong, NOT the same store as PIONEER despite the
+// similar name — confirmed via xv3.stores' own address data), and MAIN (a
+// legacy/system store bucket — xv3.stores shows division "Auction" and no
+// real address, but it carries real historical revenue the business's own
+// reporting includes). "SUCAT, PARANAQUE" (an old alias of HMR SUCAT) is
+// deliberately NOT included — the business's own query excludes it too.
 const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -20,6 +30,9 @@ const CORE_RETAIL_STORES = [
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
   "HMR CUBAO",
+  "HARRINGTON PIONEER",
+  "HMR BULACAN",
+  "MAIN",
 ];
 const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 const HRH_ONLINE_STORE = "HRH ONLINE";
@@ -28,25 +41,6 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
-
-// "SUCAT, PARANAQUE" and "HARRINGTON PIONEER" are confirmed (2026-09-22)
-// to be earlier names for HMR SUCAT / PIONEER in the source data (still
-// present historically in mart_net_sales/mart_invoice_items/
-// mart_level_of_inventory, but not in mart_sales_target/
-// mart_foot_traffic_masterlist, which only ever used the current names).
-// expandStoreAliases widens the store list used for WHERE...IN filtering
-// so their historical rows are included; STORE_NAME_EXPR then folds them
-// back into the canonical name wherever store_name is grouped/displayed,
-// so they read as one continuous store rather than two.
-const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
-function expandStoreAliases(stores) {
-  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
-}
-const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
-// GROUP BY must reference the `store_name` ALIAS below, not repeat
-// STORE_NAME_EXPR — ClickHouse errors ("not under aggregate function and
-// not in GROUP BY keys") when the raw multiIf(...) is repeated verbatim in
-// GROUP BY, but resolves it correctly through the SELECT alias.
 
 function toNum(v) {
   const n = Number(v);
@@ -183,6 +177,9 @@ const STORE_REGIONS = {
   CEBU: "Central Visayas",
   "HMR CAGAYAN DE ORO": "Northern Mindanao",
   "HMR CUBAO": "NCR",
+  "HARRINGTON PIONEER": "NCR",
+  "HMR BULACAN": "Central Luzon",
+  MAIN: "Other",
   "HPI CANLUBANG": "CALABARZON",
   ENVIROCYCLE: "CALABARZON",
   "HRH ONLINE": "Online",
@@ -199,7 +196,7 @@ export async function handleRetailSalesOverview(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = expandStoreAliases(resolveStores(resolveSegment(segment), req.query.store));
+    const stores = resolveStores(resolveSegment(segment), req.query.store);
 
     // MTD Attainment needs a target — only queried when the "mtd" preset is
     // selected (the reference report only ever shows Attainment for that
@@ -238,7 +235,7 @@ export async function handleRetailSalesOverview(req, res) {
       client
         .query({
           query: `
-            SELECT ${STORE_NAME_EXPR} AS store_name,
+            SELECT store_name,
               sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_rev,
               sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_rev
             FROM xv3.mart_net_sales
@@ -577,6 +574,7 @@ export async function handleRetailSalesOverview(req, res) {
         "New vs Returning Revenue (At a Glance) uses xv3.mart_invoice_items' own customer_recency field (Repeat buyer / One time customer / No name) — a coarser 2-way split than the full New/Retained/Reactivated cohort analysis on the Customer (3R) tab, used here only for a quick-reference figure.",
         "Notable Changes/Insights are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
         "Sales by Region uses a maintained store→region lookup (src/retail/storeRegions.js), not a live query — xv3.stores' own address data only covers 9 of 11 stores.",
+        "The store universe includes HARRINGTON PIONEER (a distinct Mandaluyong branch, not the same store as PIONEER) and MAIN (a legacy/system store bucket — xv3.stores shows it under division \"Auction\" with no real address, but it carries real revenue). Both are verified 2026-09-22 against the business's own YTD sales query. Neither has foot-traffic or sales-target data, so they don't appear on the Foot Traffic tab or in MTD Attainment.",
         "Sales by Payment Method is intentionally NOT included — the only table with a real payment-method field (xv3.mart_xv3_order_report) covers just ~4% of this store scope's actual transaction volume (verified 2026-09-18: 83K order rows vs ~2M real POS transactions), so a breakdown from it would misrepresent how customers actually pay.",
         "Inventory figures (value, units on hand, low/out-of-stock, aging, gross margin) are a CURRENT point-in-time snapshot from xv3.mart_level_of_inventory, independent of the Weekly/MTD toggle above (which only affects sales figures).",
         "Gross Margin is intentionally NOT included — investigated 2026-09-18 via current inventory (current_srp vs item_cost); a small number of extreme-volume SKUs (e.g. one product with item_cost double its current_srp, at ~39,000 units) have an implausible cost-exceeds-price relationship that single-handedly drove the network-wide aggregate negative. This looks like a source-data entry error (cost/price swapped or stale) rather than real economics, so showing it would mislead rather than inform.",

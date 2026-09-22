@@ -7,9 +7,14 @@ const client = createClient({
   database: process.env.CLICKHOUSE_DATABASE,
 });
 
-// Foot traffic only ever exists for the 9 core walk-in branches — never
-// HRH Online or Wholesale (Envirocycle/HPI Canlubang), verified zero rows
-// in xv3.mart_foot_traffic_masterlist for both. See segments.js.
+// Foot traffic only ever exists for these 10 walk-in branches — never HRH
+// Online or Wholesale (Envirocycle/HPI Canlubang), verified zero rows in
+// xv3.mart_foot_traffic_masterlist for both. HARRINGTON PIONEER, MAIN, and
+// HMR BULACAN (added to the sales-side store lists 2026-09-22 — see
+// api/_retail-sales-overview.js's own comment) are deliberately NOT added
+// here — confirmed zero rows for all three in
+// xv3.mart_foot_traffic_masterlist, so including them would only add
+// always-zero rows to this tab. See segments.js.
 const CORE_RETAIL_STORES = [
   "PIONEER",
   "NORTH CALOOCAN",
@@ -22,22 +27,6 @@ const CORE_RETAIL_STORES = [
   "HMR CAGAYAN DE ORO",
   "HMR CUBAO",
 ];
-
-// See api/_retail-sales-overview.js's own comment for the full writeup —
-// "SUCAT, PARANAQUE"/"HARRINGTON PIONEER" are confirmed earlier names for
-// HMR SUCAT/PIONEER, present historically in mart_net_sales (used by the
-// transaction/conversion query below) but NOT in
-// mart_foot_traffic_masterlist itself, which only ever used the current
-// names.
-const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
-function expandStoreAliases(stores) {
-  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
-}
-const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
-// GROUP BY must reference the `store_name` ALIAS below, not repeat
-// STORE_NAME_EXPR — ClickHouse errors ("not under aggregate function and
-// not in GROUP BY keys") when the raw multiIf(...) is repeated verbatim in
-// GROUP BY, but resolves it correctly through the SELECT alias.
 
 function toNum(v) {
   const n = Number(v);
@@ -162,7 +151,7 @@ export async function handleRetailFootTraffic(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = expandStoreAliases(resolveStores(req.query.store));
+    const stores = resolveStores(req.query.store);
     const today = manilaTodayISODate();
     const monthStart = firstOfMonthISO(today);
     const fourWeeksAgoMonday = addDaysISO(mondayOfWeek(today), -28);
@@ -199,7 +188,7 @@ export async function handleRetailFootTraffic(req, res) {
       client
         .query({
           query: `
-            SELECT ${STORE_NAME_EXPR} AS store_name,
+            SELECT store_name,
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_txn,
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_txn
             FROM xv3.mart_net_sales
