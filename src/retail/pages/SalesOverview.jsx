@@ -11,18 +11,35 @@ import NeedsAttentionCenter from "../components/NeedsAttentionCenter";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
+// Value + vs-previous-period % change, stacked — same ▲/▼ green/red
+// convention as KpiCard's own delta, used inside breakdown modal tables.
+function ValueCell({ value, deltaPct }) {
+  const hasDelta = deltaPct !== null && deltaPct !== undefined;
+  const positive = hasDelta && deltaPct >= 0;
+  return (
+    <div>
+      <div>{value}</div>
+      {hasDelta && (
+        <div className="text-[10.5px] font-semibold mt-0.5" style={{ color: positive ? retail.good : retail.bad }}>
+          {positive ? "▲" : "▼"} {Math.abs(deltaPct).toFixed(1)}%
+        </div>
+      )}
+    </div>
+  );
+}
+
 const SEGMENT_BREAKDOWN_COLUMNS = [
   { key: "label", label: "Segment" },
-  { key: "revenue", label: "Revenue", render: (r) => formatPeso(r.revenue) },
-  { key: "transactions", label: "Transactions", render: (r) => formatNum(r.transactions) },
-  { key: "abs", label: "ABS", render: (r) => formatPeso(r.abs) },
+  { key: "revenue", label: "Revenue", render: (r) => <ValueCell value={formatPeso(r.revenue)} deltaPct={r.revenueDeltaPct} /> },
+  { key: "transactions", label: "Transactions", render: (r) => <ValueCell value={formatNum(r.transactions)} deltaPct={r.transactionsDeltaPct} /> },
+  { key: "abs", label: "ABS", render: (r) => <ValueCell value={formatPeso(r.abs)} deltaPct={r.absDeltaPct} /> },
 ];
 const STORE_ENGAGEMENT_COLUMNS = [
   { key: "label", label: "Store" },
-  { key: "footTraffic", label: "Foot Traffic", render: (r) => formatNum(r.footTraffic) },
-  { key: "totalCustomers", label: "Total Customers", render: (r) => formatNum(r.totalCustomers) },
-  { key: "newCustomers", label: "New", render: (r) => formatNum(r.newCustomers) },
-  { key: "returningCustomers", label: "Returning", render: (r) => formatNum(r.returningCustomers) },
+  { key: "footTraffic", label: "Foot Traffic", render: (r) => <ValueCell value={formatNum(r.footTraffic)} deltaPct={r.footTrafficDeltaPct} /> },
+  { key: "totalCustomers", label: "Total Customers", render: (r) => <ValueCell value={formatNum(r.totalCustomers)} deltaPct={r.totalCustomersDeltaPct} /> },
+  { key: "newCustomers", label: "New", render: (r) => <ValueCell value={formatNum(r.newCustomers)} deltaPct={r.newCustomersDeltaPct} /> },
+  { key: "returningCustomers", label: "Returning", render: (r) => <ValueCell value={formatNum(r.returningCustomers)} deltaPct={r.returningCustomersDeltaPct} /> },
 ];
 
 function dateRangeParams(dateRange) {
@@ -336,7 +353,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       )}
 
-      <Modal open={segmentModalOpen} onClose={() => setSegmentModalOpen(false)} title="Retail vs Wholesale" subtitle="Revenue, transactions, and average basket size for the selected period">
+      <Modal open={segmentModalOpen} onClose={() => setSegmentModalOpen(false)} title="Retail vs Wholesale" subtitle="Revenue, transactions, and average basket size — vs previous period">
         {!segmentBreakdown && !segmentBreakdownError && <LoadingState label="Loading breakdown…" />}
         {segmentBreakdownError && <ErrorState label={`Couldn't load breakdown: ${segmentBreakdownError}`} />}
         {segmentBreakdown && !segmentBreakdownError && (
@@ -344,7 +361,7 @@ export default function SalesOverview({ filters }) {
         )}
       </Modal>
 
-      <Modal open={storeModalOpen} onClose={() => setStoreModalOpen(false)} title="Per-Store Breakdown" subtitle="Foot traffic and named customers, 10 walk-in branches">
+      <Modal open={storeModalOpen} onClose={() => setStoreModalOpen(false)} title="Per-Store Breakdown" subtitle="Foot traffic and named customers, 10 walk-in branches — vs previous period">
         {!storeBreakdown && !storeBreakdownError && <LoadingState label="Loading breakdown…" />}
         {storeBreakdownError && <ErrorState label={`Couldn't load breakdown: ${storeBreakdownError}`} />}
         {storeBreakdown && !storeBreakdownError && (
