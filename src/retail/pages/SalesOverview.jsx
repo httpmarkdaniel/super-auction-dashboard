@@ -226,6 +226,13 @@ export default function SalesOverview({ filters }) {
             onClick={openStoreBreakdown}
             methodology="Split via mart_invoice_items' own customer_recency field (One time customer vs Repeat buyer) — a coarser 2-way split than the full 3R cohort model on the Customer (3R) tab."
           />
+          <KpiCard
+            label="Avg Sales / Day"
+            value={formatPeso(data.kpis.avgSalesPerDay.value)}
+            delta={data.kpis.avgSalesPerDay.delta}
+            previousLabel={formatPeso(data.kpis.avgSalesPerDay.previous)}
+            methodology="Revenue ÷ elapsed days in the selected period. For Week/Month to Date this is an average over the days elapsed so far, not a full week/month."
+          />
         </KpiRow>
         {isMtd && data.kpis.attainment && (
           <div className="mt-1">
@@ -241,7 +248,7 @@ export default function SalesOverview({ filters }) {
         )}
       </Panel>
 
-      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1.25fr .95fr .9fr" }}>
+      <div className="grid gap-3.5 mb-3.5 items-start" style={{ gridTemplateColumns: "1.25fr .95fr .9fr" }}>
         <Panel title="Sales Trend" subtitle="Revenue and units sold">
           <DualAxisComboChart data={trendChartData} barName="Revenue" barColor={retail.blue} lineName="Units Sold" lineColor={retail.orange} barValueFormatter={formatCompactPeso} lineValueFormatter={formatNum} />
         </Panel>
@@ -253,7 +260,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
-      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-3.5 mb-3.5 items-start" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <Panel title="Top Categories by Sales">
           <DataTable
             columns={[
@@ -279,7 +286,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
-      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-3.5 mb-3.5 items-start" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <Panel title="Sales by Hour" subtitle="All channels, 6am-11pm">
           <BarComparisonChart data={hourChartData} xKey="label" series={[{ key: "value", name: "Sales", color: retail.blue }]} valueFormatter={formatCompactPeso} />
         </Panel>
@@ -321,7 +328,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
-      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-3.5 mb-3.5 items-start" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <Panel title="Top Selling Products">
           <DataTable
             columns={[

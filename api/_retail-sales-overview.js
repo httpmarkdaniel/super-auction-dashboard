@@ -296,6 +296,13 @@ export async function handleRetailSalesOverview(req, res) {
     const prevUnits = toNum(kpi.prev_units);
     const curAbs = safeDivide(curRev, curTxn);
     const prevAbs = safeDivide(prevRev, prevTxn);
+    // Average Sales per Day = revenue ÷ elapsed days in the window — for
+    // WTD/MTD this is "to date", same partial-period convention every
+    // other KPI on this page already uses, not a full-week/month average.
+    const curDays = daysBetweenISO(current.from, current.to) + 1;
+    const prevDays = daysBetweenISO(previous.from, previous.to) + 1;
+    const curAvgPerDay = safeDivide(curRev, curDays);
+    const prevAvgPerDay = safeDivide(prevRev, prevDays);
     const target = toNum(targetRows[0]?.target);
     const attainment = range === "mtd" && target > 0 ? safeDivide(curRev, target) * 100 : null;
 
@@ -528,6 +535,7 @@ export async function handleRetailSalesOverview(req, res) {
         transactions: { value: curTxn, previous: prevTxn, delta: pctDelta(curTxn, prevTxn) },
         units: { value: curUnits, previous: prevUnits, delta: pctDelta(curUnits, prevUnits) },
         abs: { value: curAbs, previous: prevAbs, delta: pctDelta(curAbs, prevAbs) },
+        avgSalesPerDay: { value: curAvgPerDay, previous: prevAvgPerDay, delta: pctDelta(curAvgPerDay, prevAvgPerDay) },
         attainment: range === "mtd" ? { value: attainment, target } : null,
       },
       atAGlance: {
