@@ -98,9 +98,11 @@ function isDevTestOrder(o) {
 // the customer to actually complete payment, so theirs is "No Payment" —
 // but ~10% of orders with an explicit "No Payment" reason are still COD
 // (a real, if smaller, other path to that trigger), so this mapping is a
-// strong signal, not a certainty; the specific 1-day vs 2-day duration
-// isn't recoverable from payment_type at all, so those go to a duration-
-// unspecified bucket instead of guessing which. "No Reason Logged" itself
+// strong signal, not a certainty. The specific 1-day vs 2-day duration
+// isn't recoverable from payment_type at all — per explicit request
+// (2026-09-22), these are folded into the "1 Day" bucket rather than kept
+// in a separate duration-unspecified one, so this is a deliberate
+// simplification, not a data-driven finding. "No Reason Logged" itself
 // is kept as a fallback for the (currently nonexistent) case of a blank
 // reason AND a blank payment_type — genuinely no signal to categorize by.
 const COD_LIKE_PAYMENT_TYPES = new Set(["Cash On Delivery", "Onsite Payment"]);
@@ -109,7 +111,7 @@ function categorizeCancellationReason(reason, paymentType) {
   if (!r) {
     const pt = (paymentType || "").trim();
     if (!pt) return "No Reason Logged";
-    return COD_LIKE_PAYMENT_TYPES.has(pt) ? "Expired — No Customer Confirmation (2 Days)" : "Expired — No Payment (Unspecified Duration)";
+    return COD_LIKE_PAYMENT_TYPES.has(pt) ? "Expired — No Customer Confirmation (2 Days)" : "Expired — No Payment (1 Day)";
   }
   if (r.includes("expired")) {
     if (r.includes("no payment") && r.includes("1 day")) return "Expired — No Payment (1 Day)";
@@ -150,7 +152,6 @@ function categorizeCancellationReason(reason, paymentType) {
 const SYSTEM_INITIATED_EXPIRED_CATEGORIES = new Set([
   "Expired — No Payment (1 Day)",
   "Expired — No Payment (2 Days)",
-  "Expired — No Payment (Unspecified Duration)",
   "Expired — No Customer Confirmation (2 Days)",
   "Expired — Other",
 ]);
@@ -1018,7 +1019,6 @@ export async function handleOrdersFulfillment(req, res) {
     const CATEGORY_ORDER = [
       "Expired — No Payment (1 Day)",
       "Expired — No Payment (2 Days)",
-      "Expired — No Payment (Unspecified Duration)",
       "Expired — No Customer Confirmation (2 Days)",
       "Expired — Other",
       "Payment Issues",
@@ -1255,8 +1255,8 @@ export async function handleOrdersFulfillment(req, res) {
       returns: { ...returnsWithComparison, trendTrailing: returnsTrendTrailing },
       dataQuality: [
         `Real Orders Received (${m.realOrdersReceived}) = ${m.rawDedupedCount} raw deduped orders − ${m.devTestOrders.length} dev/test-tagged − ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations − ${m.duplicateRetryOrders.length} genuine duplicate retries.`,
-        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired, split into its 5 auto-cancel sub-reasons — see below) + the rare no-reason/no-payment-type fallback only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 11 categories (everything except the 5 Expired sub-categories and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
-        `2026-09-18: blank cancellation_reason ("No Reason Logged") is now reclassified into "Expired — No Customer Confirmation (2 Days)" (Cash On Delivery / Onsite Payment orders) or "Expired — No Payment (Unspecified Duration)" (all other payment types) using payment_type, since these orders share the exact same payment_status = Pending signature as explicitly-logged Expired cancellations. This is a strong inference (100% of orders with an explicit "No Customer Confirmation" reason are COD), not a certainty — about 10% of orders with an explicit "No Payment" reason are still COD, so a small amount of misclassification in either direction is possible. "No Reason Logged" itself is kept only as a fallback for the shouldn't-happen case of a blank reason AND a blank payment_type.`,
+        `"Cancelled" (${m.stayingCancelled.length}) is System-Initiated (Expired, split into its 4 auto-cancel sub-reasons — see below) + the rare no-reason/no-payment-type fallback only — used consistently for the "Cancelled Orders" KPI, the Fulfillment Status Breakdown, the Cancellation Rate, Cancellation Reasons, Cancelled Orders by Fulfillment Method, and Executive Overview's Order Lifecycle donut, so all of these always reconcile to the same number. The ${m.customerInitiatedCancelled.length} confirmed customer-initiated cancellations (stated reason, e.g. changed mind, payment issue — cross-checked against Sales Analytics' independent "Re-ordered" classification, which landed on the same count for the same period) are excluded from all of these and from Real Orders Received, same as dev/test orders and duplicate retries — shown separately in the Cancelled Orders KPI's own breakdown (allRealCancelled/reordered) rather than silently dropped. Consequence: 5 of Cancellation Reasons' 10 categories (everything except the 4 Expired sub-categories and No Reason Logged) will always show 0 — those reasons only ever occur among the excluded 4.`,
+        `2026-09-18: blank cancellation_reason ("No Reason Logged") is now reclassified into "Expired — No Customer Confirmation (2 Days)" (Cash On Delivery / Onsite Payment orders) or "Expired — No Payment (1 Day)" (all other payment types) using payment_type, since these orders share the exact same payment_status = Pending signature as explicitly-logged Expired cancellations. This is a strong inference (100% of orders with an explicit "No Customer Confirmation" reason are COD), not a certainty — about 10% of orders with an explicit "No Payment" reason are still COD, so a small amount of misclassification in either direction is possible. 2026-09-22: folded into "1 Day" rather than a separate duration-unspecified bucket, per explicit request — a deliberate simplification, not a data-driven finding. "No Reason Logged" itself is kept only as a fallback for the shouldn't-happen case of a blank reason AND a blank payment_type.`,
         "Some invoices have no order_no populated — resolved via probable matching (customer name + date + fee-adjusted amount); a small number remain genuinely unmatched or ambiguous (see Unresolved Orders).",
         "Unresolved COD (payment_status = Pending) orders are expected to have no invoice yet — HRH Online confirms COD orders by phone before handing them to the courier, so these aren't a data gap the way an unresolved Paid order is.",
         "Name-based matching is unreliable for customers with many orders/invoices in a short window — ambiguous cases are left unresolved rather than force-matched.",
