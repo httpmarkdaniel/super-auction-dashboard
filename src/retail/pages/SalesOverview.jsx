@@ -117,7 +117,7 @@ export default function SalesOverview({ filters }) {
             previousLabel={formatNum(data.kpis.transactions.previous)}
           />
           <KpiCard label={isMtd ? "MTD ABS" : "ABS"} value={formatPeso(data.kpis.abs.value)} delta={data.kpis.abs.delta} previousLabel={formatPeso(data.kpis.abs.previous)} sub="Avg Basket Size" />
-          <KpiCard label="Active SKUs" value={formatNum(data.moreKpis.activeSkus)} sub="Distinct products sold" />
+          <KpiCard label="Foot Traffic" value={data.moreKpis.hasFootTraffic ? formatNum(data.moreKpis.footTraffic) : "—"} sub="Walk-in branches, current period" />
           <KpiCard label="Total Customers" value={formatNum(data.moreKpis.totalCustomers)} sub="Named customers, current period" />
           <KpiCard label="New / Returning" value={`${formatNum(data.moreKpis.newCustomers)} / ${formatNum(data.moreKpis.returningCustomers)}`} sub="Named customers" />
         </KpiRow>

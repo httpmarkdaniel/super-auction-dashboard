@@ -41,6 +41,20 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
+// Foot traffic only exists for these 10 walk-in branches — see
+// api/_retail-foot-traffic.js's own comment for the full writeup.
+const WALK_IN_STORES = [
+  "PIONEER",
+  "NORTH CALOOCAN",
+  "MABALACAT",
+  "S AND C CAINTA",
+  "HMR TAGAYTAY ROAD",
+  "CEBU",
+  "HMR SUCAT",
+  "SUBIC MAIN",
+  "HMR CAGAYAN DE ORO",
+  "HMR CUBAO",
+];
 
 function toNum(v) {
   const n = Number(v);
@@ -197,6 +211,7 @@ export async function handleRetailSalesOverview(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
     const stores = resolveStores(resolveSegment(segment), req.query.store);
+    const walkInStores = stores.filter((s) => WALK_IN_STORES.includes(s));
 
     // MTD Attainment needs a target — only queried when the "mtd" preset is
     // selected (the reference report only ever shows Attainment for that
@@ -330,7 +345,7 @@ export async function handleRetailSalesOverview(req, res) {
       channelMixRows,
       categoryRows,
       hourRows,
-      activeSkuRows,
+      footTrafficRows,
       customerCountRows,
       inventorySnapshotRows,
       inventoryAgeRows,
@@ -364,13 +379,18 @@ export async function handleRetailSalesOverview(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
-      client
-        .query({
-          query: `SELECT count(DISTINCT product_name) AS n FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0`,
-          query_params: { stores, curFrom: current.from, curTo: current.to },
-          format: "JSONEachRow",
-        })
-        .then((r) => r.json()),
+      // Total foot traffic — scoped to the 10 walk-in branches only (see
+      // api/_retail-foot-traffic.js's own comment); empty/zero when the
+      // selected segment/store has no walk-in overlap (e.g. Wholesale).
+      walkInStores.length
+        ? client
+            .query({
+              query: `SELECT sum(traffic_count) AS traffic FROM xv3.mart_foot_traffic_masterlist WHERE store_name IN {stores:Array(String)} AND date BETWEEN {curFrom:String} AND {curTo:String}`,
+              query_params: { stores: walkInStores, curFrom: current.from, curTo: current.to },
+              format: "JSONEachRow",
+            })
+            .then((r) => r.json())
+        : Promise.resolve([{ traffic: 0 }]),
       // Total/New/Returning Customers — via mart_invoice_items'
       // customer_recency (same coarse 2-way real classification used
       // above for the At a Glance revenue split, applied here to
@@ -462,7 +482,7 @@ export async function handleRetailSalesOverview(req, res) {
       return { hour: h, gmv: row ? toNum(row.gmv) : 0 };
     });
 
-    const activeSkus = toNum(activeSkuRows[0]?.n);
+    const footTraffic = toNum(footTrafficRows[0]?.traffic);
     const custByRecency = new Map(customerCountRows.map((r) => [r.customer_recency, toNum(r.n)]));
     const newCustomers = custByRecency.get("One time customer") || 0;
     const returningCustomers = custByRecency.get("Repeat buyer") || 0;
@@ -556,7 +576,8 @@ export async function handleRetailSalesOverview(req, res) {
         sellThroughPct,
       },
       moreKpis: {
-        activeSkus,
+        footTraffic,
+        hasFootTraffic: walkInStores.length > 0,
         totalCustomers,
         newCustomers,
         returningCustomers,
@@ -571,7 +592,8 @@ export async function handleRetailSalesOverview(req, res) {
       inventoryAge,
       topProducts,
       dataQuality: [
-        "Every revenue/units figure on this page (KPIs, Sales Trend, Sales by Channel, Top Categories, Sales by Region, Sales by Hour, Top Selling Products) is NET of returns/refunds/voids — verified 2026-09-22 that these all now reconcile to the same total (previously, several of these breakdowns excluded negative-amount rows while the headline KPI didn't, so their totals didn't match it). Active SKUs is the one exception — it counts distinct products with a real (positive) sale this period, since a product that only had a return didn't meaningfully \"sell.\"",
+        "Every revenue/units figure on this page (KPIs, Sales Trend, Sales by Channel, Top Categories, Sales by Region, Sales by Hour, Top Selling Products) is NET of returns/refunds/voids — verified 2026-09-22 that these all now reconcile to the same total (previously, several of these breakdowns excluded negative-amount rows while the headline KPI didn't, so their totals didn't match it).",
+        "Foot Traffic (KPI grid) is scoped to the 10 walk-in branches only (see the Foot Traffic tab's own data quality note) — Wholesale, HRH Online, HARRINGTON PIONEER, MAIN, and HMR BULACAN have no foot-traffic tracking, so it reads 0 when the selected segment/store has no walk-in overlap (e.g. Wholesale).",
         "New vs Returning Revenue (At a Glance) uses xv3.mart_invoice_items' own customer_recency field (Repeat buyer / One time customer / No name) — a coarser 2-way split than the full New/Retained/Reactivated cohort analysis on the Customer (3R) tab, used here only for a quick-reference figure.",
         "Notable Changes/Insights are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
         "Sales by Region uses a maintained store→region lookup (src/retail/storeRegions.js), not a live query — xv3.stores' own address data only covers 9 of 11 stores.",
