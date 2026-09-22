@@ -503,7 +503,13 @@ export default function PickupAndDelivery({ filters }) {
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
-      setData(json);
+      // Zeroed pending data validation — every KPI/chart/table on this
+      // page derives from orders/inProgress/recentOrders/ordersReceived
+      // (see filterOrders/computeKpis etc. below), so emptying these 4
+      // fields at the source correctly zeroes everything downstream
+      // without touching the compute functions themselves. Remove this
+      // override once the underlying pickup/delivery data is validated.
+      setData({ ...json, orders: [], inProgress: [], recentOrders: [], ordersReceived: {} });
     } catch (err) {
       if (err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : String(err));

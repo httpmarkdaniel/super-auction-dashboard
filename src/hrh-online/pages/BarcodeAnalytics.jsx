@@ -151,6 +151,25 @@ function funnelColor(i, n) {
   return lerpColor(hrh.blue, hrh.navy, n > 1 ? i / (n - 1) : 0);
 }
 
+// Zeroed pending data validation (see the load() comment above for why) —
+// stage quantities/conversion rates go to 0, per-stage item drill-downs
+// go empty, cycle-time days go to 0, and the "sold but never posted" gap
+// count goes to 0. cohort dates/labels/dataQuality notes are left as-is
+// since they aren't numbers the validation concern applies to.
+function zeroLifecycleFunnel(funnel) {
+  return {
+    ...funnel,
+    stages: (funnel.stages || []).map((s) => ({
+      ...s,
+      qty: 0,
+      conversionFromPrev: s.conversionFromPrev === null || s.conversionFromPrev === undefined ? s.conversionFromPrev : 0,
+      items: [],
+    })),
+    cycleTimeDays: funnel.cycleTimeDays ? Object.fromEntries(Object.keys(funnel.cycleTimeDays).map((k) => [k, 0])) : funnel.cycleTimeDays,
+    unmatched: funnel.unmatched ? { ...funnel.unmatched, soldButNeverPosted: 0 } : funnel.unmatched,
+  };
+}
+
 // Click a stage's block to open its item-level breakdown (barcode/item
 // name/amount/qty/stock value) — a bare count doesn't say WHICH units are
 // in that stage. Own modal state here (not lifted to the parent) since
@@ -252,7 +271,12 @@ export default function BarcodeAnalytics({ filters }) {
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
-      setData(json);
+      // Inventory Lifecycle Funnel zeroed pending data validation — see
+      // computeLifecycleFunnel()'s own comment in
+      // api/_hrh-barcode-analytics.js for the specific joins this was
+      // flagged over (ASN-based Received/Put-away, CMS-based Posted).
+      // onHandStock (the rest of this page) is untouched and stays real.
+      setData(json.lifecycleFunnel ? { ...json, lifecycleFunnel: zeroLifecycleFunnel(json.lifecycleFunnel) } : json);
     } catch (err) {
       if (err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : String(err));

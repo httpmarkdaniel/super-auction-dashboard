@@ -100,6 +100,24 @@ function formatDuration(seconds) {
   return `${(hrs / 24).toFixed(1)}d`;
 }
 
+// Zeroed pending data validation — Warehouse Operations shares its
+// backend endpoint (report=barcodeAnalytics) with the Stocks tab, so
+// zeroing happens here at render/display time only, never at the API or
+// Stocks' own separate fetch, which stays real. Recurses through every
+// number in the response (KPIs, daily volume, picker/QC tables, dispatch
+// distribution) so every displayed figure reads 0 without needing a
+// second, error-prone transform per chart. Remove once warehouse ops data
+// is validated.
+function zeroNumbersDeep(value) {
+  if (Array.isArray(value)) return value.map(zeroNumbersDeep);
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = zeroNumbersDeep(v);
+    return out;
+  }
+  return typeof value === "number" ? 0 : value;
+}
+
 const PICKER_COLUMNS = [
   { key: "picker", label: "Picker" },
   { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
@@ -261,7 +279,7 @@ export default function OrdersFulfillment({ filters }) {
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
       if (json.error) throw new Error(json.message || json.error);
-      setWhData(json);
+      setWhData(zeroNumbersDeep(json));
     } catch (err) {
       if (err.name === "AbortError") return;
       setWhError(err instanceof Error ? err.message : String(err));
