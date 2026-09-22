@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVendorAnalytics } from "../useVendorAnalytics";
 import { useVendorTop5Year } from "../useVendorTop5Year";
 import { CATEGORY_NAMES } from "../../api/_category.js";
+import { VEHICLE_SUBCATEGORY_NAMES } from "../../api/_category.js";
 import StorySection from "./primitives/StorySection";
 import RankedMetricBar from "./primitives/RankedMetricBar";
 import PeriodStackedBar from "./primitives/PeriodStackedBar";
@@ -26,6 +27,74 @@ function formatAbs2dp(n) {
   return Math.abs(n).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Category/subcategory multi-select — lets multiple categories AND
+// Vehicles-and-Automotive subcategories (Motorcycles/Cars/Trucks/Vans/
+// Other Vehicles) be combined freely in one filter (e.g. Trucks +
+// Equipment and Industrial + General Merchandise), per explicit request.
+// Checking "Vehicles and Automotive" itself means ALL vehicles,
+// independent of which (if any) subcategory boxes are also checked —
+// the two aren't mutually exclusive, just redundant if both are on.
+function CategoryMultiSelect({ selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  function toggle(value) {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  }
+
+  const summary = selected.length === 0 ? "All Categories" : selected.length === 1 ? selected[0] : `${selected.length} selected`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px] font-semibold text-ink cursor-pointer max-w-[220px]"
+      >
+        <span className="truncate">{summary}</span>
+        <span className="text-muted text-[10px] shrink-0">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 top-9 left-0 w-64 rounded-lg border border-gridline bg-surface1 shadow-lg py-1.5 max-h-[340px] overflow-y-auto">
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="w-full text-left px-3 py-1 text-[12px] font-semibold text-series1 hover:bg-plane"
+            >
+              Clear all
+            </button>
+          )}
+          {CATEGORY_NAMES.map((c) => (
+            <div key={c}>
+              <label className="flex items-center gap-2 px-3 py-1.5 text-[13.5px] text-ink cursor-pointer hover:bg-plane">
+                <input type="checkbox" checked={selected.includes(c)} onChange={() => toggle(c)} className="cursor-pointer" />
+                {c}
+              </label>
+              {c === "Vehicles and Automotive" &&
+                VEHICLE_SUBCATEGORY_NAMES.map((sub) => (
+                  <label key={sub} className="flex items-center gap-2 pl-8 pr-3 py-1 text-[13px] text-ink2 cursor-pointer hover:bg-plane">
+                    <input type="checkbox" checked={selected.includes(sub)} onChange={() => toggle(sub)} className="cursor-pointer" />
+                    {sub}
+                  </label>
+                ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // TOP VENDORS — 5-YEAR BID VALUE — one row per distinct vendor, one
 // column per calendar year (2022-2026 as of 2026, see
 // api/leaderboards.js's type=vendor-top-5-year for the exact rolling-
@@ -35,16 +104,23 @@ function formatAbs2dp(n) {
 // (Phone/Email were also added, then removed per a follow-up request —
 // the backend still returns them, just unused here), Bid Value shown as
 // absolute-value-2dp with no currency symbol, an Excel export button, and
-// its own Category filter (General Merchandise/Vehicles and Automotive/
-// Equipment and Industrial/Bulk Auction) — kept as LOCAL state here,
+// its own multi-select Category filter (General Merchandise/Vehicles and
+// Automotive [+ its own Motorcycles/Cars/Trucks/Vans/Other Vehicles
+// subcategories, added 2026-09-22]/Equipment and Industrial/Bulk Auction)
+// — any combination can be checked at once (e.g. Trucks + Equipment and
+// Industrial), per explicit request. Kept as LOCAL state here,
 // deliberately NOT the page-wide category filter used by Overview/Bidder
 // Analytics/the rest of this tab, since this table is explicitly a
 // standing reference view independent of the dashboard's other filters;
-// sharing that state would silently change Overview's category too.
+// sharing that state would silently change Overview's category too. The
+// subcategories are a brand-new classification (api/_category.js's
+// VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL) — NOT a change to the existing
+// top-level category logic used everywhere else in the dashboard, which
+// stays completely untouched per explicit instruction.
 function VendorTop5YearTable() {
-  const [category, setCategory] = useState("");
+  const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
-  const { data, loading, error } = useVendorTop5Year(category);
+  const { data, loading, error } = useVendorTop5Year(categories);
 
   if (error && !data) {
     return <div className="px-4 py-3 rounded-lg bg-critical/10 text-toneRedText text-[15.5px]">Couldn't load 5-Year Top Vendors: {error}</div>;
@@ -66,20 +142,7 @@ function VendorTop5YearTable() {
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] tracking-[0.06em] uppercase text-muted font-semibold mr-1">Category</span>
-          <div className="flex items-center gap-1.5 bg-surface1 border border-gridline rounded-lg px-2.5 h-8 text-[14px]">
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="font-semibold text-ink bg-transparent outline-none cursor-pointer max-w-[220px]"
-            >
-              <option value="">All Categories</option>
-              {CATEGORY_NAMES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
+          <CategoryMultiSelect selected={categories} onChange={setCategories} />
           <input
             type="text"
             value={search}
@@ -90,7 +153,7 @@ function VendorTop5YearTable() {
         </div>
         <button
           type="button"
-          onClick={() => exportVendorTop5YearExcel({ years, category, rows })}
+          onClick={() => exportVendorTop5YearExcel({ years, categories, rows })}
           className="text-[13.5px] font-semibold px-3 py-1.5 rounded-lg border border-gridline bg-surface1 text-ink hover:border-navy/40 transition-colors"
         >
           Export to Excel

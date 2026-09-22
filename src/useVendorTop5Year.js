@@ -2,16 +2,19 @@ import { useEffect, useState } from "react";
 
 // TOP VENDORS — 5-YEAR BID VALUE — a rolling 5-calendar-year reference
 // table, still independent of the dashboard's date-range/Store filters
-// (see api/leaderboards.js's type=vendor-top-5-year comment), but now
-// DOES accept the Category filter — refetches when `category` changes,
-// unlike the old always-empty-dependency-array version.
-export function useVendorTop5Year(category = "") {
+// (see api/leaderboards.js's type=vendor-top-5-year comment). `categories`
+// is an array — top-level categories and Vehicles-and-Automotive
+// subcategories (Motorcycles/Cars/Trucks/Vans/Other Vehicles) can be
+// freely mixed, e.g. ["Trucks", "Equipment and Industrial"] — sent as a
+// single comma-joined query param, matching the API's own parsing.
+export function useVendorTop5Year(categories = []) {
   const [state, setState] = useState({ data: null, loading: true, error: null });
+  const categoriesKey = categories.join(",");
 
   useEffect(() => {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
-    const qs = new URLSearchParams({ type: "vendor-top-5-year", category: category || "" });
+    const qs = new URLSearchParams({ type: "vendor-top-5-year", categories: categoriesKey });
     fetch(`/api/leaderboards?${qs.toString()}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(`vendor-top-5-year returned ${res.status}: ${await res.text()}`);
@@ -26,7 +29,7 @@ export function useVendorTop5Year(category = "") {
     return () => {
       cancelled = true;
     };
-  }, [category]);
+  }, [categoriesKey]);
 
   return state;
 }

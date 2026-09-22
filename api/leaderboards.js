@@ -1,5 +1,5 @@
 import { createClient } from "@clickhouse/client";
-import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
+import { CATEGORY_CLASSIFICATION_SQL, VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 import { STATUS_PRIORITY_SQL } from "./_lotStatus.js";
 import { pickBucketGrain, enumerateBuckets, zeroFillBuckets } from "./_bucketing.js";
@@ -13,7 +13,15 @@ const client = createClient({
 
 export default async function handler(req, res) {
   try {
-    const { from, to, store = "", category = "", type = "" } = req.query;
+    const { from, to, store = "", category = "", categories = "", type = "" } = req.query;
+    // Multi-select category/subcategory list for vendor-top-5-year only —
+    // comma-separated (e.g. "Trucks,Equipment and Industrial"), mixing
+    // top-level categories and Vehicles-and-Automotive subcategories
+    // freely. Every other `type` branch below still uses the single
+    // `category` param, untouched.
+    const categoryList = categories
+      ? categories.split(",").map((c) => c.trim()).filter(Boolean)
+      : [];
 
     // =========================================================
     // TOP VENDORS — 5-YEAR BID VALUE (type=vendor-top-5-year) — a rolling
@@ -66,11 +74,16 @@ export default async function handler(req, res) {
               argMax(v.status, ${STATUS_PRIORITY_SQL}) AS status,
               any(v.bid_amount) AS bid_amount,
               any(v.end_date) AS lot_end_date,
-              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category
+              any(${CATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_category,
+              any(${VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL("v.name")}) AS lot_subcategory
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.auction_number IS NOT NULL AND v.lot_number IS NOT NULL
             GROUP BY v.auction_number, v.lot_number
-            HAVING ({category:String} = '' OR lot_category = {category:String})
+            HAVING (
+              length({categories:Array(String)}) = 0
+              OR lot_category IN {categories:Array(String)}
+              OR lot_subcategory IN {categories:Array(String)}
+            )
           ),
           auction_meta AS (
             SELECT DISTINCT auction_number, ending_time
@@ -86,7 +99,7 @@ export default async function handler(req, res) {
             AND toYear(coalesce(l.lot_end_date, am.ending_time)) BETWEEN {startYear:UInt16} AND {endYear:UInt16}
           GROUP BY l.vendor, yr
         `,
-        query_params: { startYear, endYear, category },
+        query_params: { startYear, endYear, categories: categoryList },
         format: "JSONEachRow",
       });
 
@@ -162,7 +175,7 @@ export default async function handler(req, res) {
         type: "vendor-top-5-year",
         startYear,
         endYear,
-        category,
+        categories: categoryList,
         rows: vendors,
       });
     }

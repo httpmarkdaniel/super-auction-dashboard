@@ -16,7 +16,7 @@ function dash(value) {
 // numbers with a real Excel number format (no currency symbol, per
 // explicit request), not the on-screen abs-value-2dp string, so they stay
 // sortable/summable in Excel.
-export function exportVendorTop5YearExcel({ years, category, rows }) {
+export function exportVendorTop5YearExcel({ years, categories = [], rows }) {
   const wb = XLSX.utils.book_new();
   const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: NAVY_HEX } } };
 
@@ -42,6 +42,6 @@ export function exportVendorTop5YearExcel({ years, category, rows }) {
   ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: headers.length - 1 } }) };
   XLSX.utils.book_append_sheet(wb, ws, "Top Vendors 5-Year");
 
-  const catPart = category ? category.replace(/[\\/:*?"<>|]/g, "").trim() : "All Categories";
+  const catPart = categories.length ? categories.join(" + ").replace(/[\\/:*?"<>|]/g, "").trim() : "All Categories";
   XLSX.writeFile(wb, `Top Vendors 5-Year Bid Value (${catPart}).xlsx`);
 }
