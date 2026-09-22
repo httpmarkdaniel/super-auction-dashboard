@@ -49,13 +49,14 @@ export const CATEGORY_NAMES = [
 // keyword were simply dropped. Needs a real decision on which "equipment"
 // items count, not a blanket keyword removal — flag to the user before
 // touching this.
-// Vehicles and Automotive SUB-category (Motorcycles/Cars/Trucks/Vans/
-// Other Vehicles) — added 2026-09-22 for Vendor Analytics' Top Vendors
-// 5-Year Bid Value table's multi-select Category filter, per explicit
-// request. Deliberately a SEPARATE, brand-new classification, not a
-// change to CATEGORY_CLASSIFICATION_SQL above — the existing top-level
-// categories (used by Overview/Category View/everywhere else) are left
-// completely untouched per explicit instruction.
+// Vehicles and Automotive SUB-category (Motorcycles/Cars/Trucks) — added
+// 2026-09-22 for Vendor Analytics' Top Vendors 5-Year Bid Value table's
+// multi-select Category filter, per explicit request (Vans/Other Vehicles
+// dropped per explicit follow-up — only these 3 wanted). Deliberately a
+// SEPARATE, brand-new classification, not a change to
+// CATEGORY_CLASSIFICATION_SQL above — the existing top-level categories
+// (used by Overview/Category View/everywhere else) are left completely
+// untouched per explicit instruction.
 //
 // Uses word-boundary regex matching (`\b`), NOT the parent's plain ILIKE
 // substring matching — verified 2026-09-22 that a naive '%car%' substring
@@ -69,21 +70,21 @@ export const CATEGORY_NAMES = [
 // category's own "Motorcycle Helmet" already has — not a new issue this
 // introduces). Only meaningful for lots already classified as "Vehicles
 // and Automotive" by the existing, unchanged classifier above — see
-// leaderboards.js's use of this for how that scoping is applied.
+// leaderboards.js's use of this for how that scoping is applied. Vans/
+// generic "vehicle" items aren't broken out into their own subcategory —
+// they still count under the parent "Vehicles and Automotive" checkbox.
 export function VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL(nameExpr) {
   const n = `lower(${nameExpr})`;
   return `
     CASE
       WHEN match(${n}, '\\\\bmotorcycle') THEN 'Motorcycles'
       WHEN match(${n}, '\\\\btruck') THEN 'Trucks'
-      WHEN match(${n}, '\\\\bvan\\\\b') THEN 'Vans'
       WHEN match(${n}, '\\\\bcar\\\\b') THEN 'Cars'
-      WHEN match(${n}, '\\\\bvehicle') THEN 'Other Vehicles'
       ELSE NULL
     END
   `;
 }
-export const VEHICLE_SUBCATEGORY_NAMES = ["Motorcycles", "Cars", "Trucks", "Vans", "Other Vehicles"];
+export const VEHICLE_SUBCATEGORY_NAMES = ["Motorcycles", "Cars", "Trucks"];
 
 export function CATEGORY_CLASSIFICATION_SQL(nameExpr) {
   return `
