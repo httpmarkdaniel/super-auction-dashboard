@@ -131,15 +131,15 @@ async function handleItemView(req, res, stores) {
       .query({
         query: `
           SELECT product_name, department_name,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {twFrom:String} AND {twTo:String}) AS tw,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {twFrom:String} AND {twTo:String}) AS twq,
-            sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {lwFrom:String} AND {lwTo:String}) AS lw,
-            sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {lwFrom:String} AND {lwTo:String}) AS lwq,
+            sumIf(net_sales_amount, transaction_date BETWEEN {twFrom:String} AND {twTo:String}) AS tw,
+            sumIf(net_quantity, transaction_date BETWEEN {twFrom:String} AND {twTo:String}) AS twq,
+            sumIf(net_sales_amount, transaction_date BETWEEN {lwFrom:String} AND {lwTo:String}) AS lw,
+            sumIf(net_quantity, transaction_date BETWEEN {lwFrom:String} AND {lwTo:String}) AS lwq,
             groupUniqArray(store_name) AS stores_sold
           FROM xv3.mart_net_sales
-          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {lwFrom:String} AND {twTo:String} AND net_sales_amount > 0
+          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {lwFrom:String} AND {twTo:String}
           GROUP BY product_name, department_name
-          HAVING tw > 0 OR lw > 0
+          HAVING tw != 0 OR lw != 0
         `,
         query_params: { stores, twFrom: thisWeek.from, twTo: thisWeek.to, lwFrom: lastWeek.from, lwTo: lastWeek.to },
         format: "JSONEachRow",
@@ -152,7 +152,7 @@ async function handleItemView(req, res, stores) {
           SELECT product_name, department_name, toMonday(transaction_date) AS weekStart,
             sum(net_sales_amount) AS revenue, sum(net_quantity) AS qty
           FROM xv3.mart_net_sales
-          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String} AND net_sales_amount > 0
+          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String}
           GROUP BY product_name, department_name, weekStart
         `,
         query_params: { stores, from: fourWeeksAgo, to: thisWeek.to },
@@ -213,6 +213,7 @@ async function handleItemView(req, res, stores) {
     dataQuality: [
       "Stock status comes from xv3.mart_level_of_inventory's item_qty, summed per product per store — a product with item_qty > 0 anywhere in scope shows as Has Stock with which store(s); otherwise Sold Out.",
       "Repeat Sellers requires real sales in all 4 of the last 4 full Mon-Sun weeks (not just 'at some point') — a stricter bar than Top Movers.",
+      "Sales/quantity figures are net of returns/refunds/voids, matching Sales Overview's own headline revenue — verified 2026-09-22.",
     ],
   });
 }
@@ -225,9 +226,9 @@ async function handleCategoryView(req, res, stores, range, current) {
     client
       .query({
         query: `
-          SELECT category_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+          SELECT category_name, sum(net_sales_amount) AS gmv
           FROM xv3.mart_net_sales
-          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String} AND net_sales_amount > 0
+          WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String}
           GROUP BY category_name
           ORDER BY gmv DESC
           LIMIT {topN:UInt8}
@@ -241,12 +242,12 @@ async function handleCategoryView(req, res, stores, range, current) {
         query: `
           SELECT category_name, product_name, sales, qty, stores_sold FROM (
             SELECT category_name, product_name,
-              sumIf(net_sales_amount, net_sales_amount > 0) AS sales,
-              sumIf(net_quantity, net_sales_amount > 0) AS qty,
+              sum(net_sales_amount) AS sales,
+              sum(net_quantity) AS qty,
               groupUniqArray(store_name) AS stores_sold,
-              row_number() OVER (PARTITION BY category_name ORDER BY sumIf(net_sales_amount, net_sales_amount > 0) DESC) AS rn
+              row_number() OVER (PARTITION BY category_name ORDER BY sum(net_sales_amount) DESC) AS rn
             FROM xv3.mart_net_sales
-            WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String} AND net_sales_amount > 0
+            WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String}
             GROUP BY category_name, product_name
           )
           WHERE rn <= {topItems:UInt8} AND sales > 0
@@ -272,6 +273,9 @@ async function handleCategoryView(req, res, stores, range, current) {
     meta: { range, current, stores },
     categories,
     itemsByCategory: Object.fromEntries(itemsByCategory),
+    dataQuality: [
+      "Category GMV is net of returns/refunds/voids, matching Sales Overview's own Top Categories panel — verified 2026-09-22. The top-5-items-per-category drilldown still only shows items with positive net sales.",
+    ],
   });
 }
 

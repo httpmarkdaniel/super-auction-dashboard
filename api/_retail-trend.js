@@ -89,10 +89,10 @@ export async function handleRetailTrend(req, res) {
             SELECT product_name, groupArray(store_name || '(' || toString(qty) || ')') AS store_qty, any(sales_channel) AS channel, sum(sales) AS sales, sum(qty) AS total_qty
             FROM (
               SELECT product_name, store_name, sales_channel,
-                sumIf(net_sales_amount, net_sales_amount > 0) AS sales,
-                sumIf(net_quantity, net_sales_amount > 0) AS qty
+                sum(net_sales_amount) AS sales,
+                sum(net_quantity) AS qty
               FROM xv3.mart_net_sales
-              WHERE store_name IN {stores:Array(String)} AND transaction_date = {day:String} AND net_sales_amount > 0
+              WHERE store_name IN {stores:Array(String)} AND transaction_date = {day:String}
               GROUP BY product_name, store_name, sales_channel
             )
             GROUP BY product_name
@@ -119,7 +119,7 @@ export async function handleRetailTrend(req, res) {
             SELECT transaction_date AS d,
               sum(net_sales_amount) AS revenue,
               uniqExactIf(invoice_id, net_sales_amount > 0) AS transactions,
-              sumIf(net_quantity, net_sales_amount > 0) AS units
+              sum(net_quantity) AS units
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {today:String}
             GROUP BY transaction_date

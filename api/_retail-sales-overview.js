@@ -209,10 +209,10 @@ export async function handleRetailSalesOverview(req, res) {
             SELECT
               sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_rev,
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_txn,
-              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              sumIf(net_quantity, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
               sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_rev,
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_txn,
-              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+              sumIf(net_quantity, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)}
               AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
@@ -251,7 +251,7 @@ export async function handleRetailSalesOverview(req, res) {
       client
         .query({
           query: `
-            SELECT sales_channel, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            SELECT sales_channel, sum(net_sales_amount) AS gmv
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
             GROUP BY sales_channel ORDER BY gmv DESC LIMIT 1
@@ -264,9 +264,9 @@ export async function handleRetailSalesOverview(req, res) {
       client
         .query({
           query: `
-            SELECT product_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv
+            SELECT product_name, sum(net_sales_amount) AS gmv
             FROM xv3.mart_net_sales
-            WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0
+            WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
             GROUP BY product_name ORDER BY gmv DESC LIMIT 1
           `,
           query_params: { stores, curFrom: current.from, curTo: current.to },
@@ -338,28 +338,28 @@ export async function handleRetailSalesOverview(req, res) {
     ] = await Promise.all([
       client
         .query({
-          query: `SELECT transaction_date AS d, sum(net_sales_amount) AS rev, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY transaction_date ORDER BY d`,
+          query: `SELECT transaction_date AS d, sum(net_sales_amount) AS rev, sum(net_quantity) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY transaction_date ORDER BY d`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       client
         .query({
-          query: `SELECT sales_channel, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY sales_channel ORDER BY gmv DESC`,
+          query: `SELECT sales_channel, sum(net_sales_amount) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY sales_channel ORDER BY gmv DESC`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       client
         .query({
-          query: `SELECT category_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0 GROUP BY category_name ORDER BY gmv DESC LIMIT 8`,
+          query: `SELECT category_name, sum(net_sales_amount) AS gmv, sum(net_quantity) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY category_name ORDER BY gmv DESC LIMIT 8`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
       client
         .query({
-          query: `SELECT toHour(created_time) AS h, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY h ORDER BY h`,
+          query: `SELECT toHour(created_time) AS h, sum(net_sales_amount) AS gmv FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY h ORDER BY h`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
@@ -429,7 +429,7 @@ export async function handleRetailSalesOverview(req, res) {
         .then((r) => r.json()),
       client
         .query({
-          query: `SELECT product_name, department_name, sumIf(net_sales_amount, net_sales_amount > 0) AS gmv, sumIf(net_quantity, net_sales_amount > 0) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} AND net_sales_amount > 0 GROUP BY product_name, department_name ORDER BY gmv DESC LIMIT 8`,
+          query: `SELECT product_name, department_name, sum(net_sales_amount) AS gmv, sum(net_quantity) AS units FROM xv3.mart_net_sales WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {curFrom:String} AND {curTo:String} GROUP BY product_name, department_name ORDER BY gmv DESC LIMIT 8`,
           query_params: { stores, curFrom: current.from, curTo: current.to },
           format: "JSONEachRow",
         })
@@ -571,6 +571,7 @@ export async function handleRetailSalesOverview(req, res) {
       inventoryAge,
       topProducts,
       dataQuality: [
+        "Every revenue/units figure on this page (KPIs, Sales Trend, Sales by Channel, Top Categories, Sales by Region, Sales by Hour, Top Selling Products) is NET of returns/refunds/voids — verified 2026-09-22 that these all now reconcile to the same total (previously, several of these breakdowns excluded negative-amount rows while the headline KPI didn't, so their totals didn't match it). Active SKUs is the one exception — it counts distinct products with a real (positive) sale this period, since a product that only had a return didn't meaningfully \"sell.\"",
         "New vs Returning Revenue (At a Glance) uses xv3.mart_invoice_items' own customer_recency field (Repeat buyer / One time customer / No name) — a coarser 2-way split than the full New/Retained/Reactivated cohort analysis on the Customer (3R) tab, used here only for a quick-reference figure.",
         "Notable Changes/Insights are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
         "Sales by Region uses a maintained store→region lookup (src/retail/storeRegions.js), not a live query — xv3.stores' own address data only covers 9 of 11 stores.",

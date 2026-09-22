@@ -182,9 +182,20 @@ export default function TopProducts({ filters }) {
           <>
             {loading && !categoryData && <LoadingState label="Loading Top Categories…" />}
             {categoryData && !error && (
-              <Panel title="Top Categories" subtitle="Click a row for its top 5 items">
-                <DataTable columns={CATEGORY_COLUMNS} rows={categoryData.categories} onRowClick={(r) => setDrilldownCategory(r.category)} paginate pageSize={12} emptyLabel="No sales in this period." />
-              </Panel>
+              <>
+                <Panel title="Top Categories" subtitle="Click a row for its top 5 items" className="mb-4">
+                  <DataTable columns={CATEGORY_COLUMNS} rows={categoryData.categories} onRowClick={(r) => setDrilldownCategory(r.category)} paginate pageSize={12} emptyLabel="No sales in this period." />
+                </Panel>
+                {categoryData.dataQuality?.length > 0 && (
+                  <Panel title="Data Quality Notes">
+                    <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: retail.ink2 }}>
+                      {categoryData.dataQuality.map((note, i) => (
+                        <li key={i}>{note}</li>
+                      ))}
+                    </ul>
+                  </Panel>
+                )}
+              </>
             )}
           </>
         )}

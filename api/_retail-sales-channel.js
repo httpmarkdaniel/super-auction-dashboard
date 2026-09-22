@@ -107,7 +107,7 @@ export async function handleRetailSalesChannel(req, res) {
       .query({
         query: `
           SELECT sales_channel,
-            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+            sum(net_sales_amount) AS gmv,
             uniqExactIf(invoice_id, net_sales_amount > 0) AS transactions
           FROM xv3.mart_net_sales
           WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {from:String} AND {to:String}
@@ -132,7 +132,10 @@ export async function handleRetailSalesChannel(req, res) {
       meta: { range, current, segment, store: req.query.store || "", stores },
       channels,
       totalGmv,
-      dataQuality: ["Channel comes directly from xv3.mart_net_sales' own sales_channel field — real raw values (WALK-IN, VIBER, FACEBOOK, HMRPH ONLINE, TIKTOK, SHOPEE, REFERRAL, CAROUSEL, etc.), not consolidated into fewer buckets."],
+      dataQuality: [
+        "Channel comes directly from xv3.mart_net_sales' own sales_channel field — real raw values (WALK-IN, VIBER, FACEBOOK, HMRPH ONLINE, TIKTOK, SHOPEE, REFERRAL, CAROUSEL, etc.), not consolidated into fewer buckets.",
+        "GMV is net of returns/refunds/voids, matching Sales Overview's own headline revenue and its Sales by Channel panel — verified 2026-09-22.",
+      ],
     });
   } catch (err) {
     console.error("[retail-sales-channel]", err);
