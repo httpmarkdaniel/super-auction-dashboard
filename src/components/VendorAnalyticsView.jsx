@@ -28,10 +28,12 @@ function formatAbs2dp(n) {
 }
 
 // Category/subcategory multi-select — lets multiple categories AND
-// Vehicles-and-Automotive subcategories (Motorcycles/Cars/Trucks/Vans/
-// Other Vehicles) be combined freely in one filter (e.g. Trucks +
-// Equipment and Industrial + General Merchandise), per explicit request.
-// Checking "Vehicles and Automotive" itself means ALL vehicles,
+// Vehicles-and-Automotive subcategories (Motorcycles/Cars — Trucks is now
+// its own top-level category, see api/_category.js's 2026-09-22 rewrite,
+// so it's selectable directly from CATEGORY_NAMES instead of appearing
+// here) be combined freely in one filter (e.g. Trucks + Equipment and
+// Industrial + General Merchandise), per explicit request. Checking
+// "Vehicles and Automotive" itself means all NON-truck road vehicles,
 // independent of which (if any) subcategory boxes are also checked —
 // the two aren't mutually exclusive, just redundant if both are on.
 function CategoryMultiSelect({ selected, onChange }) {
@@ -105,18 +107,19 @@ function CategoryMultiSelect({ selected, onChange }) {
 // the backend still returns them, just unused here), Bid Value shown as
 // absolute-value-2dp with no currency symbol, an Excel export button, and
 // its own multi-select Category filter (General Merchandise/Vehicles and
-// Automotive [+ its own Motorcycles/Cars/Trucks/Vans/Other Vehicles
-// subcategories, added 2026-09-22]/Equipment and Industrial/Bulk Auction)
-// — any combination can be checked at once (e.g. Trucks + Equipment and
+// Automotive [+ its own Motorcycles/Cars subcategories, added 2026-09-22]/
+// Trucks/Equipment and Industrial/Bulk Auction — Trucks split into its
+// own top-level category 2026-09-22, see api/_category.js) — any
+// combination can be checked at once (e.g. Trucks + Equipment and
 // Industrial), per explicit request. Kept as LOCAL state here,
 // deliberately NOT the page-wide category filter used by Overview/Bidder
 // Analytics/the rest of this tab, since this table is explicitly a
 // standing reference view independent of the dashboard's other filters;
 // sharing that state would silently change Overview's category too. The
-// subcategories are a brand-new classification (api/_category.js's
-// VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL) — NOT a change to the existing
-// top-level category logic used everywhere else in the dashboard, which
-// stays completely untouched per explicit instruction.
+// Motorcycles/Cars subcategories are a separate classification
+// (api/_category.js's VEHICLE_SUBCATEGORY_CLASSIFICATION_SQL), only
+// meaningful within lots already classified as "Vehicles and Automotive"
+// by the shared top-level classification.
 function VendorTop5YearTable() {
   const [categories, setCategories] = useState([]);
   const [search, setSearch] = useState("");
