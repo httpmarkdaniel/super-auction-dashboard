@@ -17,6 +17,7 @@ const CORE_RETAIL_STORES = [
   "HMR SUCAT",
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
+  "HMR CUBAO",
 ];
 const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 const HRH_ONLINE_STORE = "HRH ONLINE";
@@ -25,6 +26,15 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
+
+// See api/_retail-sales-overview.js's own comment for the full writeup —
+// "SUCAT, PARANAQUE"/"HARRINGTON PIONEER" are confirmed earlier names for
+// HMR SUCAT/PIONEER, still present historically in mart_net_sales.
+const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
+function expandStoreAliases(stores) {
+  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
+}
+const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
 
 function toNum(v) {
   const n = Number(v);
@@ -146,13 +156,13 @@ export async function handleRetailStorePerformance(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = resolveStores(resolveSegment(segment), req.query.store);
+    const stores = expandStoreAliases(resolveStores(resolveSegment(segment), req.query.store));
 
     const [salesRows, targetRows] = await Promise.all([
       client
         .query({
           query: `
-            SELECT store_name,
+            SELECT ${STORE_NAME_EXPR} AS store_name,
               sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_rev,
               sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_rev,
               uniqExactIf(invoice_id, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_txn,
@@ -161,7 +171,7 @@ export async function handleRetailStorePerformance(req, res) {
               sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)} AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            GROUP BY store_name
+            GROUP BY ${STORE_NAME_EXPR}
           `,
           query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",

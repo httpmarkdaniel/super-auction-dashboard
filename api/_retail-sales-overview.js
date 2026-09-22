@@ -19,6 +19,7 @@ const CORE_RETAIL_STORES = [
   "HMR SUCAT",
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
+  "HMR CUBAO",
 ];
 const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 const HRH_ONLINE_STORE = "HRH ONLINE";
@@ -27,6 +28,21 @@ const SEGMENTS = {
   retail: [...CORE_RETAIL_STORES, HRH_ONLINE_STORE],
   wholesale: WHOLESALE_STORES,
 };
+
+// "SUCAT, PARANAQUE" and "HARRINGTON PIONEER" are confirmed (2026-09-22)
+// to be earlier names for HMR SUCAT / PIONEER in the source data (still
+// present historically in mart_net_sales/mart_invoice_items/
+// mart_level_of_inventory, but not in mart_sales_target/
+// mart_foot_traffic_masterlist, which only ever used the current names).
+// expandStoreAliases widens the store list used for WHERE...IN filtering
+// so their historical rows are included; STORE_NAME_EXPR then folds them
+// back into the canonical name wherever store_name is grouped/displayed,
+// so they read as one continuous store rather than two.
+const STORE_ALIASES = { "HMR SUCAT": ["SUCAT, PARANAQUE"], PIONEER: ["HARRINGTON PIONEER"] };
+function expandStoreAliases(stores) {
+  return stores.flatMap((s) => [s, ...(STORE_ALIASES[s] || [])]);
+}
+const STORE_NAME_EXPR = "multiIf(store_name = 'SUCAT, PARANAQUE', 'HMR SUCAT', store_name = 'HARRINGTON PIONEER', 'PIONEER', store_name)";
 
 function toNum(v) {
   const n = Number(v);
@@ -162,6 +178,7 @@ const STORE_REGIONS = {
   "HMR TAGAYTAY ROAD": "CALABARZON",
   CEBU: "Central Visayas",
   "HMR CAGAYAN DE ORO": "Northern Mindanao",
+  "HMR CUBAO": "NCR",
   "HPI CANLUBANG": "CALABARZON",
   ENVIROCYCLE: "CALABARZON",
   "HRH ONLINE": "Online",
@@ -178,7 +195,7 @@ export async function handleRetailSalesOverview(req, res) {
     } catch (rangeErr) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
-    const stores = resolveStores(resolveSegment(segment), req.query.store);
+    const stores = expandStoreAliases(resolveStores(resolveSegment(segment), req.query.store));
 
     // MTD Attainment needs a target — only queried when the "mtd" preset is
     // selected (the reference report only ever shows Attainment for that
@@ -217,13 +234,13 @@ export async function handleRetailSalesOverview(req, res) {
       client
         .query({
           query: `
-            SELECT store_name,
+            SELECT ${STORE_NAME_EXPR} AS store_name,
               sumIf(net_sales_amount, transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_rev,
               sumIf(net_sales_amount, transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_rev
             FROM xv3.mart_net_sales
             WHERE store_name IN {stores:Array(String)}
               AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
-            GROUP BY store_name
+            GROUP BY ${STORE_NAME_EXPR}
           `,
           query_params: { stores, curFrom: current.from, curTo: current.to, prevFrom: previous.from, prevTo: previous.to },
           format: "JSONEachRow",

@@ -17,6 +17,7 @@ export const STORE_REGIONS = {
   "HMR TAGAYTAY ROAD": "CALABARZON",
   CEBU: "Central Visayas",
   "HMR CAGAYAN DE ORO": "Northern Mindanao",
+  "HMR CUBAO": "NCR",
   "HPI CANLUBANG": "CALABARZON",
   ENVIROCYCLE: "CALABARZON",
   "HRH ONLINE": "Online",

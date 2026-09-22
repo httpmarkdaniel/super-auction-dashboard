@@ -18,6 +18,7 @@ export const CORE_RETAIL_STORES = [
   "HMR SUCAT",
   "SUBIC MAIN",
   "HMR CAGAYAN DE ORO",
+  "HMR CUBAO",
 ];
 export const WHOLESALE_STORES = ["HPI CANLUBANG", "ENVIROCYCLE"];
 export const HRH_ONLINE_STORE = "HRH ONLINE";
