@@ -103,7 +103,7 @@ export default function StorePerformance({ filters }) {
             />
           </Panel>
 
-          <StorePerformanceQuadrant />
+          <StorePerformanceQuadrant filters={filters} />
 
           {data.dataQuality?.length > 0 && (
             <Panel title="Data Quality Notes" className="mt-4">

@@ -144,7 +144,7 @@ export default function TopProducts({ filters }) {
         </div>
       </div>
 
-      <ProductVelocityAnalysis />
+      <ProductVelocityAnalysis filters={filters} />
 
       <SubTabNav tabs={SUBVIEW_TABS} value={subview} onChange={setSubview} />
       <div className="mt-4">

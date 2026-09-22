@@ -245,7 +245,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
-      <NeedsAttentionCenter />
+      <NeedsAttentionCenter filters={filters} />
 
       {data.dataQuality?.length > 0 && (
         <Panel title="Data Quality Notes" className="mt-4">

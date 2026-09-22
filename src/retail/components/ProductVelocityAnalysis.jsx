@@ -1,16 +1,23 @@
+import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "./Kpi";
 import Panel from "./Panel";
 import DataTable from "./DataTable";
 import { BubbleChart } from "./Charts";
+import { LoadingState, ErrorState } from "./States";
 import { retail } from "../theme";
 import { formatPeso, formatNum } from "../format";
-import { PRODUCT_VELOCITY_DATA } from "../mockAnalytics";
 
 const STATUS_PILL_STYLE = {
   "Fast Moving": { bg: "#eaf1fe", color: retail.blueDark },
   Healthy: { bg: "#e9f9ef", color: retail.good },
   "Slow Moving": { bg: "#fdf3e3", color: "#8a5a12" },
   "Replenishment Risk": { bg: "#faeaea", color: retail.bad },
+};
+const STATUS_DOT_COLOR = {
+  "Fast Moving": retail.blue,
+  Healthy: retail.good,
+  "Slow Moving": retail.orange,
+  "Replenishment Risk": retail.bad,
 };
 
 function VelocityPill({ status }) {
@@ -27,7 +34,7 @@ function VelocityTooltip({ active, payload }) {
   const p = payload[0]?.payload;
   if (!p) return null;
   const rows = [
-    ["Days of Supply", p.x.toFixed(0)],
+    ["Days of Supply", p.x === null ? "No sales (30d)" : p.x.toFixed(0)],
     ["Avg Daily Units Sold", p.y.toFixed(1)],
     ["Sales Value", formatPeso(p.z)],
     ["Status", p.status],
@@ -56,31 +63,80 @@ const COLUMNS = [
   { key: "currentStock", label: "Current Stock", render: (r) => formatNum(r.currentStock) },
   { key: "unitsSold30d", label: "Units Sold (30d)", render: (r) => formatNum(r.unitsSold30d) },
   { key: "avgDailySales", label: "Avg Daily Sales", render: (r) => r.avgDailySales.toFixed(1) },
-  { key: "daysOfSupply", label: "Days of Supply", render: (r) => r.daysOfSupply.toFixed(0) },
+  { key: "daysOfSupply", label: "Days of Supply", render: (r) => (r.daysOfSupply === null ? "—" : r.daysOfSupply.toFixed(0)) },
   { key: "salesValue", label: "Sales Value", render: (r) => formatPeso(r.salesValue) },
   { key: "status", label: "Velocity Status", render: (r) => <VelocityPill status={r.status} /> },
   { key: "action", label: "Recommended Action", maxWidth: 220 },
 ];
 
-// Fast/healthy/slow/replenishment-risk classification of product sell-
-// through vs. current stock coverage — see classifyVelocity in
-// ../mockAnalytics for the rule and PRODUCT_VELOCITY_DATA for the
-// (currently mock) inputs. Not a statement that the fastest seller is the
-// "best" product — see the accompanying Days-of-Supply/velocity table.
-export default function ProductVelocityAnalysis() {
-  const counts = PRODUCT_VELOCITY_DATA.reduce((acc, p) => {
+// Real ClickHouse-backed Product Velocity Analysis — see
+// api/_retail-product-velocity.js (dispatched via ?report=productVelocity).
+// Fixed 30-day trailing window, independent of the dashboard-wide Date
+// Range filter — same convention as Stocks/Top Products' own Item
+// subview. Not a statement that the fastest seller is the "best" product
+// — see the accompanying Days-of-Supply/velocity table.
+export default function ProductVelocityAnalysis({ filters }) {
+  const { segment, store } = filters;
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async (seg, st, signal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams({ segment: seg, ...(st ? { store: st } : {}), report: "productVelocity" });
+      const res = await fetch(`/api/retail-analytics?${qs.toString()}`, { signal });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setData(json);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    load(segment, store, controller.signal);
+    return () => controller.abort();
+  }, [segment, store, load]);
+
+  if (loading && !data) {
+    return (
+      <Panel title="Product Velocity Analysis" subtitle="Fast movers, healthy stock, and replenishment risk — last 30 days" className="mb-4">
+        <LoadingState label="Loading Product Velocity Analysis…" />
+      </Panel>
+    );
+  }
+  if (error) {
+    return (
+      <Panel title="Product Velocity Analysis" className="mb-4">
+        <ErrorState label={`Couldn't load Product Velocity Analysis: ${error}`} />
+      </Panel>
+    );
+  }
+  if (!data) return null;
+
+  const items = data.items || [];
+  const counts = items.reduce((acc, p) => {
     acc[p.status] = (acc[p.status] || 0) + 1;
     return acc;
   }, {});
 
-  const bubbleData = PRODUCT_VELOCITY_DATA.map((p) => ({
-    x: p.daysOfSupply,
-    y: p.avgDailySales,
-    z: p.salesValue,
-    label: p.product,
-    color: p.color,
-    status: p.status,
-  }));
+  const bubbleData = items
+    .filter((p) => p.daysOfSupply !== null)
+    .map((p) => ({
+      x: p.daysOfSupply,
+      y: p.avgDailySales,
+      z: p.salesValue,
+      label: p.product,
+      color: STATUS_DOT_COLOR[p.status] || retail.good,
+      status: p.status,
+    }));
 
   return (
     <Panel title="Product Velocity Analysis" subtitle="Fast movers, healthy stock, and replenishment risk — last 30 days" className="mb-4">
@@ -98,7 +154,7 @@ export default function ProductVelocityAnalysis() {
         <BubbleChart data={bubbleData} xLabel="Days of Supply" yLabel="Avg Daily Units Sold" tooltipContent={VelocityTooltip} height={280} />
       </div>
 
-      <DataTable columns={COLUMNS} rows={PRODUCT_VELOCITY_DATA} paginate pageSize={10} emptyLabel="No product velocity data." />
+      <DataTable columns={COLUMNS} rows={items} paginate pageSize={10} emptyLabel="No product velocity data for this selection." />
     </Panel>
   );
 }
