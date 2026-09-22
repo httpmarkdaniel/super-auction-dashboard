@@ -20,7 +20,6 @@ export const STORE_REGIONS = {
   "HMR CUBAO": "NCR",
   "HARRINGTON PIONEER": "NCR",
   "HMR BULACAN": "Central Luzon",
-  MAIN: "Other",
   "HPI CANLUBANG": "CALABARZON",
   ENVIROCYCLE: "CALABARZON",
   "HRH ONLINE": "Online",

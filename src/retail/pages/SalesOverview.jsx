@@ -187,6 +187,7 @@ export default function SalesOverview({ filters }) {
             delta={data.kpis.revenue.delta}
             previousLabel={formatPeso(data.kpis.revenue.previous)}
             onClick={openSegmentBreakdown}
+            methodology="Net of returns/refunds/voids — sum of net_sales_amount for the selected date range and segment (xv3.mart_net_sales)."
           />
           <KpiCard
             label={isMtd ? "MTD Transactions" : "Transactions"}
@@ -194,6 +195,7 @@ export default function SalesOverview({ filters }) {
             delta={data.kpis.transactions.delta}
             previousLabel={formatNum(data.kpis.transactions.previous)}
             onClick={openSegmentBreakdown}
+            methodology="Distinct invoices with a positive sale in the selected date range and segment (xv3.mart_net_sales). Refund-only invoices aren't counted as transactions."
           />
           <KpiCard
             label={isMtd ? "MTD ABS" : "ABS"}
@@ -202,19 +204,28 @@ export default function SalesOverview({ filters }) {
             previousLabel={formatPeso(data.kpis.abs.previous)}
             sub="Avg Basket Size"
             onClick={openSegmentBreakdown}
+            methodology="Revenue ÷ Transactions for the same period — not a separate query, just the ratio of the two cards to its left."
           />
           <KpiCard
             label="Foot Traffic"
             value={data.moreKpis.hasFootTraffic ? formatNum(data.moreKpis.footTraffic) : "—"}
             sub="Walk-in branches, current period"
             onClick={openStoreBreakdown}
+            methodology="Sum of daily visitor counts from the 10 walk-in branches only (xv3.mart_foot_traffic_masterlist). Wholesale, HRH Online, HARRINGTON PIONEER, MAIN, and HMR BULACAN aren't tracked."
           />
-          <KpiCard label="Total Customers" value={formatNum(data.moreKpis.totalCustomers)} sub="Named customers, current period" onClick={openStoreBreakdown} />
+          <KpiCard
+            label="Total Customers"
+            value={formatNum(data.moreKpis.totalCustomers)}
+            sub="Named customers, current period"
+            onClick={openStoreBreakdown}
+            methodology="Distinct named customers (real name, not blank/Walk In) across invoices in the selected date range and segment (xv3.mart_invoice_items)."
+          />
           <KpiCard
             label="New / Returning"
             value={`${formatNum(data.moreKpis.newCustomers)} / ${formatNum(data.moreKpis.returningCustomers)}`}
             sub="Named customers"
             onClick={openStoreBreakdown}
+            methodology="Split via mart_invoice_items' own customer_recency field (One time customer vs Repeat buyer) — a coarser 2-way split than the full 3R cohort model on the Customer (3R) tab."
           />
         </KpiRow>
         {isMtd && data.kpis.attainment && (
@@ -224,6 +235,7 @@ export default function SalesOverview({ filters }) {
                 label="MTD Attainment"
                 value={data.kpis.attainment.value === null ? "—" : formatPct(data.kpis.attainment.value)}
                 sub={data.kpis.attainment.target > 0 ? `vs ${formatPeso(data.kpis.attainment.target)} target` : "No target set"}
+                methodology="MTD Revenue ÷ this month's full-month target (xv3.mart_sales_target) — only shown for the Month to Date preset, since there's no such thing as a weekly or arbitrary-range target."
               />
             </KpiRow>
           </div>
