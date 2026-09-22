@@ -176,28 +176,6 @@ function resolveStores(segmentStores, storeParam) {
   return segmentStores;
 }
 
-// Store -> region — see src/retail/storeRegions.js for the full writeup
-// (a maintained static mapping, not a live query — xv3.stores' own
-// address fields only cover 9 of 11 stores). Duplicated here per this
-// dashboard's no-shared-import-across-frontend/backend convention.
-const STORE_REGIONS = {
-  PIONEER: "NCR",
-  "HMR SUCAT": "NCR",
-  "NORTH CALOOCAN": "NCR",
-  MABALACAT: "Central Luzon",
-  "S AND C CAINTA": "CALABARZON",
-  "SUBIC MAIN": "Central Luzon",
-  "HMR TAGAYTAY ROAD": "CALABARZON",
-  CEBU: "Central Visayas",
-  "HMR CAGAYAN DE ORO": "Northern Mindanao",
-  "HMR CUBAO": "NCR",
-  "HARRINGTON PIONEER": "NCR",
-  "HMR BULACAN": "Central Luzon",
-  "HPI CANLUBANG": "CALABARZON",
-  ENVIROCYCLE: "CALABARZON",
-  "HRH ONLINE": "Online",
-};
-
 export async function handleRetailSalesOverview(req, res) {
   try {
     const segment = req.query.segment && SEGMENTS[req.query.segment] ? req.query.segment : "all";
@@ -468,21 +446,6 @@ export async function handleRetailSalesOverview(req, res) {
 
     const topStores = [...storeDeltas].sort((a, b) => b.cur - a.cur).slice(0, 8);
 
-    // MAIN is deliberately excluded here — it has no real address in
-    // xv3.stores (division "Auction", no location), so there's no honest
-    // region to assign it to. Its revenue still counts everywhere else on
-    // this page (headline KPIs, Top Stores, etc.), just not in this one
-    // region breakdown.
-    const regionTotals = new Map();
-    let regionTotal = 0;
-    for (const s of storeDeltas) {
-      if (s.store === "MAIN") continue;
-      const region = STORE_REGIONS[s.store] || "Other";
-      regionTotals.set(region, (regionTotals.get(region) || 0) + s.cur);
-      regionTotal += s.cur;
-    }
-    const salesByRegion = Array.from(regionTotals, ([region, gmv]) => ({ region, gmv, sharePct: safeDivide(gmv, regionTotal) * 100 })).sort((a, b) => b.gmv - a.gmv);
-
     const salesByHour = Array.from({ length: 24 }, (_, h) => {
       const row = hourRows.find((r) => toNum(r.h) === h);
       return { hour: h, gmv: row ? toNum(row.gmv) : 0 };
@@ -592,17 +555,15 @@ export async function handleRetailSalesOverview(req, res) {
       salesByChannel,
       topCategories,
       topStores,
-      salesByRegion,
       salesByHour,
       inventoryOverview: { inventoryValue, unitsOnHand, lowStockItems, outOfStockItems },
       inventoryAge,
       topProducts,
       dataQuality: [
-        "Every revenue/units figure on this page (KPIs, Sales Trend, Sales by Channel, Top Categories, Sales by Region, Sales by Hour, Top Selling Products) is NET of returns/refunds/voids — verified 2026-09-22 that these all now reconcile to the same total (previously, several of these breakdowns excluded negative-amount rows while the headline KPI didn't, so their totals didn't match it).",
+        "Every revenue/units figure on this page (KPIs, Sales Trend, Sales by Channel, Top Categories, Sales by Hour, Top Selling Products) is NET of returns/refunds/voids — verified 2026-09-22 that these all now reconcile to the same total (previously, several of these breakdowns excluded negative-amount rows while the headline KPI didn't, so their totals didn't match it).",
         "Foot Traffic (KPI grid) is scoped to the 10 walk-in branches only (see the Foot Traffic tab's own data quality note) — Wholesale, HRH Online, HARRINGTON PIONEER, MAIN, and HMR BULACAN have no foot-traffic tracking, so it reads 0 when the selected segment/store has no walk-in overlap (e.g. Wholesale).",
         "New vs Returning Revenue (At a Glance) uses xv3.mart_invoice_items' own customer_recency field (Repeat buyer / One time customer / No name) — a coarser 2-way split than the full New/Retained/Reactivated cohort analysis on the Customer (3R) tab, used here only for a quick-reference figure.",
         "Notable Changes/Insights are auto-derived facts (what changed, by how much) — not editorial recommendations, since those require business judgment a query can't honestly produce.",
-        "Sales by Region uses a maintained store→region lookup (src/retail/storeRegions.js), not a live query — xv3.stores' own address data doesn't cover every store. MAIN is deliberately excluded from this one breakdown (its revenue still counts everywhere else on this page) since xv3.stores has no real address for it to assign an honest region.",
         "The store universe includes HARRINGTON PIONEER (a distinct Mandaluyong branch, not the same store as PIONEER) and MAIN (a legacy/system store bucket — xv3.stores shows it under division \"Auction\" with no real address, but it carries real revenue). Both are verified 2026-09-22 against the business's own YTD sales query. Neither has foot-traffic or sales-target data, so they don't appear on the Foot Traffic tab or in MTD Attainment.",
         "Sales by Payment Method is intentionally NOT included — the only table with a real payment-method field (xv3.mart_xv3_order_report) covers just ~4% of this store scope's actual transaction volume (verified 2026-09-18: 83K order rows vs ~2M real POS transactions), so a breakdown from it would misrepresent how customers actually pay.",
         "Inventory figures (value, units on hand, low/out-of-stock, aging, gross margin) are a CURRENT point-in-time snapshot from xv3.mart_level_of_inventory, independent of the Weekly/MTD toggle above (which only affects sales figures).",

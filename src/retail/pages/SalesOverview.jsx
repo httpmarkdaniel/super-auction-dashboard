@@ -163,7 +163,6 @@ export default function SalesOverview({ filters }) {
 
   const trendChartData = data.salesTrend.map((r) => ({ label: r.date.slice(5), bar: r.revenue, line: r.units }));
   const channelSegments = data.salesByChannel.map((c, i) => ({ label: c.channel, value: c.gmv, color: retail.series[i % retail.series.length] }));
-  const regionSegments = data.salesByRegion.map((r, i) => ({ label: r.region, value: r.gmv, color: retail.series[i % retail.series.length] }));
   const hourChartData = data.salesByHour.filter((h) => h.hour >= 6 && h.hour <= 23).map((h) => ({ label: `${h.hour}:00`, value: h.gmv }));
   const totalInvUnits = data.inventoryAge.reduce((s, b) => s + b.units, 0);
 
@@ -254,7 +253,7 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
-      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+      <div className="grid gap-3.5 mb-3.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <Panel title="Top Categories by Sales">
           <DataTable
             columns={[
@@ -277,17 +276,6 @@ export default function SalesOverview({ filters }) {
             rows={data.topStores}
             emptyLabel="No sales in this period."
           />
-        </Panel>
-        <Panel title="Sales by Region" subtitle="Share of total sales">
-          <DonutChart segments={regionSegments} centerValue={formatCompactPeso(regionSegments.reduce((s, r) => s + r.value, 0))} centerLabel="Total" size={160} />
-          <div className="grid gap-2 text-[13px] mt-2.5">
-            {data.salesByRegion.map((r) => (
-              <div key={r.region} className="flex justify-between gap-3">
-                <span style={{ color: retail.ink2 }}>{r.region}</span>
-                <b style={{ color: retail.ink }}>{r.sharePct.toFixed(1)}%</b>
-              </div>
-            ))}
-          </div>
         </Panel>
       </div>
 
