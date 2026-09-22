@@ -6,6 +6,7 @@ import Hero from "../components/Hero";
 import { InsightList } from "../components/InsightCard";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart, BarComparisonChart, DualAxisComboChart } from "../components/Charts";
+import NeedsAttentionCenter from "../components/NeedsAttentionCenter";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
@@ -244,8 +245,10 @@ export default function SalesOverview({ filters }) {
         </Panel>
       </div>
 
+      <NeedsAttentionCenter />
+
       {data.dataQuality?.length > 0 && (
-        <Panel title="Data Quality Notes">
+        <Panel title="Data Quality Notes" className="mt-4">
           <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: retail.ink2 }}>
             {data.dataQuality.map((note, i) => (
               <li key={i}>{note}</li>

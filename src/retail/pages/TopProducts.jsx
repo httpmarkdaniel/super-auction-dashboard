@@ -3,6 +3,7 @@ import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import Modal from "../components/Modal";
 import SubTabNav from "../components/SubTabNav";
+import ProductVelocityAnalysis from "../components/ProductVelocityAnalysis";
 import { LoadingState, ErrorState } from "../components/States";
 import { retail } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
@@ -142,6 +143,8 @@ export default function TopProducts({ filters }) {
           Top Products
         </div>
       </div>
+
+      <ProductVelocityAnalysis />
 
       <SubTabNav tabs={SUBVIEW_TABS} value={subview} onChange={setSubview} />
       <div className="mt-4">

@@ -18,6 +18,7 @@ import {
   ScatterChart,
   Scatter,
   ZAxis,
+  ReferenceLine,
 } from "recharts";
 import { retail } from "../theme";
 import { formatCompactPeso, formatNum } from "../format";
@@ -546,7 +547,12 @@ function BubbleTooltip({ active, payload, xLabel, yLabel, xValueFormatter, yValu
 // Bubble/scatter chart -- x/y position plus bubble size (z), each point
 // individually colored (e.g. a relative performance tier) rather than one
 // series color. `data`: [{ x, y, z, label, color, sizeLabel? }].
-export function BubbleChart({ data, xLabel, yLabel, xValueFormatter, yValueFormatter, height = 280 }) {
+// `tooltipContent` lets a caller override the default BubbleTooltip (e.g.
+// to surface extra fields carried on each data point). `referenceLineX`/
+// `referenceLineY` (both optional, undefined by default) draw a dashed
+// line at that value on each axis — used for zero-growth quadrant charts.
+export function BubbleChart({ data, xLabel, yLabel, xValueFormatter, yValueFormatter, height = 280, tooltipContent, referenceLineX, referenceLineY }) {
+  const TooltipContent = tooltipContent || BubbleTooltip;
   return (
     <ChartWithAxisTitles xAxisLabel={xLabel} yAxisLabel={yLabel}>
       <ResponsiveContainer width="100%" height={height}>
@@ -572,8 +578,10 @@ export function BubbleChart({ data, xLabel, yLabel, xValueFormatter, yValueForma
             name={yLabel}
           />
           <ZAxis type="number" dataKey="z" range={[80, 500]} />
+          {referenceLineX !== undefined && <ReferenceLine x={referenceLineX} stroke={retail.muted} strokeDasharray="4 4" />}
+          {referenceLineY !== undefined && <ReferenceLine y={referenceLineY} stroke={retail.muted} strokeDasharray="4 4" />}
           <Tooltip
-            content={<BubbleTooltip xLabel={xLabel} yLabel={yLabel} xValueFormatter={xValueFormatter} yValueFormatter={yValueFormatter} />}
+            content={<TooltipContent xLabel={xLabel} yLabel={yLabel} xValueFormatter={xValueFormatter} yValueFormatter={yValueFormatter} />}
             cursor={{ strokeDasharray: "3 3" }}
           />
           <Scatter data={data} fill={retail.accent}>

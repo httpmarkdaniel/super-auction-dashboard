@@ -3,6 +3,7 @@ import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
 import { LoadingState, ErrorState } from "../components/States";
 import { DonutChart } from "../components/Charts";
+import StorePerformanceQuadrant from "../components/StorePerformanceQuadrant";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
 
@@ -101,6 +102,8 @@ export default function StorePerformance({ filters }) {
               pageSize={12}
             />
           </Panel>
+
+          <StorePerformanceQuadrant />
 
           {data.dataQuality?.length > 0 && (
             <Panel title="Data Quality Notes" className="mt-4">
