@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
+import Modal from "../components/Modal";
 import Hero from "../components/Hero";
 import { InsightList } from "../components/InsightCard";
 import { LoadingState, ErrorState } from "../components/States";
@@ -9,6 +10,20 @@ import { DonutChart, BarComparisonChart, DualAxisComboChart } from "../component
 import NeedsAttentionCenter from "../components/NeedsAttentionCenter";
 import { retail } from "../theme";
 import { formatPeso, formatCompactPeso, formatNum, formatPct } from "../format";
+
+const SEGMENT_BREAKDOWN_COLUMNS = [
+  { key: "label", label: "Segment" },
+  { key: "revenue", label: "Revenue", render: (r) => formatPeso(r.revenue) },
+  { key: "transactions", label: "Transactions", render: (r) => formatNum(r.transactions) },
+  { key: "abs", label: "ABS", render: (r) => formatPeso(r.abs) },
+];
+const STORE_ENGAGEMENT_COLUMNS = [
+  { key: "label", label: "Store" },
+  { key: "footTraffic", label: "Foot Traffic", render: (r) => formatNum(r.footTraffic) },
+  { key: "totalCustomers", label: "Total Customers", render: (r) => formatNum(r.totalCustomers) },
+  { key: "newCustomers", label: "New", render: (r) => formatNum(r.newCustomers) },
+  { key: "returningCustomers", label: "Returning", render: (r) => formatNum(r.returningCustomers) },
+];
 
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
@@ -61,6 +76,46 @@ export default function SalesOverview({ filters }) {
   const [error, setError] = useState(null);
   const isMtd = dateRange === "mtd";
 
+  const [segmentModalOpen, setSegmentModalOpen] = useState(false);
+  const [segmentBreakdown, setSegmentBreakdown] = useState(null);
+  const [segmentBreakdownError, setSegmentBreakdownError] = useState(null);
+
+  const [storeModalOpen, setStoreModalOpen] = useState(false);
+  const [storeBreakdown, setStoreBreakdown] = useState(null);
+  const [storeBreakdownError, setStoreBreakdownError] = useState(null);
+
+  const openSegmentBreakdown = useCallback(async () => {
+    setSegmentModalOpen(true);
+    setSegmentBreakdown(null);
+    setSegmentBreakdownError(null);
+    try {
+      const qs = new URLSearchParams({ ...dateRangeParams(dateRange), report: "salesSegmentBreakdown" });
+      const res = await fetch(`/api/retail-analytics?${qs.toString()}`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setSegmentBreakdown(json);
+    } catch (err) {
+      setSegmentBreakdownError(err instanceof Error ? err.message : String(err));
+    }
+  }, [dateRange]);
+
+  const openStoreBreakdown = useCallback(async () => {
+    setStoreModalOpen(true);
+    setStoreBreakdown(null);
+    setStoreBreakdownError(null);
+    try {
+      const qs = new URLSearchParams({ ...dateRangeParams(dateRange), report: "storeEngagementBreakdown" });
+      const res = await fetch(`/api/retail-analytics?${qs.toString()}`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.message || json.error);
+      setStoreBreakdown(json);
+    } catch (err) {
+      setStoreBreakdownError(err instanceof Error ? err.message : String(err));
+    }
+  }, [dateRange]);
+
   const load = useCallback(async (seg, dr, st, signal) => {
     setLoading(true);
     setError(null);
@@ -109,17 +164,41 @@ export default function SalesOverview({ filters }) {
 
       <Panel className="mb-3.5">
         <KpiRow>
-          <KpiCard label={isMtd ? "MTD Revenue" : "Revenue"} value={formatPeso(data.kpis.revenue.value)} delta={data.kpis.revenue.delta} previousLabel={formatPeso(data.kpis.revenue.previous)} />
+          <KpiCard
+            label={isMtd ? "MTD Revenue" : "Revenue"}
+            value={formatPeso(data.kpis.revenue.value)}
+            delta={data.kpis.revenue.delta}
+            previousLabel={formatPeso(data.kpis.revenue.previous)}
+            onClick={openSegmentBreakdown}
+          />
           <KpiCard
             label={isMtd ? "MTD Transactions" : "Transactions"}
             value={formatNum(data.kpis.transactions.value)}
             delta={data.kpis.transactions.delta}
             previousLabel={formatNum(data.kpis.transactions.previous)}
+            onClick={openSegmentBreakdown}
           />
-          <KpiCard label={isMtd ? "MTD ABS" : "ABS"} value={formatPeso(data.kpis.abs.value)} delta={data.kpis.abs.delta} previousLabel={formatPeso(data.kpis.abs.previous)} sub="Avg Basket Size" />
-          <KpiCard label="Foot Traffic" value={data.moreKpis.hasFootTraffic ? formatNum(data.moreKpis.footTraffic) : "—"} sub="Walk-in branches, current period" />
-          <KpiCard label="Total Customers" value={formatNum(data.moreKpis.totalCustomers)} sub="Named customers, current period" />
-          <KpiCard label="New / Returning" value={`${formatNum(data.moreKpis.newCustomers)} / ${formatNum(data.moreKpis.returningCustomers)}`} sub="Named customers" />
+          <KpiCard
+            label={isMtd ? "MTD ABS" : "ABS"}
+            value={formatPeso(data.kpis.abs.value)}
+            delta={data.kpis.abs.delta}
+            previousLabel={formatPeso(data.kpis.abs.previous)}
+            sub="Avg Basket Size"
+            onClick={openSegmentBreakdown}
+          />
+          <KpiCard
+            label="Foot Traffic"
+            value={data.moreKpis.hasFootTraffic ? formatNum(data.moreKpis.footTraffic) : "—"}
+            sub="Walk-in branches, current period"
+            onClick={openStoreBreakdown}
+          />
+          <KpiCard label="Total Customers" value={formatNum(data.moreKpis.totalCustomers)} sub="Named customers, current period" onClick={openStoreBreakdown} />
+          <KpiCard
+            label="New / Returning"
+            value={`${formatNum(data.moreKpis.newCustomers)} / ${formatNum(data.moreKpis.returningCustomers)}`}
+            sub="Named customers"
+            onClick={openStoreBreakdown}
+          />
         </KpiRow>
         {isMtd && data.kpis.attainment && (
           <div className="mt-1">
@@ -256,6 +335,22 @@ export default function SalesOverview({ filters }) {
           </ul>
         </Panel>
       )}
+
+      <Modal open={segmentModalOpen} onClose={() => setSegmentModalOpen(false)} title="Retail vs Wholesale" subtitle="Revenue, transactions, and average basket size for the selected period">
+        {!segmentBreakdown && !segmentBreakdownError && <LoadingState label="Loading breakdown…" />}
+        {segmentBreakdownError && <ErrorState label={`Couldn't load breakdown: ${segmentBreakdownError}`} />}
+        {segmentBreakdown && !segmentBreakdownError && (
+          <DataTable columns={SEGMENT_BREAKDOWN_COLUMNS} rows={[...segmentBreakdown.rows, segmentBreakdown.total]} emptyLabel="No data for this period." />
+        )}
+      </Modal>
+
+      <Modal open={storeModalOpen} onClose={() => setStoreModalOpen(false)} title="Per-Store Breakdown" subtitle="Foot traffic and named customers, 10 walk-in branches">
+        {!storeBreakdown && !storeBreakdownError && <LoadingState label="Loading breakdown…" />}
+        {storeBreakdownError && <ErrorState label={`Couldn't load breakdown: ${storeBreakdownError}`} />}
+        {storeBreakdown && !storeBreakdownError && (
+          <DataTable columns={STORE_ENGAGEMENT_COLUMNS} rows={[...storeBreakdown.rows, storeBreakdown.total]} emptyLabel="No data for this period." />
+        )}
+      </Modal>
     </div>
   );
 }

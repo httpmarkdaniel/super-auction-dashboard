@@ -7,11 +7,21 @@ import { retail } from "../theme";
 // string, e.g. formatPeso(previous)) renders a "vs {previousLabel}"
 // mini-line. `icon` is optional. A `sparkline` prop is accepted but
 // intentionally ignored — sparklines aren't part of this module's design.
-export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
+// `onClick` (optional) makes the card an interactive drill-down trigger —
+// adds a pointer cursor, hover lift, and a subtle "view breakdown" hint so
+// it reads as clickable without cluttering cards that aren't.
+export function KpiCard({ label, value, delta, sub, previousLabel, icon, onClick }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
-    <div className="rounded-2xl p-4" style={{ background: retail.surface, border: `1px solid ${retail.border}`, boxShadow: retail.shadow }}>
+    <div
+      className={`rounded-2xl p-4 ${onClick ? "transition-shadow hover:shadow-md" : ""}`}
+      style={{ background: retail.surface, border: `1px solid ${retail.border}`, boxShadow: retail.shadow, cursor: onClick ? "pointer" : undefined }}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
+    >
       <div className="flex items-center gap-1.5 mb-2">
         {icon && (
           <span className="shrink-0" style={{ color: retail.blue }}>
@@ -21,6 +31,11 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
         <div className="text-[13px] font-bold" style={{ color: retail.muted }}>
           {label}
         </div>
+        {onClick && (
+          <span className="ml-auto text-[10px] font-semibold" style={{ color: retail.blue }}>
+            View breakdown ›
+          </span>
+        )}
       </div>
       <div className="text-[20px] font-extrabold leading-none tabular-nums" style={{ color: retail.ink }}>
         {value}
