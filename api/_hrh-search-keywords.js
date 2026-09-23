@@ -22,18 +22,42 @@ import { BetaAnalyticsDataClient } from "@google-analytics/data";
 // GA4_SERVICE_ACCOUNT_PRIVATE_KEY in .env.local / Vercel env vars) rather
 // than reusing the CLICKHOUSE_* ones.
 //
-// Same GA4 property as api/_hrh-traffic-analytics.js's GA4_PROPERTY_ID, but
-// DELIBERATELY NOT scoped to ONP_PAGE_PATHS the way that file's page-view
-// numbers are. Investigated 2026-09-23: the search results page is a
-// single shared page (pagePath "/search") used site-wide by every branch,
-// not something unique to HRH Online's storefront — checking the referrer
-// of every view_search_results event, only ~11 of 1,531 total searches
-// (Jan-Sep 2026) came from someone browsing /shop/ONP or
-// /search/stores/ONP right before searching. There is no dimension that
-// cleanly attributes a search to one store the way pagePath does for page
-// views, so per explicit decision this reports EVERY search site-wide,
-// not an HRH-Online-only slice.
+// Same GA4 property as api/_hrh-traffic-analytics.js's GA4_PROPERTY_ID.
+// Investigated 2026-09-23: the search results page is a single shared page
+// (pagePath "/search") used site-wide by every branch, not something
+// unique to any one storefront — there is no dimension that cleanly
+// attributes a search to one store the way pagePath does for page views.
+// Default (no `store` param) reports EVERY search site-wide.
+//
+// A `store` param (added 2026-09-23, per explicit request for a store
+// dropdown) filters to searches whose REFERRING page (pageReferrer — the
+// page the person was on right before they searched) matched that store's
+// /shop/{code} or /search/stores/{code} pages, same convention as
+// api/_hrh-traffic-analytics.js's BRANCHES. This is a real but PARTIAL
+// signal, not a clean store-scoped number: most searches (~94.6% in a
+// 2026-09-23 check, 1,450 of 1,533 total) have no branch-page referrer at
+// all (direct navigation to /search, a repeat search from the results page
+// itself, external links, etc.) and are simply excluded when a store is
+// selected — per explicit decision, NOT bucketed into a generic "Unknown"
+// option, since that would misrepresent an artifact of the referrer signal
+// as if it were a real, nameable segment. Each store option's scopeNote
+// spells out the exact matching rule so this is transparent, not hidden
+// behind a vague label.
 const GA4_PROPERTY_ID = "314716873";
+const STORES = [
+  { code: "ONP", label: "HRH Online", pagePrefixes: ["/shop/ONP", "/search/stores/ONP"] },
+  { code: "PIO", label: "Pioneer", pagePrefixes: ["/shop/PIO", "/search/stores/PIO"] },
+  { code: "CTA", label: "Cainta", pagePrefixes: ["/shop/CTA", "/search/stores/CTA"] },
+  { code: "HSR", label: "Sucat", pagePrefixes: ["/shop/HSR", "/search/stores/HSR"] },
+  { code: "MAB", label: "Mabalacat", pagePrefixes: ["/shop/MAB", "/search/stores/MAB"] },
+  // Store code SRR's real store record is "HMR TAGAYTAY ROAD" — labeled
+  // "Santa Rosa Road" here to match the existing label every other branch
+  // dropdown on this dashboard uses (api/_hrh-traffic-analytics.js's
+  // BRANCHES), so this doesn't introduce a second, inconsistent name for
+  // the same branch.
+  { code: "SRR", label: "Santa Rosa Road", pagePrefixes: ["/shop/SRR", "/search/stores/SRR"] },
+  { code: "SUB", label: "Subic", pagePrefixes: ["/shop/SUB", "/search/stores/SUB"] },
+];
 
 let cachedClient = null;
 function getClient() {
@@ -87,6 +111,7 @@ export async function handleSearchKeywords(req, res) {
   try {
     const { from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");
+    const store = STORES.find((s) => s.code === req.query.store) || null;
 
     let dateRange;
     try {
@@ -95,15 +120,26 @@ export async function handleSearchKeywords(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
+    const expressions = [
+      { filter: { fieldName: "eventName", stringFilter: { matchType: "EXACT", value: "view_search_results" } } },
+    ];
+    if (store) {
+      expressions.push({
+        orGroup: {
+          expressions: store.pagePrefixes.map((prefix) => ({
+            filter: { fieldName: "pageReferrer", stringFilter: { matchType: "CONTAINS", value: prefix } },
+          })),
+        },
+      });
+    }
+
     const client = getClient();
     const [report] = await client.runReport({
       property: `properties/${GA4_PROPERTY_ID}`,
       dateRanges: [{ startDate: dateRange.from, endDate: dateRange.to }],
       dimensions: [{ name: "searchTerm" }],
       metrics: [{ name: "eventCount" }, { name: "totalUsers" }],
-      dimensionFilter: {
-        filter: { fieldName: "eventName", stringFilter: { matchType: "EXACT", value: "view_search_results" } },
-      },
+      dimensionFilter: { andGroup: { expressions } },
       orderBys: [{ metric: { metricName: "eventCount" }, desc: true }],
       limit: 5000,
     });
@@ -116,12 +152,18 @@ export async function handleSearchKeywords(req, res) {
       }))
       .filter((r) => r.keyword && r.keyword !== "(not set)");
 
+    const scopeNote = store
+      ? `Searches referred from ${store.label}'s own pages (hmr.ph${store.pagePrefixes.join(" or hmr.ph")}) right before searching — a partial signal, not a clean store-scoped total: most searches have no branch-page referrer at all (direct navigation, a repeat search, external links) and are excluded here rather than lumped into an "Unknown" bucket. Live from the GA4 Data API, not the ClickHouse/Airbyte copy, so this has no ETL sync lag.`
+      : "Site-wide on-site search terms (hmr.ph/search) across every branch — not scoped to one store. Live from the GA4 Data API, not the ClickHouse/Airbyte copy, so this has no ETL sync lag.";
+
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         property: GA4_PROPERTY_ID,
         range: dateRange,
-        scopeNote: "Site-wide on-site search terms (hmr.ph/search) across every branch — not HRH-Online-exclusive, since the search page itself isn't scoped per store. Live from the GA4 Data API, not the ClickHouse/Airbyte copy, so this has no ETL sync lag.",
+        store: store ? { code: store.code, label: store.label } : null,
+        stores: STORES.map((s) => ({ code: s.code, label: s.label })),
+        scopeNote,
       },
       rows,
     });

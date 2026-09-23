@@ -9,9 +9,10 @@ function dash(value) {
 }
 
 // Search Keywords export — one sheet, one row per search term, ranked by
-// search count. Site-wide (not HRH-Online-only) — see
-// api/_hrh-search-keywords.js's file-header comment for why.
-export function exportSearchKeywordsExcel({ range, rows }) {
+// search count. Site-wide by default (not HRH-Online-only) unless a store
+// is selected — see api/_hrh-search-keywords.js's file-header comment for
+// why site-wide is the default and what a store filter actually means.
+export function exportSearchKeywordsExcel({ range, store, rows }) {
   const wb = XLSX.utils.book_new();
   const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: NAVY_HEX } } };
 
@@ -31,5 +32,6 @@ export function exportSearchKeywordsExcel({ range, rows }) {
   XLSX.utils.book_append_sheet(wb, ws, "Search Keywords");
 
   const rangePart = range ? `${range.from} to ${range.to}` : "All Time";
-  XLSX.writeFile(wb, `Search Keywords (${rangePart}).xlsx`);
+  const storePart = store ? ` - ${store.label}` : "";
+  XLSX.writeFile(wb, `Search Keywords (${rangePart})${storePart}.xlsx`);
 }

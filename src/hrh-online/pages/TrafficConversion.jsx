@@ -175,10 +175,29 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
 // someone browsing HRH Online's own pages right before searching — not
 // a meaningful "HRH Online only" slice, per explicit decision to show the
 // full site-wide list instead.
+// Store dropdown — added 2026-09-23 per explicit request. "All Stores"
+// (default) is the honest site-wide list; picking a specific store
+// switches to the referrer-based approximation described in
+// api/_hrh-search-keywords.js's file header (a partial signal, not a
+// clean store-scoped total — deliberately has NO "Unknown"/"Other" option,
+// per explicit decision, since unmatched searches are simply excluded
+// rather than mislabeled as a real segment).
+const SEARCH_KEYWORD_STORES = [
+  { code: "", label: "All Stores" },
+  { code: "ONP", label: "HRH Online" },
+  { code: "PIO", label: "Pioneer" },
+  { code: "CTA", label: "Cainta" },
+  { code: "HSR", label: "Sucat" },
+  { code: "MAB", label: "Mabalacat" },
+  { code: "SRR", label: "Santa Rosa Road" },
+  { code: "SUB", label: "Subic" },
+];
+
 function SearchKeywordsPanel({ dateRange }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [store, setStore] = useState("");
   const ready = isDateRangeReady(dateRange);
 
   useEffect(() => {
@@ -186,7 +205,7 @@ function SearchKeywordsPanel({ dateRange }) {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    const qs = new URLSearchParams({ report: "searchKeywords", ...dateRangeParams(dateRange) });
+    const qs = new URLSearchParams({ report: "searchKeywords", ...dateRangeParams(dateRange), ...(store ? { store } : {}) });
     fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`Request failed (${res.status})`);
@@ -200,7 +219,7 @@ function SearchKeywordsPanel({ dateRange }) {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [dateRange, ready]);
+  }, [dateRange, ready, store]);
 
   const rows = data?.rows || [];
 
@@ -213,19 +232,33 @@ function SearchKeywordsPanel({ dateRange }) {
           className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
           style={{ background: hrh.blueSoft, color: hrh.blueText }}
         >
-          Site-Wide · Not HRH Online Only
+          {store ? "Approximated by Referring Page" : "Site-Wide · Not HRH Online Only"}
         </span>
       }
       action={
-        rows.length > 0 && (
-          <button
-            onClick={() => exportSearchKeywordsExcel({ range: data.meta.range, rows })}
-            className="text-[12px] font-semibold px-3 py-1.5 rounded-md"
+        <div className="flex items-center gap-2">
+          <select
+            value={store}
+            onChange={(e) => setStore(e.target.value)}
+            className="text-[12.5px] rounded-md px-2.5 py-1.5 outline-none font-medium"
             style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
           >
-            Export to Excel
-          </button>
-        )
+            {SEARCH_KEYWORD_STORES.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          {rows.length > 0 && (
+            <button
+              onClick={() => exportSearchKeywordsExcel({ range: data.meta.range, store: data.meta.store, rows })}
+              className="text-[12px] font-semibold px-3 py-1.5 rounded-md whitespace-nowrap"
+              style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+            >
+              Export to Excel
+            </button>
+          )}
+        </div>
       }
     >
       {data?.meta?.scopeNote && (
