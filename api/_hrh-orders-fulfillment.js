@@ -913,7 +913,7 @@ export async function handleOrdersFulfillment(req, res) {
     };
 
     if (fulfillmentUnsupported) {
-      res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+      res.setHeader("Cache-Control", "no-store");
       return res.status(200).json({
         meta: {
           channel,
@@ -1180,7 +1180,7 @@ export async function handleOrdersFulfillment(req, res) {
       })),
     ].sort((a, b) => (a.orderDate < b.orderDate ? -1 : 1));
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         channel: "HMRPH Online",

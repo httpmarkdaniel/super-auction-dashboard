@@ -184,7 +184,7 @@ export async function handleCustomerSuccess(req, res) {
 
     needsAttention.sort((a, b) => (a.date || "") < (b.date || "") ? -1 : 1);
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         range,

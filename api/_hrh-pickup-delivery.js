@@ -215,7 +215,7 @@ export async function handlePickupDelivery(req, res) {
       fetchFlatOrders("toDate(j.order_placed_at) BETWEEN {trailingFrom:String} AND {today:String}", { trailingFrom, today }),
     ]);
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         range,

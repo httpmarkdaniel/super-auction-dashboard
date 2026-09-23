@@ -479,7 +479,7 @@ export async function handleExecutiveOverview(req, res) {
     const orderLifecycleTotal = lifecycleData.realOrdersReceived;
     const customerSegments = customerSegmentRows.map((r) => ({ segment: r.segment, orders: toNum(r.orders) }));
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         channel,

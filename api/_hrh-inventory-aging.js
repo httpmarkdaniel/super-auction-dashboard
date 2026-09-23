@@ -210,7 +210,7 @@ export async function handleInventoryAging(req, res) {
       status: toNum(r.total_qty_sold) === 0 ? "Non-Moving" : soldRecently(r.product_id) ? "Recently Sold" : "Slow-Moving",
     }));
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         snapshotNote:

@@ -736,7 +736,7 @@ export async function handleCustomerAnalytics(req, res) {
         .sort((a, b) => b.customers - a.customers),
     };
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         channel,

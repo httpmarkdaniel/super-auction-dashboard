@@ -440,7 +440,7 @@ async function runProductDrilldown(req, res) {
         otherStoreStock: rollUpOtherStoreStock(otherStoreMap, [r.group_key]),
       };
     });
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({ rows: drilldownRows });
   }
 
@@ -530,7 +530,7 @@ async function runProductDrilldown(req, res) {
             otherStoreStock: r.otherStoreStock,
             status: stockStatus(r.currentStockQty !== null ? { stockQty: r.currentStockQty, postedQty: r.postedQty } : null),
           }));
-  res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+  res.setHeader("Cache-Control", "no-store");
   return res.status(200).json({ rows: drilldownRows });
 }
 
@@ -899,7 +899,7 @@ export default async function handler(req, res) {
         ),
       }));
 
-    res.setHeader("Cache-Control", "public, s-maxage=120, stale-while-revalidate=300");
+    res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
       meta: {
         channel,
