@@ -9,6 +9,7 @@ import { LoadingState, ErrorState, EmptyState } from "../components/States";
 import { formatShortDateLabel } from "../trendBucket";
 import { hrh } from "../theme";
 import { formatPct, formatNum, formatPeso } from "../format";
+import { exportSearchKeywordsExcel } from "../../utils/searchKeywordsExport";
 
 function dateRangeParams(dateRange) {
   if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
@@ -165,6 +166,115 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
   );
 }
 
+// Search Keywords — live GA4 Data API query (NOT the ClickHouse/Airbyte
+// copy every other number on this page uses), see
+// api/_hrh-search-keywords.js's file-header comment for the full
+// investigation. Deliberately site-wide, not HRH-Online-scoped: the
+// search results page is one shared page across every branch, and
+// checking referrers showed only ~11 of 1,531 total searches came from
+// someone browsing HRH Online's own pages right before searching — not
+// a meaningful "HRH Online only" slice, per explicit decision to show the
+// full site-wide list instead.
+function SearchKeywordsPanel({ dateRange }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const ready = isDateRangeReady(dateRange);
+
+  useEffect(() => {
+    if (!ready) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    const qs = new URLSearchParams({ report: "searchKeywords", ...dateRangeParams(dateRange) });
+    fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Request failed (${res.status})`);
+        const json = await res.json();
+        if (json.error) throw new Error(json.message || json.error);
+        setData(json);
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [dateRange, ready]);
+
+  const rows = data?.rows || [];
+
+  return (
+    <Panel
+      title="Search Keywords"
+      subtitle="What customers typed into the on-site search bar"
+      badge={
+        <span
+          className="text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-1 rounded whitespace-nowrap"
+          style={{ background: hrh.blueSoft, color: hrh.blueText }}
+        >
+          Site-Wide · Not HRH Online Only
+        </span>
+      }
+      action={
+        rows.length > 0 && (
+          <button
+            onClick={() => exportSearchKeywordsExcel({ range: data.meta.range, rows })}
+            className="text-[12px] font-semibold px-3 py-1.5 rounded-md"
+            style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+          >
+            Export to Excel
+          </button>
+        )
+      }
+    >
+      {data?.meta?.scopeNote && (
+        <p className="text-[11px] mb-3" style={{ color: hrh.muted }}>
+          {data.meta.scopeNote}
+        </p>
+      )}
+      {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
+      {ready && loading && !data && <LoadingState label="Loading Search Keywords…" />}
+      {error && <ErrorState label={`Couldn't load Search Keywords: ${error}`} />}
+      {data && !error && rows.length === 0 && <EmptyState label="No searches in this period." />}
+      {data && !error && rows.length > 0 && (
+        <div className="max-h-[420px] overflow-y-auto">
+          <table className="w-full text-[12.5px]">
+            <thead style={{ position: "sticky", top: 0, background: hrh.surface }}>
+              <tr style={{ borderBottom: `1px solid ${hrh.border}` }}>
+                <th className="text-left py-2 font-semibold" style={{ color: hrh.ink2 }}>
+                  Search Term
+                </th>
+                <th className="text-right py-2 font-semibold" style={{ color: hrh.ink2 }}>
+                  Searches
+                </th>
+                <th className="text-right py-2 font-semibold" style={{ color: hrh.ink2 }}>
+                  Users
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={`${r.keyword}-${i}`} style={{ borderBottom: `1px solid ${hrh.border}` }}>
+                  <td className="py-1.5" style={{ color: hrh.ink }}>
+                    {r.keyword}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums" style={{ color: hrh.ink }}>
+                    {formatNum(r.searches)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums" style={{ color: hrh.ink }}>
+                    {formatNum(r.users)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // Real, HRH-Online-scoped Traffic & Conversion — see
 // api/_hrh-traffic-analytics.js's file-header comment for the full scoping
 // investigation. Short version: Users/Page Views are GA4 data filtered to
@@ -253,6 +363,10 @@ export default function TrafficConversion({ filters }) {
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
       {ready && loading && !data && <LoadingState label="Loading Traffic & Conversion…" />}
       {error && <ErrorState label={`Couldn't load Traffic & Conversion: ${error}`} />}
+
+      <SearchKeywordsPanel dateRange={dateRange} />
+
+      <div className="my-8 pt-1" style={{ borderTop: `2px solid ${hrh.border}` }} />
 
       {data && !error && (
         <>
