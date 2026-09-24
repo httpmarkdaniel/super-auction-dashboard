@@ -218,13 +218,14 @@ function InsightsPanel({ storageKey, periodLabel }) {
 }
 
 // Sales/Orders/AOV each show their change vs the Date Range filter's
-// previous comparable period; WoW/MoM compare the same selected dates one
-// week / one month earlier (headers carry the actual comparison dates).
+// previous comparable period. WoW compares the selected dates one week
+// earlier; MoM is always month-to-date vs the same days last month,
+// whatever the filter (headers carry the actual dates).
 const platformTableColumns = (meta) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
   { key: "wowPct", label: meta.wowPreviousLabel ? `WoW % (vs ${meta.wowPreviousLabel})` : "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
-  { key: "momPct", label: `MoM % (vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
+  { key: "momPct", label: `MoM % (MTD ${meta.momCurrentLabel} vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
   { key: "orders", label: "Orders", render: (r) => <DeltaValue value={r.orders} previous={r.prevOrders} format={formatNum} /> },
   { key: "aov", label: "AOV", render: (r) => <DeltaValue value={r.aov} previous={r.prevAov} format={formatPeso} /> },
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
