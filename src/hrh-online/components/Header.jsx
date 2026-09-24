@@ -16,10 +16,13 @@ import ChannelPills from "./ChannelPills";
 // (investigated: no GA4 dimension/custom parameter ties a session to one
 // of those 3 commerce channels), so showing the sales-channel pills on
 // that page would silently do nothing (or worse, look like it should
-// filter GA4 data and quietly not). Date Range still applies everywhere.
-export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange, hideChannelFilter = false }) {
+// filter GA4 data and quietly not).
+//
+// `hideDateRange` (Interactive Calendar only): the calendar has its own
+// month navigation, so the dashboard date range would do nothing there.
+export default function Header({ channel, onChannelChange, dateRange, onDateRangeChange, hideChannelFilter = false, hideDateRange = false }) {
   return (
-    <div style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
+    <div className="print:hidden" style={{ background: hrh.surface, borderBottom: `1px solid ${hrh.border}` }}>
       <div className="relative px-5 md:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-[19px] font-bold" style={{ color: hrh.ink }}>
@@ -41,9 +44,11 @@ export default function Header({ channel, onChannelChange, dateRange, onDateRang
             <ChannelPills value={channel} onChange={onChannelChange} />
           </div>
         )}
-        <div className="mr-0 md:mr-10 lg:mr-20">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-        </div>
+        {!hideDateRange && (
+          <div className="mr-0 md:mr-10 lg:mr-20">
+            <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+          </div>
+        )}
       </div>
     </div>
   );

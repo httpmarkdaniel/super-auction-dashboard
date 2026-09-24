@@ -39,7 +39,7 @@ function GroupLabel({ children }) {
 export default function Sidebar({ active, onNavigate }) {
   return (
     <aside
-      className="w-[228px] shrink-0 h-screen sticky top-0 flex flex-col overflow-y-auto font-sans"
+      className="w-[228px] shrink-0 h-screen sticky top-0 flex flex-col overflow-y-auto font-sans print:hidden"
       style={{ background: hrh.surface, borderRight: `1px solid ${hrh.border}` }}
     >
       <div className="px-3 pt-3 pb-2">

@@ -12,6 +12,7 @@ import BarcodeAnalytics from "./pages/BarcodeAnalytics";
 import ReturnsAndCancellation from "./pages/ReturnsAndCancellation";
 import CustomerSuccess from "./pages/CustomerSuccess";
 import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
+import CampaignCalendar from "./pages/CampaignCalendar";
 import OperationalFlags from "./pages/OperationalFlags";
 import { OPERATIONAL_FLAGS_KEY } from "./nav";
 import { hrh } from "./theme";
@@ -29,6 +30,7 @@ const PAGES = {
   returnsCancellation: ReturnsAndCancellation,
   customerSuccess: CustomerSuccess,
   weeklyBusinessReview: WeeklyBusinessReview,
+  campaignCalendar: CampaignCalendar,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,
 };
 
@@ -64,7 +66,8 @@ export default function HrhOnlineApp() {
           onChannelChange={setChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
-          hideChannelFilter={page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview"}
+          hideChannelFilter={page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar"}
+          hideDateRange={page === "campaignCalendar"}
         />
         <main className="flex-1 min-w-0 px-5 md:px-6 py-5">
           <Page filters={filters} />
