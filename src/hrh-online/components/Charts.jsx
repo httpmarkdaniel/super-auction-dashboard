@@ -450,12 +450,41 @@ export function StackedAreaChart({
   );
 }
 
+// Change vs a comparison period as a small colored "▲ 12.3%" — null
+// previous means no comparison was requested; 0 previous means new.
+function DeltaChip({ value, previous, title }) {
+  if (previous === undefined || previous === null) return null;
+  if (!previous) {
+    return value ? (
+      <span className="text-[10.5px] font-semibold shrink-0" style={{ color: hrh.good }} title={title}>
+        New
+      </span>
+    ) : null;
+  }
+  const pct = ((value - previous) / Math.abs(previous)) * 100;
+  const color = pct > 0 ? hrh.good : pct < 0 ? hrh.bad : hrh.muted;
+  const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "▬";
+  return (
+    <span className="text-[10.5px] font-semibold shrink-0 whitespace-nowrap" style={{ color }} title={title}>
+      {arrow} {Math.abs(pct).toFixed(1)}%
+    </span>
+  );
+}
+
 // Donut share breakdown with a centered total and a metric-list legend —
 // same `segments` shape ShareBar already uses ([{ label, value, color }]),
 // just a ring instead of a strip for panels that want the more prominent
 // "total in the middle" treatment (Sales by Channel, Order Status).
-export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
+//
+// Optional comparison: a segment's `previous` adds a change chip beside its
+// share (hover shows the previous value via `valueFormatter`), and
+// `comparisonLabel` adds a "Change vs …" line plus the total's own change
+// under the center figure.
+export function DonutChart({ segments, centerValue, centerLabel, size = 132, valueFormatter = (v) => String(v), comparisonLabel }) {
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
+  const hasComparison = segments.some((s) => s.previous !== undefined && s.previous !== null);
+  const previousTotal = hasComparison ? segments.reduce((s, x) => s + (x.previous || 0), 0) : null;
+  const realTotal = segments.reduce((s, x) => s + x.value, 0);
   return (
     <div className="grid gap-4 items-center" style={{ gridTemplateColumns: `${size}px 1fr` }}>
       <div className="relative shrink-0" style={{ width: size, height: size }}>
@@ -479,10 +508,20 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
                 {centerLabel}
               </div>
             )}
+            {hasComparison && (
+              <div className="leading-tight mt-0.5">
+                <DeltaChip value={realTotal} previous={previousTotal} title={`Previous: ${valueFormatter(previousTotal)}`} />
+              </div>
+            )}
           </div>
         )}
       </div>
       <div className="flex flex-col gap-2">
+        {hasComparison && comparisonLabel && (
+          <div className="text-[10.5px] text-right -mb-1" style={{ color: hrh.muted }}>
+            Change vs {comparisonLabel}
+          </div>
+        )}
         {segments.map((s) => (
           <div key={s.label} className="flex items-center gap-1.5 text-[11.5px]" style={{ color: hrh.ink2 }}>
             <span className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
@@ -490,6 +529,11 @@ export function DonutChart({ segments, centerValue, centerLabel, size = 132 }) {
             <span className="ml-auto font-semibold shrink-0" style={{ color: hrh.ink }}>
               {((s.value / total) * 100).toFixed(1)}%
             </span>
+            {hasComparison && (
+              <span className="w-[52px] text-right shrink-0">
+                <DeltaChip value={s.value} previous={s.previous ?? 0} title={`${valueFormatter(s.value)} now vs ${valueFormatter(s.previous ?? 0)} before`} />
+              </span>
+            )}
           </div>
         ))}
       </div>

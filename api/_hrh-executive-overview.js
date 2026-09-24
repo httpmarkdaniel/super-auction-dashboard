@@ -462,9 +462,11 @@ export async function handleExecutiveOverview(req, res) {
         ? CHANNEL_MAP["All Channels"].map((ch) => ({
             channel: ch,
             gmv: channelGmv.get(ch) || 0,
+            // Same "Compare to" window as the scorecards (`previous`).
+            previousGmv: prevChannelGmv.get(ch) || 0,
             sharePct: curGmv > 0 ? ((channelGmv.get(ch) || 0) / curGmv) * 100 : 0,
           }))
-        : [{ channel: channels[0], gmv: curGmv, sharePct: curGmv > 0 ? 100 : 0 }];
+        : [{ channel: channels[0], gmv: curGmv, previousGmv: prevGmv, sharePct: curGmv > 0 ? 100 : 0 }];
     // Cancelled = stayingCancelled only (System-Initiated Expired + No
     // Reason Logged) — reverted 2026-09-15 (briefly used allRealCancelled,
     // ALL real cancellations any reason, for a same-day unification; see

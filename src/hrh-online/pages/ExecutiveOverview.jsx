@@ -227,11 +227,12 @@ export default function ExecutiveOverview({ filters }) {
   const [channelLoading, setChannelLoading] = useState(true);
   const [channelError, setChannelError] = useState(null);
 
-  const loadChannelData = useCallback(async (ch, p, signal) => {
+  const loadChannelData = useCallback(async (ch, p, cmp, signal) => {
     setChannelLoading(true);
     setChannelError(null);
     try {
-      const qs = new URLSearchParams({ channel: ch, ...p });
+      // compareTo: previous-period counts for Payment Type / Checkout Method.
+      const qs = new URLSearchParams({ channel: ch, ...p, compareTo: cmp });
       const res = await fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const json = await res.json();
@@ -248,9 +249,9 @@ export default function ExecutiveOverview({ filters }) {
   useEffect(() => {
     if (!ready) return;
     const controller = new AbortController();
-    loadChannelData(channel, params, controller.signal);
+    loadChannelData(channel, params, compareTo, controller.signal);
     return () => controller.abort();
-  }, [channel, params, ready, loadChannelData]);
+  }, [channel, params, compareTo, ready, loadChannelData]);
 
   // Fixed trailing window, independent of the Date Range filter — see
   // TRAILING_BUCKET_COUNT comment. bucketArrayField merges the per-day
@@ -264,7 +265,12 @@ export default function ExecutiveOverview({ filters }) {
     channelBreakdown: salesTrendChannelByBucket.get(row.dateLabel) || [],
   }));
   const channelSegments =
-    data?.channelMix.map((c) => ({ label: c.channel, value: c.gmv, color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length] })) || [];
+    data?.channelMix.map((c) => ({
+      label: c.channel,
+      value: c.gmv,
+      previous: c.previousGmv,
+      color: hrh.series[["HMRPH ONLINE", "TIKTOK", "SHOPEE"].indexOf(c.channel) % hrh.series.length],
+    })) || [];
 
   return (
     <div>
@@ -361,13 +367,21 @@ export default function ExecutiveOverview({ filters }) {
       {data && channelData && !error && !channelError && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <Panel title="Sales by Channel" subtitle="GMV share for the selected period">
-            <DonutChart segments={channelSegments} centerValue={formatCompactPeso(data.kpis.gmv.value)} centerLabel="Total GMV" />
+            <DonutChart
+              segments={channelSegments}
+              centerValue={formatCompactPeso(data.kpis.gmv.value)}
+              centerLabel="Total GMV"
+              valueFormatter={formatPeso}
+              comparisonLabel={effectivePeriodLabel(data.meta.previous)}
+            />
           </Panel>
           <Panel title="Payment Type" subtitle={channelData.meta?.checkoutCoverageNote || "Orders share by payment method"}>
             <DonutChart
               segments={channelData.paymentType}
               centerValue={formatNum(channelData.paymentType.reduce((s, x) => s + x.value, 0))}
               centerLabel="Orders"
+              valueFormatter={(v) => `${formatNum(v)} orders`}
+              comparisonLabel={channelData.meta?.comparison ? effectivePeriodLabel(channelData.meta.comparison) : undefined}
             />
           </Panel>
           <Panel
@@ -378,6 +392,8 @@ export default function ExecutiveOverview({ filters }) {
               segments={channelData.fulfillmentMethod}
               centerValue={formatNum(channelData.fulfillmentMethod.reduce((s, x) => s + x.value, 0))}
               centerLabel="Orders"
+              valueFormatter={(v) => `${formatNum(v)} orders`}
+              comparisonLabel={channelData.meta?.comparison ? effectivePeriodLabel(channelData.meta.comparison) : undefined}
             />
           </Panel>
         </div>

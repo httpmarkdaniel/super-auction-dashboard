@@ -67,6 +67,28 @@ function firstOfMonthISO(iso) {
   const [y, m] = iso.split("-").map(Number);
   return `${y}-${String(m).padStart(2, "0")}-01`;
 }
+function daysInMonthUTC(year, month1Based) {
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
+}
+function shiftMonthsClampedISO(iso, deltaMonths) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const total0 = y * 12 + (m - 1) + deltaMonths;
+  const ny = Math.floor(total0 / 12);
+  const nm1 = (((total0 % 12) + 12) % 12) + 1;
+  const nd = Math.min(d, daysInMonthUTC(ny, nm1));
+  return `${ny}-${String(nm1).padStart(2, "0")}-${String(nd).padStart(2, "0")}`;
+}
+// Sales Overview's "Compare to" (Day/Week/Month) window — identical to
+// api/_hrh-executive-overview.js's resolveComparisonWindow, duplicated per
+// this codebase's per-file convention. Used only for the Payment Type /
+// Checkout Method previous-period counts.
+function resolveComparisonWindow(current, compareTo) {
+  const { from, to } = current;
+  if (compareTo === "day") return { from: addDaysISO(from, -1), to: addDaysISO(to, -1) };
+  if (compareTo === "month") return { from: shiftMonthsClampedISO(from, -1), to: shiftMonthsClampedISO(to, -1) };
+  return { from: addDaysISO(from, -7), to: addDaysISO(to, -7) }; // "week" (default)
+}
+
 function resolveCurrentRange(range, fromParam, toParam) {
   const today = manilaTodayISODate();
   if (range === "custom") {
@@ -504,9 +526,10 @@ export default async function handler(req, res) {
     // excluded from the percentage breakdown rather than shown as a
     // "unknown" slice that would dwarf the real signal — the `coverage`
     // note in the response states the exclusion explicitly.
-    const checkoutInfoRows = await (
-      await client.query({
-        query: `
+    const checkoutInfoFor = async (win) =>
+      (
+        await client.query({
+          query: `
           WITH canonical AS (
             SELECT DISTINCT invoice_id
             FROM xv3.mart_net_sales
@@ -524,10 +547,18 @@ export default async function handler(req, res) {
           FROM canonical c
           LEFT JOIN info i ON c.invoice_id = i.invoice_id
         `,
-        query_params: { store: HRH_STORE, channels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
+          query_params: { store: HRH_STORE, channels, curFrom: win.from, curTo: win.to },
+          format: "JSONEachRow",
+        })
+      ).json();
+    // `compareTo` is only sent by Sales Overview (Payment Type / Checkout
+    // Method deltas); without it the comparison query is skipped.
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : null;
+    const comparison = compareTo ? resolveComparisonWindow(current, compareTo) : null;
+    const [checkoutInfoRows, prevCheckoutInfoRows] = await Promise.all([
+      checkoutInfoFor(current),
+      comparison ? checkoutInfoFor(comparison) : Promise.resolve(null),
+    ]);
     const totalCheckoutOrders = checkoutInfoRows.length;
     const paymentCounts = new Map();
     const fulfillmentCounts = new Map();
@@ -545,21 +576,29 @@ export default async function handler(req, res) {
         fulfillmentCounts.set(cm, (fulfillmentCounts.get(cm) || 0) + 1);
       }
     }
-    const paymentType = toTopSegments(
-      Array.from(paymentCounts, ([label, value]) => ({ label, value })),
-      "label",
-      "value",
-      6,
-      SERIES_COLORS,
-      OTHER_COLOR,
+    // Previous-period counts per label, attached to each segment as
+    // `previous` ("Other" gets the sum for every label not shown).
+    const prevPaymentCounts = new Map();
+    const prevFulfillmentCounts = new Map();
+    for (const r of prevCheckoutInfoRows || []) {
+      const pt = normalizePaymentType(r.payment_type);
+      if (pt) prevPaymentCounts.set(pt, (prevPaymentCounts.get(pt) || 0) + 1);
+      const cm = r.checkout_method ? CHECKOUT_METHOD_DISPLAY[r.checkout_method] || r.checkout_method : null;
+      if (cm) prevFulfillmentCounts.set(cm, (prevFulfillmentCounts.get(cm) || 0) + 1);
+    }
+    const withPrevious = (segments, prevCounts) => {
+      if (!prevCheckoutInfoRows) return segments;
+      const shown = new Set(segments.map((s) => s.label));
+      const otherPrev = Array.from(prevCounts).reduce((sum, [label, n]) => sum + (shown.has(label) ? 0 : n), 0);
+      return segments.map((s) => ({ ...s, previous: s.label === "Other" ? otherPrev : prevCounts.get(s.label) || 0 }));
+    };
+    const paymentType = withPrevious(
+      toTopSegments(Array.from(paymentCounts, ([label, value]) => ({ label, value })), "label", "value", 6, SERIES_COLORS, OTHER_COLOR),
+      prevPaymentCounts,
     );
-    const fulfillmentMethod = toTopSegments(
-      Array.from(fulfillmentCounts, ([label, value]) => ({ label, value })),
-      "label",
-      "value",
-      6,
-      SERIES_COLORS,
-      OTHER_COLOR,
+    const fulfillmentMethod = withPrevious(
+      toTopSegments(Array.from(fulfillmentCounts, ([label, value]) => ({ label, value })), "label", "value", 6, SERIES_COLORS, OTHER_COLOR),
+      prevFulfillmentCounts,
     );
     const checkoutCoverageNote =
       totalCheckoutOrders > 0 && (matchedPayment < totalCheckoutOrders || matchedFulfillment < totalCheckoutOrders)
@@ -693,6 +732,7 @@ export default async function handler(req, res) {
         current,
         generatedAt: new Date().toISOString(),
         checkoutCoverageNote,
+        comparison,
       },
       channelComparison,
       salesTrendTrailing,
