@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { hrh } from "../theme";
-import Modal from "../components/Modal";
-import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, PLATFORMS, SEASON_MONTHS } from "../data/campaignCalendar";
+import CampaignEditor from "../components/CampaignEditor";
+import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_MONTHS, withCampaignDefaults } from "../data/campaignCalendar";
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
 // campaign calendar) as a dashboard page: month grid with per-platform
 // overlays, platform filter, search, clean/show-all density, summary cards,
 // a detail panel, and PDF/CSV/ICS export.
 //
-// Campaign data is static (src/hrh-online/data/campaignCalendar.js) and
-// edits made through "View / Edit Campaign" live in this page's state only
-// — the original HTML worked the same way, and there's no campaign table
-// in the warehouse to write to yet.
+// Campaign data is static (src/hrh-online/data/campaignCalendar.js).
+// Clicking any campaign opens the full "Edit Campaign Period" form
+// (components/CampaignEditor.jsx); edits and deletes live in this page's
+// state only — the original HTML worked the same way, and there's no
+// campaign table in the warehouse to write to yet.
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
@@ -39,7 +40,10 @@ const STATUS_TONES = {
   Active: { color: "#0a8c5e", background: "#e4f8ee" },
   Upcoming: { color: hrh.blueText, background: hrh.blueSoft },
   Ended: { color: hrh.ink2, background: "#eef0f4" },
+  Paused: { color: "#b07514", background: "#faf1df" },
+  Draft: { color: hrh.ink2, background: "#eef0f4" },
 };
+const SCOPE_LABELS = { chainwide: `Chainwide · all ${HMR_BRANCHES.length} branches`, online: "Online only", selected: "Selected branches" };
 
 const pad = (n) => String(n).padStart(2, "0");
 const isoOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
@@ -67,6 +71,7 @@ function eventStyle(e) {
 }
 
 function statusOf(e, today) {
+  if (e.status) return e.status;
   if (endOf(e) < today) return "Ended";
   if (e.date > today) return "Upcoming";
   return "Active";
@@ -135,11 +140,9 @@ function DetailRow({ label, children }) {
   );
 }
 
-const inputClass = "w-full mt-1 rounded-md border px-2.5 py-2 text-[13px] outline-none";
-
 export default function CampaignCalendar() {
   const today = todayIso();
-  const [events, setEvents] = useState(CAMPAIGN_EVENTS);
+  const [campaigns, setCampaigns] = useState(() => [...CAMPAIGN_EVENTS, ...CONTINUOUS_CAMPAIGNS].map(withCampaignDefaults));
   const [view, setView] = useState(() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() };
@@ -148,12 +151,13 @@ export default function CampaignCalendar() {
   const [cleanView, setCleanView] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
-  const [draft, setDraft] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [shareMsg, setShareMsg] = useState("");
 
   const viewKey = `${view.year}-${pad(view.month + 1)}`;
   const monthLabel = `${MONTH_NAMES[view.month]} ${view.year}`;
 
+  const events = useMemo(() => campaigns.filter((c) => !c.continuous), [campaigns]);
   const monthEvents = useMemo(() => events.filter((e) => monthKey(e.date) === viewKey), [events, viewKey]);
 
   const visibleEvents = useMemo(() => {
@@ -193,11 +197,17 @@ export default function CampaignCalendar() {
   const continuous = useMemo(() => {
     const monthStart = `${viewKey}-01`;
     const monthEnd = isoOf(view.year, view.month, new Date(view.year, view.month + 1, 0).getDate());
-    return CONTINUOUS_CAMPAIGNS.filter((c) => c.start <= monthEnd && c.end >= monthStart);
-  }, [viewKey, view]);
+    return campaigns.filter((c) => c.continuous && c.date <= monthEnd && endOf(c) >= monthStart);
+  }, [campaigns, viewKey, view]);
 
   // Default selection: this month's next headline launch, else its first campaign.
-  const selected = events.find((e) => e.id === selectedId) || summary.upcoming[0] || monthEvents[0] || null;
+  const selected = campaigns.find((e) => e.id === selectedId) || summary.upcoming[0] || monthEvents[0] || null;
+  const editing = campaigns.find((e) => e.id === editingId) || null;
+
+  function openCampaign(c) {
+    setSelectedId(c.id);
+    setEditingId(c.id);
+  }
 
   useEffect(() => {
     if (!shareMsg) return;
@@ -262,18 +272,20 @@ export default function CampaignCalendar() {
     }
   }
 
-  function openEdit() {
-    if (!selected) return;
-    setDraft({ ...selected, end: endOf(selected), objective: selected.objective || "" });
+  function saveCampaign(updated) {
+    setCampaigns((list) => list.map((c) => (c.id === updated.id ? updated : c)));
+    setSelectedId(updated.id);
+    setEditingId(null);
+    if (!updated.continuous) {
+      const d = parseIso(updated.date);
+      setView({ year: d.getFullYear(), month: d.getMonth() });
+    }
   }
 
-  function saveEdit() {
-    const end = draft.end && draft.end > draft.date ? draft.end : undefined;
-    setEvents((list) => list.map((e) => (e.id === draft.id ? { ...e, title: draft.title, platform: draft.platform, date: draft.date, end, objective: draft.objective } : e)));
-    setSelectedId(draft.id);
-    const d = parseIso(draft.date);
-    setView({ year: d.getFullYear(), month: d.getMonth() });
-    setDraft(null);
+  function deleteCampaign(id) {
+    setCampaigns((list) => list.filter((c) => c.id !== id));
+    setSelectedId(null);
+    setEditingId(null);
   }
 
   // Calendar cells: leading/trailing days of the neighboring months, only as many rows as the month needs.
@@ -435,9 +447,16 @@ export default function CampaignCalendar() {
           </h3>
           <div className="flex flex-wrap gap-1.5">
             {continuous.map((c) => (
-              <span key={c.title} className="rounded border px-2.5 py-1.5 text-[11px] font-bold" style={PLATFORM_TONES[c.platform]}>
-                [{PLATFORMS[c.platform].name.split(" /")[0]}] {c.title} · {shortDate(c.start)}–{shortDate(c.end)}
-              </span>
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => openCampaign(c)}
+                className="rounded border px-2.5 py-1.5 text-[11px] font-bold transition hover:-translate-y-px hover:shadow"
+                style={PLATFORM_TONES[c.platform]}
+                title="Edit campaign period"
+              >
+                [{PLATFORMS[c.platform].name.split(" /")[0]}] {c.title} · {shortDate(c.date)}–{shortDate(endOf(c))}
+              </button>
             ))}
           </div>
         </section>
@@ -490,7 +509,7 @@ export default function CampaignCalendar() {
                         <button
                           key={e.id}
                           type="button"
-                          onClick={() => setSelectedId(e.id)}
+                          onClick={() => openCampaign(e)}
                           className="text-left rounded-md border px-1.5 py-1 text-[11px] leading-tight transition hover:-translate-y-px hover:shadow"
                           style={{ ...eventStyle(e), color: eventStyle(e).color || hrh.ink }}
                           title={`${PLATFORMS[e.platform].name}: ${e.title}`}
@@ -538,13 +557,24 @@ export default function CampaignCalendar() {
                   {selected.title}
                 </h2>
                 <div className="text-[12.5px]" style={{ color: hrh.ink2 }}>
-                  📅 {shortDate(selected.date)}
-                  {selectedSpan > 1 ? ` – ${shortDate(endOf(selected))}` : ""}, {parseIso(selected.date).getFullYear()} · {selectedSpan} day{selectedSpan > 1 ? "s" : ""}
+                  📅 {(() => {
+                    const startYear = selected.date.slice(0, 4);
+                    const endYear = endOf(selected).slice(0, 4);
+                    if (selectedSpan === 1) return `${shortDate(selected.date)}, ${startYear}`;
+                    if (startYear === endYear) return `${shortDate(selected.date)} – ${shortDate(endOf(selected))}, ${startYear}`;
+                    return `${shortDate(selected.date)}, ${startYear} – ${shortDate(endOf(selected))}, ${endYear}`;
+                  })()}{" "}
+                  · {selectedSpan} day{selectedSpan > 1 ? "s" : ""}
                 </div>
               </div>
               <div className="px-4 py-2">
                 <DetailRow label="🎯 Objective">{selected.objective || "Coordinate platform execution, campaign assets, and daily promotional visibility."}</DetailRow>
+                {selected.tagline && <DetailRow label="💬 Tagline">{selected.tagline}</DetailRow>}
                 <DetailRow label="🏬 Platform">{PLATFORMS[selected.platform].name}</DetailRow>
+                <DetailRow label="📍 Scope">
+                  {SCOPE_LABELS[selected.scopeType]}
+                  {selected.scopeType === "selected" && selected.branches.length ? `: ${selected.branches.join(", ")}` : ""}
+                </DetailRow>
                 <DetailRow label="● Status">{selectedStatus}</DetailRow>
                 <DetailRow label="🏷 Tags">
                   <div className="flex flex-wrap gap-1.5">
@@ -563,7 +593,7 @@ export default function CampaignCalendar() {
                 </p>
               </div>
               <div className="px-4 pb-4 pt-2">
-                <button type="button" onClick={openEdit} className="w-full rounded-md py-3 text-[13px] font-bold text-white" style={{ background: "#0c3a68" }}>
+                <button type="button" onClick={() => setEditingId(selected.id)} className="w-full rounded-md py-3 text-[13px] font-bold text-white" style={{ background: "#0c3a68" }}>
                   ✎ View / Edit Campaign
                 </button>
               </div>
@@ -576,44 +606,9 @@ export default function CampaignCalendar() {
         </aside>
       </section>
 
-      <Modal open={!!draft} onClose={() => setDraft(null)} title="Edit Campaign" subtitle="Changes last until the page is reloaded.">
-        {draft && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px] font-semibold" style={{ color: hrh.ink2 }}>
-            <label>
-              Campaign Title
-              <input className={inputClass} style={{ borderColor: hrh.border }} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-            </label>
-            <label>
-              Platform
-              <select className={inputClass} style={{ borderColor: hrh.border }} value={draft.platform} onChange={(e) => setDraft({ ...draft, platform: e.target.value })}>
-                {Object.entries(PLATFORMS).map(([key, p]) => (
-                  <option key={key} value={key}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Start Date
-              <input type="date" className={inputClass} style={{ borderColor: hrh.border }} value={draft.date} onChange={(e) => e.target.value && setDraft({ ...draft, date: e.target.value })} />
-            </label>
-            <label>
-              End Date
-              <input type="date" className={inputClass} style={{ borderColor: hrh.border }} value={draft.end} min={draft.date} onChange={(e) => setDraft({ ...draft, end: e.target.value })} />
-            </label>
-            <label className="sm:col-span-2">
-              Objective
-              <textarea rows={3} className={inputClass} style={{ borderColor: hrh.border }} value={draft.objective} onChange={(e) => setDraft({ ...draft, objective: e.target.value })} />
-            </label>
-            <div className="sm:col-span-2 flex justify-end gap-2 mt-1">
-              <Btn onClick={() => setDraft(null)}>Cancel</Btn>
-              <Btn tone="dark" onClick={saveEdit}>
-                Save Campaign
-              </Btn>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {editing && (
+        <CampaignEditor key={editing.id} campaign={editing} campaigns={campaigns} onSave={saveCampaign} onDelete={deleteCampaign} onClose={() => setEditingId(null)} />
+      )}
     </div>
   );
 }
