@@ -9,6 +9,7 @@ import { LoadingState, ErrorState } from "../components/States";
 import { hrh } from "../theme";
 import { formatPeso, formatNum, formatPct } from "../format";
 import InventoryAging from "./InventoryAging";
+import { exportRepeatSellersExcel, exportTopProductsExcel, exportDroppedProductsExcel } from "../../utils/productAnalyticsExport";
 
 const PRODUCT_SUB_TABS = [
   { key: "overview", label: "Product Analytics" },
@@ -101,6 +102,21 @@ function currentStockCell(r) {
       {r.currentStockQty === null ? "—" : formatNum(r.currentStockQty)}
       {otherList && <span style={{ color: hrh.muted }}> (Other: {otherList})</span>}
     </span>
+  );
+}
+
+// Same look as Traffic & Conversion's Search Keywords "Export to Excel".
+function ExportButton({ onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="text-[12px] font-semibold px-3 py-1.5 rounded-md whitespace-nowrap disabled:opacity-40"
+      style={{ border: `1px solid ${hrh.border}`, color: hrh.ink, background: "#fff" }}
+    >
+      Export to Excel
+    </button>
   );
 }
 
@@ -408,6 +424,12 @@ export default function ProductAnalytics({ filters }) {
               <div className="flex items-center gap-3 flex-wrap">
                 <GroupByControl value={groupBy} onChange={setGroupBy} />
                 <TrendBucketPills value={bucketGranularity} onChange={setBucketGranularity} options={BUCKET_GRANULARITY_OPTIONS} />
+                <ExportButton
+                  disabled={!data.repeatSellers?.length}
+                  onClick={() =>
+                    exportRepeatSellersExcel({ rows: data.repeatSellers, groupBy, granularity: bucketGranularity, periodBuckets: data.meta?.periodBuckets, channel })
+                  }
+                />
               </div>
             }
             className="mb-4"
@@ -430,6 +452,18 @@ export default function ProductAnalytics({ filters }) {
               <div className="flex items-center gap-3 flex-wrap">
                 <GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />
                 <ProductSortControl value={topProductsSort} onChange={setTopProductsSort} />
+                <ExportButton
+                  disabled={!data.topProducts?.length}
+                  onClick={() =>
+                    exportTopProductsExcel({
+                      rows: sortProductRows(data.topProducts, topProductsSort, "currentGmv", "currentStockQty"),
+                      groupBy: comparisonGroupBy,
+                      current: data.meta.current,
+                      previous: data.meta.previous,
+                      channel,
+                    })
+                  }
+                />
               </div>
             }
             className="mb-4"
@@ -450,6 +484,18 @@ export default function ProductAnalytics({ filters }) {
               <div className="flex items-center gap-3 flex-wrap">
                 <GroupByControl value={comparisonGroupBy} onChange={setComparisonGroupBy} />
                 <ProductSortControl value={droppedProductsSort} onChange={setDroppedProductsSort} />
+                <ExportButton
+                  disabled={!data.droppedProducts?.length}
+                  onClick={() =>
+                    exportDroppedProductsExcel({
+                      rows: sortProductRows(data.droppedProducts, droppedProductsSort, "previousGmv", "currentStockQty"),
+                      groupBy: comparisonGroupBy,
+                      current: data.meta.current,
+                      previous: data.meta.previous,
+                      channel,
+                    })
+                  }
+                />
               </div>
             }
           >
