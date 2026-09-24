@@ -159,6 +159,38 @@ const MOVERS_SORT_OPTIONS = [
   { key: "value", label: "Value" },
 ];
 
+// Channel toggle for Top 10 SKU Movers — keys match the API's
+// skuMoversByChannel keys; "all" uses the combined skuMovers list.
+const MOVERS_CHANNEL_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "HMRPH Online", label: "HMR Online" },
+  { key: "TikTok", label: "TikTok" },
+  { key: "Shopee", label: "Shopee" },
+];
+
+function SegmentedToggle({ label, options, value, onChange }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+        {label}
+      </span>
+      <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
+        {options.map((o) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            className="text-[11.5px] font-semibold px-2.5 h-6"
+            style={value === o.key ? { background: hrh.navy, color: "#fff" } : { background: "transparent", color: hrh.ink2 }}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Recreates slides 2-5 of "Ecomm Weekly Business Review.pdf" as a live,
 // real-data section — see api/_hrh-weekly-business-review.js's own top
 // comment for what that deck actually contains (a template: every metric
@@ -178,6 +210,7 @@ export default function WeeklyBusinessReview({ filters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [moversSort, setMoversSort] = useState("units");
+  const [moversChannel, setMoversChannel] = useState("all");
 
   const ready = isDateRangeReady(dateRange);
   const params = useMemo(() => dateRangeParams(dateRange), [dateRange]);
@@ -212,8 +245,10 @@ export default function WeeklyBusinessReview({ filters }) {
   // data.skuMovers is every SKU with real current-period activity, so
   // re-sorting here and taking the top 10 for whichever metric is selected
   // never misses a SKU that only ranks highly by the OTHER metric.
+  const moversSource = data ? (moversChannel === "all" ? data.skuMovers : data.skuMoversByChannel?.[moversChannel] || []) : [];
+  const moversChannelLabel = MOVERS_CHANNEL_OPTIONS.find((o) => o.key === moversChannel)?.label;
   const topMovers = data
-    ? [...data.skuMovers].sort((a, b) => (moversSort === "value" ? b.currentGmv - a.currentGmv : b.currentUnits - a.currentUnits)).slice(0, 10)
+    ? [...moversSource].sort((a, b) => (moversSort === "value" ? b.currentGmv - a.currentGmv : b.currentUnits - a.currentUnits)).slice(0, 10)
     : [];
 
   return (
@@ -290,27 +325,13 @@ export default function WeeklyBusinessReview({ filters }) {
 
           {/* ============================== SLIDE 5 ============================== */}
           <Panel
-            title={`Top 10 SKU Movers — ${moversSort === "value" ? "Sales Value" : "Units Sold"}`}
+            title={`Top 10 SKU Movers — ${moversSort === "value" ? "Sales Value" : "Units Sold"}${moversChannel === "all" ? "" : ` · ${moversChannelLabel}`}`}
             subtitle={`${data.meta.currentLabel} vs. ${data.meta.previousLabel}`}
             className="mb-4"
             action={
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
-                  Sort by
-                </span>
-                <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
-                  {MOVERS_SORT_OPTIONS.map((o) => (
-                    <button
-                      key={o.key}
-                      type="button"
-                      onClick={() => setMoversSort(o.key)}
-                      className="text-[11.5px] font-semibold px-2.5 h-6"
-                      style={moversSort === o.key ? { background: hrh.navy, color: "#fff" } : { background: "transparent", color: hrh.ink2 }}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center gap-4 flex-wrap">
+                <SegmentedToggle label="Channel" options={MOVERS_CHANNEL_OPTIONS} value={moversChannel} onChange={setMoversChannel} />
+                <SegmentedToggle label="Sort by" options={MOVERS_SORT_OPTIONS} value={moversSort} onChange={setMoversSort} />
               </div>
             }
           >
@@ -340,7 +361,7 @@ export default function WeeklyBusinessReview({ filters }) {
               />
             )}
             <div className="mt-4">
-              <DataTable columns={TOP10_TABLE_COLUMNS} rows={topMovers} emptyLabel="No sales in this period." />
+              <DataTable columns={TOP10_TABLE_COLUMNS} rows={topMovers} emptyLabel={moversChannel === "all" ? "No sales in this period." : `No ${moversChannelLabel} sales in this period.`} />
             </div>
           </Panel>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">

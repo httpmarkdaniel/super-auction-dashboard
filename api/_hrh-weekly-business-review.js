@@ -341,7 +341,7 @@ export async function handleWeeklyBusinessReview(req, res) {
     // resolveFixedMomWindows above.
     const momWindows = resolveFixedMomWindows();
     const weeks = sixWeeklyBucketsEndingAt(current.to);
-    const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows] = await Promise.all([
+    const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows, channelProductRows] = await Promise.all([
       channelMetrics(current.from, current.to),
       wowWindow ? channelMetrics(wowWindow.from, wowWindow.to) : Promise.resolve(null),
       channelMetrics(momWindows.current.from, momWindows.current.to),
@@ -392,6 +392,40 @@ export async function handleWeeklyBusinessReview(req, res) {
               AND \`ct.item_id\` IS NOT NULL
             GROUP BY item_id
             HAVING cur_gmv > 0 OR prev_gmv > 0
+          `,
+          query_params: {
+            store: HRH_STORE,
+            channels: ALL_CHANNELS,
+            curFrom: current.from,
+            curTo: current.to,
+            prevFrom: previous.from,
+            prevTo: previous.to,
+          },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
+      // Same comparison split per sales channel, for Slide 5's channel
+      // toggle (HMRPH Online / TikTok / Shopee). Only SKUs with current-
+      // period sales — movers are ranked on current activity.
+      client
+        .query({
+          query: `
+            SELECT
+              sales_channel AS ch,
+              \`ct.item_id\` AS item_id,
+              any(barcode) AS barcode,
+              argMax(product_name, transaction_date) AS product_name,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
+              sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
+              sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {channels:Array(String)}
+              AND transaction_date BETWEEN {prevFrom:String} AND {curTo:String}
+              AND \`ct.item_id\` IS NOT NULL
+            GROUP BY ch, item_id
+            HAVING cur_gmv > 0 OR cur_units > 0
           `,
           query_params: {
             store: HRH_STORE,
@@ -683,6 +717,35 @@ export async function handleWeeklyBusinessReview(req, res) {
         pctChange: p.pct,
       }));
 
+    // Per-channel movers for Slide 5's channel toggle. Only what the page can
+    // show is sent: the union of each channel's top 10 by units and top 10
+    // by value (the frontend re-sorts and takes 10, same as skuMovers).
+    const skuMoversByChannel = {};
+    for (const ch of ALL_CHANNELS) {
+      const rows = channelProductRows
+        .filter((r) => r.ch === ch)
+        .map((r) => {
+          const curGmv = toNum(r.cur_gmv);
+          const prevGmv = toNum(r.prev_gmv);
+          const curUnits = toNum(r.cur_units);
+          const prevUnits = toNum(r.prev_units);
+          return {
+            product: r.product_name || r.barcode || `Item ${r.item_id}`,
+            sku: r.barcode || null,
+            currentUnits: curUnits,
+            previousUnits: prevUnits,
+            unitChange: curUnits - prevUnits,
+            currentGmv: curGmv,
+            previousGmv: prevGmv,
+            gmvChange: curGmv - prevGmv,
+            pctChange: pctDelta(curGmv, prevGmv),
+          };
+        });
+      const byUnits = [...rows].sort((a, b) => b.currentUnits - a.currentUnits).slice(0, 10);
+      const byValue = [...rows].sort((a, b) => b.currentGmv - a.currentGmv).slice(0, 10);
+      skuMoversByChannel[CHANNEL_DISPLAY[ch]] = [...new Set([...byUnits, ...byValue])];
+    }
+
     // Hero prefers a proven repeat performer (prevGmv > 0) over the single
     // top-GMV item overall — the PDF's own framing asks "are they
     // sustainable?", which a one-off item with zero prior sales can't
@@ -734,6 +797,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       insights,
       skuMovement,
       skuMovers,
+      skuMoversByChannel,
       skuInsights,
       dataQuality: [
         "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
