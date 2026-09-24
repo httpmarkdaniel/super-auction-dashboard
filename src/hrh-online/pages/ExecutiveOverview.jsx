@@ -335,11 +335,11 @@ export default function ExecutiveOverview({ filters }) {
         {/* "Compare to" drives every change figure on this page, so it sits
             front and center rather than tucked in a corner. */}
         <div
-          className="justify-self-center flex flex-col items-center gap-2 rounded-lg px-5 py-3"
-          style={{ background: hrh.surface, border: `2px solid ${hrh.accent}`, boxShadow: "0 4px 14px rgba(235,104,52,.12)" }}
+          className="justify-self-center flex flex-col items-center gap-1.5 rounded-lg px-4 py-2"
+          style={{ background: hrh.surface, border: `1.5px solid ${hrh.accent}`, boxShadow: "0 2px 8px rgba(235,104,52,.10)" }}
         >
-          <div className="flex items-center gap-3">
-            <span className="text-[12.5px] font-bold uppercase tracking-[0.06em]" style={{ color: hrh.ink }}>
+          <div className="flex items-center gap-2.5">
+            <span className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: hrh.ink }}>
               Compare to
             </span>
             <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
@@ -350,7 +350,7 @@ export default function ExecutiveOverview({ filters }) {
                     key={o.key}
                     type="button"
                     onClick={() => setCompareTo(o.key)}
-                    className="text-[14px] font-bold px-5 h-9 transition-colors"
+                    className="text-[12.5px] font-bold px-3.5 h-7 transition-colors"
                     style={active ? { background: hrh.accent, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
                   >
                     {o.label}
@@ -360,7 +360,7 @@ export default function ExecutiveOverview({ filters }) {
             </div>
           </div>
           {data?.meta?.current && (
-            <span className="text-[12.5px] font-semibold text-center" style={{ color: hrh.ink }}>
+            <span className="text-[11.5px] font-semibold text-center" style={{ color: hrh.ink }}>
               {effectivePeriodLabel(data.meta.current)}
               <span className="font-normal" style={{ color: hrh.ink2 }}>
                 {" "}
