@@ -166,20 +166,17 @@ function resolveWowWindow(current) {
   if (spanDays > 7) return null;
   return { from: addDaysISO(current.from, -7), to: addDaysISO(current.to, -7) };
 }
-// MoM — 2026-09-15 update, per explicit user request ("make MoM default as
-// month to date"): fixed to the real Manila calendar Month-to-Date vs. the
-// same elapsed days last month, ALWAYS — independent of whatever the page's
-// Date Range filter is set to (same idea as this file's own six-week
-// trend above: some metrics only mean something anchored to the real
-// calendar, not to an arbitrary selected window). Unlike WoW, this never
-// returns null — a month-to-date comparison is always well-defined, so
-// MoM % is always shown.
-function resolveFixedMomWindows() {
-  const today = manilaTodayISODate();
-  const current = { from: firstOfMonthISO(today), to: today };
-  const prevAnchor = shiftMonthsClampedISO(today, -1);
-  const previous = { from: firstOfMonthISO(prevAnchor), to: prevAnchor };
-  return { current, previous };
+// MoM — 2026-09-24 update, per explicit user request: follows the page's
+// Date Range filter, comparing the selected dates with the SAME dates one
+// month earlier (e.g. Sep 21-24 vs Aug 21-24), never a full/partial month
+// against a different span. Days past the end of a shorter month clamp to
+// its last day (Mar 31 -> Feb 28). Replaces the earlier fixed
+// month-to-date version, which ignored the filter.
+function resolveMomWindows(current) {
+  return {
+    current,
+    previous: { from: shiftMonthsClampedISO(current.from, -1), to: shiftMonthsClampedISO(current.to, -1) },
+  };
 }
 
 // "Sep 7-13" (same month) / "Aug 31-Sep 6" (spans a month boundary) — real
@@ -337,9 +334,9 @@ export async function handleWeeklyBusinessReview(req, res) {
     // fired together instead of stacking one round-trip at a time (was
     // ~2.4s sequential end-to-end on a typical week; measured 2026-09-15).
     const wowWindow = resolveWowWindow(current);
-    // MoM is fixed to real Month-to-Date, independent of `current` — see
-    // resolveFixedMomWindows above.
-    const momWindows = resolveFixedMomWindows();
+    // MoM: the selected dates vs the same dates a month earlier — see
+    // resolveMomWindows above.
+    const momWindows = resolveMomWindows(current);
     const weeks = sixWeeklyBucketsEndingAt(current.to);
     const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows, channelProductRows] = await Promise.all([
       channelMetrics(current.from, current.to),
@@ -445,9 +442,15 @@ export async function handleWeeklyBusinessReview(req, res) {
       const wow = wowMap?.get(ch);
       const momCur = momCurMap.get(ch);
       const momPrev = momPrevMap.get(ch);
+      const prev = prevMap.get(ch);
       return {
         platform: CHANNEL_DISPLAY[ch],
         sales: cur.gmv,
+        // Previous comparable period (the Date Range filter's own "previous",
+        // same as Slide 3) — shown as a change beside every number.
+        prevSales: prev.gmv,
+        prevOrders: prev.orders,
+        prevAov: safeDivide(prev.gmv, prev.orders),
         wowPct: wow ? pctDelta(cur.gmv, wow.gmv) : null,
         // The prior period's own absolute GMV (not a delta) — "how much was
         // it before", per explicit request, so no +/- sign belongs on this.
@@ -465,9 +468,14 @@ export async function handleWeeklyBusinessReview(req, res) {
     const wowTotalGmv = wowMap ? ALL_CHANNELS.reduce((s, ch) => s + wowMap.get(ch).gmv, 0) : null;
     const momCurTotalGmv = ALL_CHANNELS.reduce((s, ch) => s + momCurMap.get(ch).gmv, 0);
     const momPrevTotalGmv = ALL_CHANNELS.reduce((s, ch) => s + momPrevMap.get(ch).gmv, 0);
+    const prevTotalGmv = ALL_CHANNELS.reduce((s, ch) => s + prevMap.get(ch).gmv, 0);
+    const prevTotalOrders = ALL_CHANNELS.reduce((s, ch) => s + prevMap.get(ch).orders, 0);
     const platformTotal = {
       platform: "Total",
       sales: curTotalGmv,
+      prevSales: prevTotalGmv,
+      prevOrders: prevTotalOrders,
+      prevAov: safeDivide(prevTotalGmv, prevTotalOrders),
       wowPct: wowMap ? pctDelta(curTotalGmv, wowTotalGmv) : null,
       wowPrevious: wowMap ? wowTotalGmv : null,
       momPct: pctDelta(momCurTotalGmv, momPrevTotalGmv),
@@ -789,6 +797,8 @@ export async function handleWeeklyBusinessReview(req, res) {
         previous,
         currentLabel,
         previousLabel,
+        wowPreviousLabel: wowWindow ? formatRangeLabel(wowWindow.from, wowWindow.to, showYear) : null,
+        momPreviousLabel: formatRangeLabel(momWindows.previous.from, momWindows.previous.to, showYear || momWindows.previous.from.slice(0, 4) !== current.from.slice(0, 4)),
         generatedAt: new Date().toISOString(),
       },
       platformTable: { rows: platformRows, total: platformTotal },
@@ -801,7 +811,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       skuInsights,
       dataQuality: [
         "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
-        "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % (2026-09-15) is fixed to real Month-to-Date vs. the same elapsed days last month, independent of the Date Range filter, and is always shown.",
+        "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % (2026-09-24) compares the selected dates with the same dates one month earlier (e.g. Sep 21-24 vs Aug 21-24), and is always shown.",
         "Grew/Dipped (Slide 4) count every SKU with any real GMV increase or decrease between the two periods (no minimum % threshold) — only an exact 0% change (identical GMV in both periods) is left uncategorized as genuinely flat.",
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",
         "SKU-level comparisons (Slides 4-5) use the same current-vs-previous-comparable-period engine as Product Analytics' Top Products/Dropped Products, not week-over-week/month-over-month specifically — the task's own Slide 4/5 definitions ask for a generic \"comparable prior period\", unlike Slide 2's explicit WoW/MoM columns.",

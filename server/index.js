@@ -41,6 +41,8 @@ app.get("/api/upcoming-auctions", upcomingAuctions);
 app.get("/api/bidding-pace", biddingPace);
 app.get("/api/hrh-product-analytics", hrhProductAnalytics);
 app.get("/api/hrh-sales-analytics", hrhSalesAnalytics);
+// POST is only used by ?report=insights (saving team insights).
+app.post("/api/hrh-sales-analytics", express.json({ limit: "200kb" }), hrhSalesAnalytics);
 app.get("/api/retail-analytics", retailAnalytics);
 
 app.use((req, res) => res.status(404).json({ error: "Not found" }));

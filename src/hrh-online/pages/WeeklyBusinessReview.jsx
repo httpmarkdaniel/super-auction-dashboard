@@ -49,6 +49,15 @@ function MomCell({ previous, current, pct }) {
   );
 }
 
+// One insights entry per report period. Keyed on the period's START (plus
+// the preset), so a week-to-date or month-to-date period keeps the same
+// insights all week/month as its end date moves forward each day.
+function insightsKey(dateRange, current) {
+  const preset = dateRange && typeof dateRange === "object" ? dateRange.key : dateRange;
+  const tail = preset === "custom" ? `${current.from}_${current.to}` : current.from;
+  return `wbr-${preset}-${tail}`.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
 function formatDateLabel(iso) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
@@ -86,26 +95,138 @@ function SkuCountWithModal({ count, topSkus, category }) {
   );
 }
 
-function InsightCard({ title, body }) {
+// A table figure with its change vs the Date Range filter's previous
+// comparable period right beneath it, e.g. "₱46,800" over "▲ 12.3% vs ₱41,700".
+function DeltaValue({ value, previous, format }) {
+  const pct = previous ? ((value - previous) / Math.abs(previous)) * 100 : null;
+  const color = pct === null ? hrh.muted : pct > 0 ? hrh.good : pct < 0 ? hrh.bad : hrh.muted;
+  const arrow = pct === null ? "" : pct > 0 ? "▲ " : pct < 0 ? "▼ " : "▬ ";
   return (
-    <div className="rounded-md p-3.5" style={{ background: hrh.bg, border: `1px solid ${hrh.border}` }}>
-      <div className="text-[11.5px] font-semibold uppercase tracking-[0.04em] mb-1.5" style={{ color: hrh.ink }}>
-        {title}
-      </div>
-      <div className="text-[12px] leading-snug" style={{ color: hrh.ink2 }}>
-        {body}
+    <div className="whitespace-nowrap leading-tight">
+      <div>{format(value)}</div>
+      <div className="text-[11px] mt-0.5" style={{ color }}>
+        {pct === null ? (value ? "New (none before)" : "—") : `${arrow}${formatPct(Math.abs(pct))}`}
+        {pct !== null && <span style={{ color: hrh.muted }}> vs {format(previous)}</span>}
       </div>
     </div>
   );
 }
 
-const PLATFORM_TABLE_COLUMNS = [
+// Team-written insights for the selected period, shared by everyone (saved
+// through /api/hrh-sales-analytics?report=insights — see
+// api/_hrh-insights.js). Replaces the old auto-generated Data Quality Notes.
+function InsightsPanel({ storageKey, periodLabel }) {
+  const [saved, setSaved] = useState({ text: "", updatedAt: null });
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState("loading"); // loading | ready | saving | error
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setStatus("loading");
+    setError(null);
+    fetch(`/api/hrh-sales-analytics?report=insights&key=${encodeURIComponent(storageKey)}`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || json.error || `Request failed (${res.status})`);
+        setSaved(json);
+        setDraft(json.text);
+        setStatus("ready");
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        setError(err.message);
+        setStatus("error");
+      });
+    return () => controller.abort();
+  }, [storageKey]);
+
+  async function save() {
+    setStatus("saving");
+    setError(null);
+    try {
+      const res = await fetch("/api/hrh-sales-analytics?report=insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: storageKey, text: draft }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || json.error || `Request failed (${res.status})`);
+      setSaved(json);
+      setDraft(json.text);
+      setStatus("ready");
+    } catch (err) {
+      setError(err.message);
+      setStatus("ready");
+    }
+  }
+
+  const dirty = draft !== saved.text;
+  const savedAt = saved.updatedAt
+    ? new Date(saved.updatedAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : null;
+
+  return (
+    <Panel title="Insights" subtitle={`Team notes for ${periodLabel} — saved for everyone viewing this period`}>
+      {status === "loading" ? (
+        <LoadingState label="Loading insights…" />
+      ) : (
+        <>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={8}
+            maxLength={20000}
+            placeholder="Write this period's insights — what drove the numbers, what to act on, what to watch next…"
+            className="w-full rounded-md border px-3 py-2.5 text-[13px] leading-relaxed outline-none"
+            style={{ borderColor: hrh.border, color: hrh.ink, background: "#fff" }}
+          />
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <button
+              type="button"
+              onClick={save}
+              disabled={!dirty || status === "saving"}
+              className="text-[12.5px] font-semibold px-4 py-1.5 rounded-md text-white disabled:opacity-40"
+              style={{ background: hrh.navy }}
+            >
+              {status === "saving" ? "Saving…" : "Save Insights"}
+            </button>
+            {dirty && (
+              <button
+                type="button"
+                onClick={() => setDraft(saved.text)}
+                className="text-[12.5px] font-semibold px-3 py-1.5 rounded-md"
+                style={{ border: `1px solid ${hrh.border}`, color: hrh.ink2, background: "#fff" }}
+              >
+                Discard changes
+              </button>
+            )}
+            <span className="text-[11.5px]" style={{ color: error ? hrh.bad : hrh.muted }}>
+              {error
+                ? `Couldn't ${status === "error" ? "load" : "save"}: ${error}`
+                : dirty
+                  ? "Unsaved changes"
+                  : savedAt
+                    ? `Last saved ${savedAt}`
+                    : "No insights saved for this period yet."}
+            </span>
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+// Sales/Orders/AOV each show their change vs the Date Range filter's
+// previous comparable period; WoW/MoM compare the same selected dates one
+// week / one month earlier (headers carry the actual comparison dates).
+const platformTableColumns = (meta) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
-  { key: "sales", label: "Sales", render: (r) => formatPeso(r.sales) },
-  { key: "wowPct", label: "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
-  { key: "momPct", label: "MoM % (Month to Date)", render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
+  { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
+  { key: "wowPct", label: meta.wowPreviousLabel ? `WoW % (vs ${meta.wowPreviousLabel})` : "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
+  { key: "momPct", label: `MoM % (vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
+  { key: "orders", label: "Orders", render: (r) => <DeltaValue value={r.orders} previous={r.prevOrders} format={formatNum} /> },
+  { key: "aov", label: "AOV", render: (r) => <DeltaValue value={r.aov} previous={r.prevAov} format={formatPeso} /> },
   { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
 ];
 
@@ -267,8 +388,12 @@ export default function WeeklyBusinessReview({ filters }) {
       {data && !error && (
         <>
           {/* ============================== SLIDE 2 ============================== */}
-          <Panel title="Sales Performance — By Platform" subtitle={`Current period: ${data.meta.currentLabel}`} className="mb-4">
-            <DataTable columns={PLATFORM_TABLE_COLUMNS} rows={platformRows} emptyLabel="No platform sales in this period." />
+          <Panel
+            title="Sales Performance — By Platform"
+            subtitle={`Current period: ${data.meta.currentLabel} · changes vs previous period ${data.meta.previousLabel}`}
+            className="mb-4"
+          >
+            <DataTable columns={platformTableColumns(data.meta)} rows={platformRows} emptyLabel="No platform sales in this period." />
           </Panel>
 
           {/* ============================== SLIDE 3 ============================== */}
@@ -307,11 +432,6 @@ export default function WeeklyBusinessReview({ filters }) {
                 ]}
               />
             </Panel>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-            <InsightCard title="Platforms that grew" body={data.insights.grew} />
-            <InsightCard title="Platforms that dipped" body={data.insights.dipped} />
-            <InsightCard title="Cross-platform insights" body={data.insights.crossPlatform} />
           </div>
 
           {/* ============================== SLIDE 4 ============================== */}
@@ -364,21 +484,7 @@ export default function WeeklyBusinessReview({ filters }) {
               <DataTable columns={TOP10_TABLE_COLUMNS} rows={topMovers} emptyLabel={moversChannel === "all" ? "No sales in this period." : `No ${moversChannelLabel} sales in this period.`} />
             </div>
           </Panel>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-            <InsightCard title="Hero SKUs" body={data.skuInsights.hero} />
-            <InsightCard title="Problem SKUs" body={data.skuInsights.problem} />
-            <InsightCard title="Emerging SKUs" body={data.skuInsights.emerging} />
-          </div>
-
-          {data.dataQuality?.length > 0 && (
-            <Panel title="Data Quality Notes">
-              <ul className="list-disc pl-5 space-y-1.5 text-[12px]" style={{ color: hrh.ink2 }}>
-                {data.dataQuality.map((note, i) => (
-                  <li key={i}>{note}</li>
-                ))}
-              </ul>
-            </Panel>
-          )}
+          <InsightsPanel storageKey={insightsKey(dateRange, data.meta.current)} periodLabel={data.meta.currentLabel} />
         </>
       )}
     </div>
