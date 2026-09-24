@@ -6,13 +6,15 @@
 // `strong` marks the headline launch of a campaign week (drawn solid, and
 // counted as an "upcoming launch"). `variant` overrides the platform color
 // for special events: yellow = on-ground/branch event, purple = double-day
-// sale, crm = payday sale.
+// sale, payday = payday sale.
 
+// HRH Online covers the online channels only: HMR's own online store plus
+// the two marketplaces. (The source calendar called HMR's campaigns "HMR
+// Retail" and also had CRM/Email/SMS blasts; those were dropped.)
 export const PLATFORMS = {
-  hmr: { name: "HMR Retail", short: "HMR" },
+  hmr: { name: "HMR Online", short: "HMR" },
   shopee: { name: "Shopee", short: "SHOPEE" },
   tiktok: { name: "TikTok Shop", short: "TIKTOK SHOP" },
-  crm: { name: "CRM / Email / SMS", short: "CRM" },
 };
 
 // [date, title, platform, extras]
@@ -29,7 +31,6 @@ const SEPTEMBER_2026 = [
   ["2026-09-07", "Shopee VIP Monday", "shopee"],
   ["2026-09-08", "FINDMAS W1 - TuesYourself", "hmr", { strong: true }],
   ["2026-09-08", "9.9 Prehype Sale", "shopee"],
-  ["2026-09-08", "EMAIL: FINDMAS Week 1", "crm"],
   ["2026-09-09", "Negosyo Finds", "hmr"],
   ["2026-09-09", "9.9 Double Digit Sale", "hmr", { variant: "purple" }],
   ["2026-09-09", "9.9 Spike Day", "shopee"],
@@ -44,7 +45,7 @@ const SEPTEMBER_2026 = [
   ["2026-09-13", "Payday Sale Sneak Peek", "shopee"],
   ["2026-09-13", "Shopee Supermarket", "shopee"],
   ["2026-09-13", "Home Care Sunday", "tiktok"],
-  ["2026-09-14", "Mid-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-14", "Mid-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-14", "Payday Sale Sneak Peek", "shopee"],
   ["2026-09-14", "Shopee VIP Monday", "shopee"],
   ["2026-09-14", "Funtastic Payday", "tiktok"],
@@ -61,12 +62,11 @@ const SEPTEMBER_2026 = [
       tags: ["FINDMAS", "TuesYourself", "Mid-Month"],
     },
   ],
-  ["2026-09-15", "Mid-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-15", "Mid-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-15", "Payday Sale (Spike Day)", "shopee"],
   ["2026-09-15", "Funtastic Payday", "tiktok"],
-  ["2026-09-15", "SMS: Tuesday TuesYourself", "crm"],
   ["2026-09-16", "Negosyo Finds", "hmr"],
-  ["2026-09-16", "Mid-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-16", "Mid-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-16", "Fashion Wednesday", "shopee"],
   ["2026-09-16", "Funtastic Payday", "tiktok"],
   ["2026-09-17", "TFT", "hmr"],
@@ -83,7 +83,6 @@ const SEPTEMBER_2026 = [
   ["2026-09-21", "Shopee VIP Monday", "shopee"],
   ["2026-09-22", "FINDMAS W3 - TuesYourself", "hmr", { strong: true }],
   ["2026-09-22", "Mom's Club Members", "shopee"],
-  ["2026-09-22", "PUSH: App Doorbuster Push", "crm", { variant: "yellow" }],
   ["2026-09-23", "Negosyo Finds", "hmr"],
   ["2026-09-23", "Fashion Wednesday", "shopee"],
   ["2026-09-24", "TFT", "hmr"],
@@ -99,18 +98,18 @@ const SEPTEMBER_2026 = [
   ["2026-09-27", "Payday Prehype", "shopee"],
   ["2026-09-27", "10.10 Sneak Peek", "shopee"],
   ["2026-09-27", "Funtastic Payday", "tiktok"],
-  ["2026-09-28", "End-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-28", "End-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-28", "Payday Prehype", "shopee"],
   ["2026-09-28", "10.10 Sneak Peek", "shopee"],
   ["2026-09-28", "Shopee VIP Monday", "shopee"],
   ["2026-09-28", "Funtastic Payday", "tiktok"],
   ["2026-09-29", "FINDMAS W4 - TuesYourself", "hmr", { strong: true }],
-  ["2026-09-29", "End-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-29", "End-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-29", "Payday Prehype", "shopee"],
   ["2026-09-29", "10.10 Sneak Peek", "shopee"],
   ["2026-09-29", "Funtastic Payday", "tiktok"],
   ["2026-09-30", "Negosyo Finds", "hmr"],
-  ["2026-09-30", "End-Month Payday Sale", "hmr", { variant: "crm" }],
+  ["2026-09-30", "End-Month Payday Sale", "hmr", { variant: "payday" }],
   ["2026-09-30", "Shopee: Unli Free Shipping", "shopee"],
   ["2026-09-30", "10.10 Sneak Peek", "shopee"],
   ["2026-09-30", "Payday Sale (Spike Day)", "shopee"],
@@ -195,7 +194,6 @@ export const CAMPAIGN_TYPES = [
   "Mega Sale",
   "Marketplace Campaign",
   "Branch Event",
-  "CRM Blast",
 ];
 export const PRIORITIES = ["High Priority", "Medium Priority", "Low Priority"];
 export const STATUSES = ["Draft", "Upcoming", "Active", "Paused", "Ended"];
@@ -233,9 +231,9 @@ export const RECURRING_STATES = ["ACTIVE", "SEASONALLY INTEGRATED", "PAUSED", "S
 // Sensible starting values for campaigns that were only transcribed as a
 // date + title — what someone would otherwise have to fill in every time.
 export function withCampaignDefaults(c) {
-  const byVariant = { yellow: "Branch Event", purple: "Mega Sale", crm: "Payday Sale" };
-  const type = c.campaignType || byVariant[c.variant] || (c.platform === "crm" ? "CRM Blast" : c.platform === "hmr" ? "Brand Campaign" : "Marketplace Campaign");
-  const channelsByPlatform = { hmr: ["HMR.PH"], shopee: ["Shopee"], tiktok: ["TikTok Shop"], crm: ["Email", "Viber"] };
+  const byVariant = { yellow: "Branch Event", purple: "Mega Sale", payday: "Payday Sale" };
+  const type = c.campaignType || byVariant[c.variant] || (c.platform === "hmr" ? "Brand Campaign" : "Marketplace Campaign");
+  const channelsByPlatform = { hmr: ["HMR.PH"], shopee: ["Shopee"], tiktok: ["TikTok Shop"] };
   return {
     tagline: "",
     campaignType: type,

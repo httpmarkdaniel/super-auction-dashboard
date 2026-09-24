@@ -4,8 +4,8 @@ import CampaignEditor from "../components/CampaignEditor";
 import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_MONTHS, withCampaignDefaults } from "../data/campaignCalendar";
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
-// campaign calendar) as a dashboard page: month grid with per-platform
-// overlays, platform filter, search, clean/show-all density, summary cards,
+// campaign calendar) as a dashboard page: month grid with HMR Online /
+// Shopee / TikTok Shop overlays, platform filter, search, clean/show-all density, summary cards,
 // a detail panel, and PDF/CSV/ICS export.
 //
 // Campaign data is static (src/hrh-online/data/campaignCalendar.js).
@@ -20,13 +20,13 @@ const CLEAN_LIMIT = 3;
 
 // Platform colors carried over from the original calendar — they're how
 // the marketing team already reads it (pink HMR, orange Shopee, cyan
-// TikTok, green CRM).
+// TikTok; green marks payday sales).
 const EVENT_STYLES = {
   hmr: { background: "#ffeaf1", borderColor: "#f2a3bb" },
   hmrStrong: { background: "#f73563", borderColor: "#f73563", color: "#fff" },
   shopee: { background: "#fff4e8", borderColor: "#f3ab67" },
   tiktok: { background: "#e7fbff", borderColor: "#54d4ea" },
-  crm: { background: "#e9faf3", borderColor: "#87d9bf" },
+  payday: { background: "#e9faf3", borderColor: "#87d9bf" },
   yellow: { background: "#fff7dc", borderColor: "#f0d36d" },
   purple: { background: "#efeaff", borderColor: "#c5b9ff" },
 };
@@ -34,7 +34,6 @@ const PLATFORM_TONES = {
   hmr: { color: "#a9214c", background: "#ffeaf1", borderColor: "#f6a4bd" },
   shopee: { color: "#b64d00", background: "#fff4e8", borderColor: "#f8ba82" },
   tiktok: { color: "#007c91", background: "#e7fbff", borderColor: "#6fd7e8" },
-  crm: { color: "#087753", background: "#e9faf3", borderColor: "#9adeca" },
 };
 const STATUS_TONES = {
   Active: { color: "#0a8c5e", background: "#e4f8ee" },
@@ -176,7 +175,7 @@ export default function CampaignCalendar() {
   }, [visibleEvents]);
 
   const platformCounts = useMemo(() => {
-    const counts = { hmr: 0, shopee: 0, tiktok: 0, crm: 0 };
+    const counts = Object.fromEntries(Object.keys(PLATFORMS).map((k) => [k, 0]));
     for (const e of monthEvents) counts[e.platform]++;
     return counts;
   }, [monthEvents]);
@@ -315,7 +314,7 @@ export default function CampaignCalendar() {
           Interactive Calendar
         </div>
         <p className="text-[12px] mt-1 mb-4" style={{ color: hrh.muted }}>
-          HRH Online campaign schedule across HMR Retail, Shopee, TikTok Shop and CRM.
+          HRH Online campaign schedule across HMR Online, Shopee and TikTok Shop.
         </p>
       </div>
 
@@ -455,7 +454,7 @@ export default function CampaignCalendar() {
                 style={PLATFORM_TONES[c.platform]}
                 title="Edit campaign period"
               >
-                [{PLATFORMS[c.platform].name.split(" /")[0]}] {c.title} · {shortDate(c.date)}–{shortDate(endOf(c))}
+                [{PLATFORMS[c.platform].name}] {c.title} · {shortDate(c.date)}–{shortDate(endOf(c))}
               </button>
             ))}
           </div>
