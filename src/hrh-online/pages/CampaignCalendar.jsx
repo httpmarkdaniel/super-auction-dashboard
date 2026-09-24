@@ -5,7 +5,7 @@ import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
 // campaign calendar) as a dashboard page: month grid with HMR Online /
-// Shopee / TikTok Shop overlays, platform filter, search, clean/show-all density, summary cards,
+// Shopee / TikTok overlays, platform filter, search, clean/show-all density, summary cards,
 // a detail panel, and PDF/CSV/ICS export.
 //
 // Campaign data is static (src/hrh-online/data/campaignCalendar.js).
@@ -314,7 +314,7 @@ export default function CampaignCalendar() {
           Interactive Calendar
         </div>
         <p className="text-[12px] mt-1 mb-4" style={{ color: hrh.muted }}>
-          HRH Online campaign schedule across HMR Online, Shopee and TikTok Shop.
+          HRH Online campaign schedule across HMR Online, Shopee and TikTok.
         </p>
       </div>
 

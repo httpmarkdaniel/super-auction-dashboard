@@ -14,7 +14,7 @@
 export const PLATFORMS = {
   hmr: { name: "HMR Online", short: "HMR" },
   shopee: { name: "Shopee", short: "SHOPEE" },
-  tiktok: { name: "TikTok Shop", short: "TIKTOK SHOP" },
+  tiktok: { name: "TikTok", short: "TIKTOK" },
 };
 
 // [date, title, platform, extras]
