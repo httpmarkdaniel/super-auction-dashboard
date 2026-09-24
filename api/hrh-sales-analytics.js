@@ -245,6 +245,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid date range", message: rangeErr.message });
     }
 
+    // `compareTo` is only sent by Sales Overview: it adds previous-period
+    // figures to Channel Comparison and Payment Type / Checkout Method.
+    // Without it, the comparison queries are skipped.
+    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : null;
+    const comparison = compareTo ? resolveComparisonWindow(current, compareTo) : null;
+
     // Channel Comparison — GMV/NMV/Orders/Units/AOV/Return Rate always
     // broken out across all 3 real channels, regardless of the page's
     // channel filter (same convention as Executive Overview's Sales by
@@ -257,172 +263,183 @@ export default async function handler(req, res) {
     // return's invoice_no does NOT match its original sale's invoice_no
     // (verified: zero overlap), so this reads as "return incidence relative
     // to order volume" rather than "% of orders that got returned".
-    const channelRows = await (
-      await client.query({
-        query: `
-          SELECT
-            sales_channel AS ch,
-            sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
-            sum(net_sales_amount) AS nmv,
-            sumIf(net_quantity, net_sales_amount > 0) AS units,
-            uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
-            countDistinctIf(invoice_no, net_sales_amount < 0) AS return_invoices
-          FROM xv3.mart_net_sales
-          WHERE store_name = {store:String}
-            AND sales_channel IN {allChannels:Array(String)}
-            AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
-          GROUP BY sales_channel
-        `,
-        query_params: { store: HRH_STORE, allChannels, curFrom: current.from, curTo: current.to },
-        format: "JSONEachRow",
-      })
-    ).json();
-
-    // Cancellation Rate — from cms.mart_cms_order_report_detailed, a
-    // completely different table from Orders & Fulfillment/Executive
-    // Overview's xv3.mart_xv3_order_report-based lifecycle. It classifies
-    // each cancelled item as "Re-ordered" (the SAME customer — matched by
-    // email, or by phone number when email is blank — ordered that same
-    // item again afterward) or "True Cancellation" (no such re-order).
-    //
-    // 2026-09-15: briefly counted both types combined (True Cancellation +
-    // Re-ordered), then reverted back to "True Cancellation" only per
-    // explicit user decision — this table's 17 True Cancellation + 4
-    // Re-ordered = 21 for the same period cross-checked exactly against
-    // xv3.mart_xv3_order_report's stayingCancelled (17) + customerInitiatedCancelled
-    // (4) in Orders & Fulfillment, which the user took as confirmation that
-    // "True Cancellation"/stayingCancelled (excluding orders the customer
-    // went on to reorder) is the right dashboard-wide "Cancelled" figure —
-    // see api/_hrh-orders-fulfillment.js's realOrdersReceived note for the
-    // matching reversal there.
-    //
-    // This table has NO sales_channel column and — verified this session —
-    // NEVER carries a single TikTok/Shopee row for ANY store (it is HMRPH's
-    // own storefront checkout system's export, not a marketplace ledger), so
-    // this is computed ONCE for the whole store, not per channel, and only
-    // ever attributed to the HMRPH Online row below; TikTok/Shopee report
-    // Cancellation Rate as null ("N/A"), never a fabricated 0%.
-    //
-    // Windowed on order_created_at, NOT transaction_date — verified every
-    // single 'Cancelled' row for this store has transaction_date = NULL
-    // (that field is only ever populated once a sale actually posts, which
-    // never happens for a cancelled order), so filtering on transaction_date
-    // silently dropped 100% of cancellations (this is what produced a
-    // fabricated 0% for the current month — a real bug, now fixed, not the
-    // "cancellations lag order placement" timing effect it looked like).
-    // Classification itself is intentionally UNSCOPED by store/date (matches
-    // the reference query exactly) — a customer's reorder used to reclassify
-    // a cancellation may itself fall outside this window or store, and
-    // narrowing the match search would wrongly turn real "Re-ordered" swaps
-    // into "True Cancellation"s. Only the FINAL count is filtered to this
-    // store + window, via a LEFT JOIN back onto every row (cancelled or not)
-    // of the base table, same shape as the reference query's virtual_table.
-    const cancellationRows = await (
-      await client.query({
-        query: `
-          WITH cancelled_items AS (
-            SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
-              replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS cancelled_created_at
-            FROM cms.mart_cms_order_report_detailed
-            WHERE order_status = 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
-          ),
-          successful_items AS (
-            SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
-              replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS successful_created_at
-            FROM cms.mart_cms_order_report_detailed
-            WHERE order_status != 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
-          ),
-          item_matches AS (
+    // Everything below runs once for the selected window and, when
+    // `compareTo` is set, once more for the comparison window.
+    const computeChannelComparison = async (win) => {
+      const channelRows = await (
+        await client.query({
+          query: `
             SELECT
-              c.order_number AS cancelled_order_number,
-              c.item_key,
-              argMinIf(s.order_number, s.successful_created_at, s.order_number IS NOT NULL) AS reorder_order_number
-            FROM cancelled_items c
-            LEFT JOIN successful_items s
-              ON ((c.email != '' AND s.email = c.email) OR (c.email = '' AND c.mobile_no != '' AND s.mobile_no = c.mobile_no))
-              AND s.item_key = c.item_key
-              AND s.successful_created_at > c.cancelled_created_at
-            GROUP BY c.order_number, c.item_key
-          ),
-          classification AS (
-            SELECT cancelled_order_number AS order_number, item_key,
-              multiIf(reorder_order_number IS NOT NULL, 'Re-ordered', 'True Cancellation') AS cancellation_type
-            FROM item_matches
-          )
-          SELECT c.cancellation_type AS cancellation_type, uniqExact(b.order_number) AS orders
-          FROM cms.mart_cms_order_report_detailed b
-          LEFT JOIN classification c ON b.order_number = c.order_number AND b.sku = c.item_key
-          WHERE b.store_name = {store:String}
-            AND b.order_created_at >= {curFromDt:String} AND b.order_created_at < {curToExclusiveDt:String}
-            AND c.cancellation_type IS NOT NULL
-          GROUP BY cancellation_type
-        `,
-        query_params: {
-          store: HRH_STORE,
-          curFromDt: `${current.from} 00:00:00`,
-          curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const trueCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "True Cancellation")?.orders);
-    const reorderedCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "Re-ordered")?.orders);
+              sales_channel AS ch,
+              sumIf(net_sales_amount, net_sales_amount > 0) AS gmv,
+              sum(net_sales_amount) AS nmv,
+              sumIf(net_quantity, net_sales_amount > 0) AS units,
+              uniqExactIf(invoice_id, net_sales_amount > 0) AS orders,
+              countDistinctIf(invoice_no, net_sales_amount < 0) AS return_invoices
+            FROM xv3.mart_net_sales
+            WHERE store_name = {store:String}
+              AND sales_channel IN {allChannels:Array(String)}
+              AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}
+            GROUP BY sales_channel
+          `,
+          query_params: { store: HRH_STORE, allChannels, curFrom: win.from, curTo: win.to },
+          format: "JSONEachRow",
+        })
+      ).json();
 
-    // Denominator for Cancellation Rate is intentionally this SAME table's
-    // total distinct order_number (not the mart_net_sales Orders count used
-    // for every other column) — cms.mart_cms_order_report_detailed tracks
-    // ALL order attempts (including ones that never became a completed
-    // sale), keyed on order_created_at, a genuinely different population
-    // from mart_net_sales' completed-sale, transaction_date-keyed Orders.
-    // Dividing the True Cancellation count by a differently-scoped
-    // denominator would produce an incoherent rate, not just an
-    // apples-to-oranges one.
-    const cmsTotalOrdersRows = await (
-      await client.query({
-        query: `
-          SELECT uniqExact(order_number) AS total
-          FROM cms.mart_cms_order_report_detailed
-          WHERE store_name = {store:String}
-            AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
-        `,
-        query_params: {
-          store: HRH_STORE,
-          curFromDt: `${current.from} 00:00:00`,
-          curToExclusiveDt: `${addDaysISO(current.to, 1)} 00:00:00`,
-        },
-        format: "JSONEachRow",
-      })
-    ).json();
-    const cmsTotalOrders = toNum(cmsTotalOrdersRows[0]?.total);
+      // Cancellation Rate — from cms.mart_cms_order_report_detailed, a
+      // completely different table from Orders & Fulfillment/Executive
+      // Overview's xv3.mart_xv3_order_report-based lifecycle. It classifies
+      // each cancelled item as "Re-ordered" (the SAME customer — matched by
+      // email, or by phone number when email is blank — ordered that same
+      // item again afterward) or "True Cancellation" (no such re-order).
+      //
+      // 2026-09-15: briefly counted both types combined (True Cancellation +
+      // Re-ordered), then reverted back to "True Cancellation" only per
+      // explicit user decision — this table's 17 True Cancellation + 4
+      // Re-ordered = 21 for the same period cross-checked exactly against
+      // xv3.mart_xv3_order_report's stayingCancelled (17) + customerInitiatedCancelled
+      // (4) in Orders & Fulfillment, which the user took as confirmation that
+      // "True Cancellation"/stayingCancelled (excluding orders the customer
+      // went on to reorder) is the right dashboard-wide "Cancelled" figure —
+      // see api/_hrh-orders-fulfillment.js's realOrdersReceived note for the
+      // matching reversal there.
+      //
+      // This table has NO sales_channel column and — verified this session —
+      // NEVER carries a single TikTok/Shopee row for ANY store (it is HMRPH's
+      // own storefront checkout system's export, not a marketplace ledger), so
+      // this is computed ONCE for the whole store, not per channel, and only
+      // ever attributed to the HMRPH Online row below; TikTok/Shopee report
+      // Cancellation Rate as null ("N/A"), never a fabricated 0%.
+      //
+      // Windowed on order_created_at, NOT transaction_date — verified every
+      // single 'Cancelled' row for this store has transaction_date = NULL
+      // (that field is only ever populated once a sale actually posts, which
+      // never happens for a cancelled order), so filtering on transaction_date
+      // silently dropped 100% of cancellations (this is what produced a
+      // fabricated 0% for the current month — a real bug, now fixed, not the
+      // "cancellations lag order placement" timing effect it looked like).
+      // Classification itself is intentionally UNSCOPED by store/date (matches
+      // the reference query exactly) — a customer's reorder used to reclassify
+      // a cancellation may itself fall outside this window or store, and
+      // narrowing the match search would wrongly turn real "Re-ordered" swaps
+      // into "True Cancellation"s. Only the FINAL count is filtered to this
+      // store + window, via a LEFT JOIN back onto every row (cancelled or not)
+      // of the base table, same shape as the reference query's virtual_table.
+      const cancellationRows = await (
+        await client.query({
+          query: `
+            WITH cancelled_items AS (
+              SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
+                replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS cancelled_created_at
+              FROM cms.mart_cms_order_report_detailed
+              WHERE order_status = 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
+            ),
+            successful_items AS (
+              SELECT order_number, sku AS item_key, lower(trim(email)) AS email,
+                replaceRegexpAll(contact_number, '[^0-9]', '') AS mobile_no, order_created_at AS successful_created_at
+              FROM cms.mart_cms_order_report_detailed
+              WHERE order_status != 'Cancelled' AND sku IS NOT NULL AND trim(sku) != ''
+            ),
+            item_matches AS (
+              SELECT
+                c.order_number AS cancelled_order_number,
+                c.item_key,
+                argMinIf(s.order_number, s.successful_created_at, s.order_number IS NOT NULL) AS reorder_order_number
+              FROM cancelled_items c
+              LEFT JOIN successful_items s
+                ON ((c.email != '' AND s.email = c.email) OR (c.email = '' AND c.mobile_no != '' AND s.mobile_no = c.mobile_no))
+                AND s.item_key = c.item_key
+                AND s.successful_created_at > c.cancelled_created_at
+              GROUP BY c.order_number, c.item_key
+            ),
+            classification AS (
+              SELECT cancelled_order_number AS order_number, item_key,
+                multiIf(reorder_order_number IS NOT NULL, 'Re-ordered', 'True Cancellation') AS cancellation_type
+              FROM item_matches
+            )
+            SELECT c.cancellation_type AS cancellation_type, uniqExact(b.order_number) AS orders
+            FROM cms.mart_cms_order_report_detailed b
+            LEFT JOIN classification c ON b.order_number = c.order_number AND b.sku = c.item_key
+            WHERE b.store_name = {store:String}
+              AND b.order_created_at >= {curFromDt:String} AND b.order_created_at < {curToExclusiveDt:String}
+              AND c.cancellation_type IS NOT NULL
+            GROUP BY cancellation_type
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${win.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(win.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const trueCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "True Cancellation")?.orders);
+      const reorderedCancellations = toNum(cancellationRows.find((r) => r.cancellation_type === "Re-ordered")?.orders);
 
-    const channelComparison = allChannels.map((ch) => {
-      const r = channelRows.find((row) => row.ch === ch) || {};
-      const gmv = toNum(r.gmv);
-      const nmv = toNum(r.nmv);
-      const units = toNum(r.units);
-      const orders = toNum(r.orders);
-      const returnInvoices = toNum(r.return_invoices);
-      return {
-        channel: CHANNEL_DISPLAY[ch] || ch,
-        gmv,
-        nmv,
-        orders,
-        units,
-        aov: safeDivide(gmv, orders),
-        // Only HMRPH Online is ever covered by the cms.mart_cms_order_report_detailed
-        // cancellation classification (see comment above) — TikTok/Shopee
-        // always report null ("N/A"), never a fabricated 0%. Denominator is
-        // cmsTotalOrders (same table/population as the numerator), not the
-        // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
-        cancellations: ch === "HMRPH ONLINE" ? trueCancellations : null,
-        cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
-        // Informational only (not in the rate) — see comment above: these
-        // are the same 4 excluded from the "Cancelled" count dashboard-wide.
-        reordered: ch === "HMRPH ONLINE" ? reorderedCancellations : null,
-        returns: returnInvoices,
-        returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
-      };
-    });
+      // Denominator for Cancellation Rate is intentionally this SAME table's
+      // total distinct order_number (not the mart_net_sales Orders count used
+      // for every other column) — cms.mart_cms_order_report_detailed tracks
+      // ALL order attempts (including ones that never became a completed
+      // sale), keyed on order_created_at, a genuinely different population
+      // from mart_net_sales' completed-sale, transaction_date-keyed Orders.
+      // Dividing the True Cancellation count by a differently-scoped
+      // denominator would produce an incoherent rate, not just an
+      // apples-to-oranges one.
+      const cmsTotalOrdersRows = await (
+        await client.query({
+          query: `
+            SELECT uniqExact(order_number) AS total
+            FROM cms.mart_cms_order_report_detailed
+            WHERE store_name = {store:String}
+              AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
+          `,
+          query_params: {
+            store: HRH_STORE,
+            curFromDt: `${win.from} 00:00:00`,
+            curToExclusiveDt: `${addDaysISO(win.to, 1)} 00:00:00`,
+          },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const cmsTotalOrders = toNum(cmsTotalOrdersRows[0]?.total);
+
+      const channelComparison = allChannels.map((ch) => {
+        const r = channelRows.find((row) => row.ch === ch) || {};
+        const gmv = toNum(r.gmv);
+        const nmv = toNum(r.nmv);
+        const units = toNum(r.units);
+        const orders = toNum(r.orders);
+        const returnInvoices = toNum(r.return_invoices);
+        return {
+          channel: CHANNEL_DISPLAY[ch] || ch,
+          gmv,
+          nmv,
+          orders,
+          units,
+          aov: safeDivide(gmv, orders),
+          // Only HMRPH Online is ever covered by the cms.mart_cms_order_report_detailed
+          // cancellation classification (see comment above) — TikTok/Shopee
+          // always report null ("N/A"), never a fabricated 0%. Denominator is
+          // cmsTotalOrders (same table/population as the numerator), not the
+          // mart_net_sales `orders` count above — see comment on cmsTotalOrders.
+          cancellations: ch === "HMRPH ONLINE" ? trueCancellations : null,
+          cancellationRate: ch === "HMRPH ONLINE" && cmsTotalOrders > 0 ? (trueCancellations / cmsTotalOrders) * 100 : null,
+          // Informational only (not in the rate) — see comment above: these
+          // are the same 4 excluded from the "Cancelled" count dashboard-wide.
+          reordered: ch === "HMRPH ONLINE" ? reorderedCancellations : null,
+          returns: returnInvoices,
+          returnRate: orders > 0 ? (returnInvoices / orders) * 100 : null,
+        };
+      });
+      return channelComparison;
+    };
+    const [channelComparisonCurrent, channelComparisonPrevious] = await Promise.all([
+      computeChannelComparison(current),
+      comparison ? computeChannelComparison(comparison) : Promise.resolve(null),
+    ]);
+    // Each row carries its comparison-window figures as `previous`.
+    const channelComparison = channelComparisonCurrent.map((row, i) => (channelComparisonPrevious ? { ...row, previous: channelComparisonPrevious[i] } : row));
 
     // Top Sales Drivers — now scoped to voucher-assisted orders ONLY (per
     // explicit request), not per-channel. cms.mart_cms_voucher_report has no
@@ -551,10 +568,6 @@ export default async function handler(req, res) {
           format: "JSONEachRow",
         })
       ).json();
-    // `compareTo` is only sent by Sales Overview (Payment Type / Checkout
-    // Method deltas); without it the comparison query is skipped.
-    const compareTo = ["day", "week", "month"].includes(req.query.compareTo) ? req.query.compareTo : null;
-    const comparison = compareTo ? resolveComparisonWindow(current, compareTo) : null;
     const [checkoutInfoRows, prevCheckoutInfoRows] = await Promise.all([
       checkoutInfoFor(current),
       comparison ? checkoutInfoFor(comparison) : Promise.resolve(null),

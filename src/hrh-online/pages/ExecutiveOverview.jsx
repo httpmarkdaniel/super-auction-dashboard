@@ -94,15 +94,64 @@ function formatRateWithCount(rate, count) {
   if (rate === null || rate === undefined) return "—";
   return `${formatPct(rate)} (${formatNum(count)})`;
 }
+// A Channel Comparison figure with its change vs the "Compare to" window
+// underneath (row.previous, sent when compareTo is set). Amounts/counts
+// show % change; rates show the change in percentage points, colored so
+// that a rising cancellation/return rate reads as bad.
+function ComparedCell({ main, value, previous, formatPrevious, rate = false }) {
+  let delta = null;
+  if (previous !== undefined && previous !== null && value !== null && value !== undefined) {
+    if (rate) {
+      const pp = value - previous;
+      delta = { text: `${pp > 0 ? "▲" : pp < 0 ? "▼" : "▬"} ${Math.abs(pp).toFixed(1)} pp`, color: pp > 0 ? hrh.bad : pp < 0 ? hrh.good : hrh.muted };
+    } else if (previous) {
+      const pct = ((value - previous) / Math.abs(previous)) * 100;
+      delta = { text: `${pct > 0 ? "▲" : pct < 0 ? "▼" : "▬"} ${formatPct(Math.abs(pct))}`, color: pct > 0 ? hrh.good : pct < 0 ? hrh.bad : hrh.muted };
+    } else if (value) {
+      delta = { text: "New", color: hrh.good };
+    }
+  }
+  return (
+    <div className="whitespace-nowrap leading-tight">
+      <div>{main}</div>
+      {delta && (
+        <div className="text-[11px] mt-0.5" style={{ color: delta.color }}>
+          {delta.text}
+          <span style={{ color: hrh.muted }}> vs {formatPrevious(previous)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const amountColumn = (key, label, format) => ({
+  key,
+  label,
+  render: (r) => <ComparedCell main={format(r[key])} value={r[key]} previous={r.previous?.[key]} formatPrevious={format} />,
+});
+const rateColumn = (key, label, countKey) => ({
+  key,
+  label,
+  render: (r) => (
+    <ComparedCell
+      main={formatRateWithCount(r[key], r[countKey])}
+      value={r[key]}
+      previous={r.previous?.[key]}
+      formatPrevious={(v) => formatPct(v)}
+      rate
+    />
+  ),
+});
+
 const CHANNEL_TABLE_COLUMNS = [
   { key: "channel", label: "Channel" },
-  { key: "gmv", label: "GMV", render: (r) => formatPeso(r.gmv) },
-  { key: "nmv", label: "NMV", render: (r) => formatPeso(r.nmv) },
-  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
-  { key: "units", label: "Units", render: (r) => formatNum(r.units) },
-  { key: "aov", label: "AOV", render: (r) => formatPeso(r.aov) },
-  { key: "cancellationRate", label: "Cancellation Rate", render: (r) => formatRateWithCount(r.cancellationRate, r.cancellations) },
-  { key: "returnRate", label: "Return Rate", render: (r) => formatRateWithCount(r.returnRate, r.returns) },
+  amountColumn("gmv", "GMV", formatPeso),
+  amountColumn("nmv", "NMV", formatPeso),
+  amountColumn("orders", "Orders", formatNum),
+  amountColumn("units", "Units", formatNum),
+  amountColumn("aov", "AOV", formatPeso),
+  rateColumn("cancellationRate", "Cancellation Rate", "cancellations"),
+  rateColumn("returnRate", "Return Rate", "returns"),
 ];
 
 // Sales Trend is now a fixed trailing window (see
@@ -274,7 +323,7 @@ export default function ExecutiveOverview({ filters }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] items-center gap-4 mb-4">
         <div>
           <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
             Sales Overview
@@ -283,23 +332,44 @@ export default function ExecutiveOverview({ filters }) {
             Key performance metrics and trends for HRH Online
           </p>
         </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>
+        {/* "Compare to" drives every change figure on this page, so it sits
+            front and center rather than tucked in a corner. */}
+        <div
+          className="justify-self-center flex flex-col items-center gap-2 rounded-lg px-5 py-3"
+          style={{ background: hrh.surface, border: `2px solid ${hrh.accent}`, boxShadow: "0 4px 14px rgba(235,104,52,.12)" }}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-[12.5px] font-bold uppercase tracking-[0.06em]" style={{ color: hrh.ink }}>
               Compare to
             </span>
-            <TrendBucketPills value={compareTo} onChange={setCompareTo} options={COMPARE_OPTIONS} />
+            <div className="flex rounded-md overflow-hidden" style={{ border: `1px solid ${hrh.border}` }}>
+              {COMPARE_OPTIONS.map((o) => {
+                const active = o.key === compareTo;
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => setCompareTo(o.key)}
+                    className="text-[14px] font-bold px-5 h-9 transition-colors"
+                    style={active ? { background: hrh.accent, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           {data?.meta?.current && (
-            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink2 }}>
+            <span className="text-[12.5px] font-semibold text-center" style={{ color: hrh.ink }}>
               {effectivePeriodLabel(data.meta.current)}
-              <span className="font-normal" style={{ color: hrh.muted }}>
+              <span className="font-normal" style={{ color: hrh.ink2 }}>
                 {" "}
                 vs {effectivePeriodLabel(data.meta.previous)}
               </span>
             </span>
           )}
         </div>
+        <div className="hidden lg:block" />
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
@@ -400,7 +470,10 @@ export default function ExecutiveOverview({ filters }) {
       )}
 
       {channelData && !channelError && (
-        <Panel title="Channel Comparison">
+        <Panel
+          title="Channel Comparison"
+          subtitle={channelData.meta?.comparison ? `Changes vs ${effectivePeriodLabel(channelData.meta.comparison)} (Compare to above)` : undefined}
+        >
           <DataTable columns={CHANNEL_TABLE_COLUMNS} rows={channelData.channelComparison} />
         </Panel>
       )}
