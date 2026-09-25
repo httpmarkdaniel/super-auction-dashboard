@@ -16,8 +16,7 @@ import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
 import CampaignCalendar from "./pages/CampaignCalendar";
 import OperationalFlags from "./pages/OperationalFlags";
 import { NAV_GROUPS, OPERATIONAL_FLAGS_KEY } from "./nav";
-import { defaultDateRange, resolveDateRange } from "./dateRange";
-import { formatPeso } from "./format";
+import { defaultDateRange } from "./dateRange";
 import "../uniform.css";
 
 const PAGES = {
@@ -57,13 +56,6 @@ const PAGE_META = {
 };
 const GROUP_BY_KEY = Object.fromEntries(NAV_GROUPS.flatMap((g) => g.items.map((it) => [it.key, g.label])));
 
-function dateRangeParams(dateRange) {
-  if (dateRange && typeof dateRange === "object" && dateRange.key === "custom") {
-    return { range: "custom", from: dateRange.from, to: dateRange.to };
-  }
-  return { range: dateRange };
-}
-
 // A separate module tree from Auction's App.jsx, own sidebar/header/page
 // state — same state-based "tab" pattern Auction already uses internally
 // (see main.jsx's comment), just not sharing any of Auction's components
@@ -76,24 +68,10 @@ export default function HrhOnlineApp() {
   const [page, setPage] = useState("overview");
   const [channel, setChannel] = useState("All Channels");
   const [dateRange, setDateRange] = useState(defaultDateRange());
-  const [pulse, setPulse] = useState(null);
 
   useEffect(() => {
     document.title = "HRH Online · HMR Analytics";
   }, []);
-
-  // Alert strip numbers — the same Sales Overview KPIs (GMV/NMV/Orders/
-  // Units/AOV) for the dashboard's current date range + channel.
-  useEffect(() => {
-    if (dateRange && typeof dateRange === "object" && dateRange.key === "custom" && !(dateRange.from && dateRange.to)) return;
-    const controller = new AbortController();
-    const qs = new URLSearchParams({ channel, ...dateRangeParams(dateRange), compareTo: "week", report: "executiveOverview" });
-    fetch(`/api/hrh-sales-analytics?${qs.toString()}`, { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => j && !j.error && setPulse(j.kpis))
-      .catch(() => {});
-    return () => controller.abort();
-  }, [channel, dateRange]);
 
   const Page = PAGES[page] || ExecutiveOverview;
   const filters = { channel, dateRange };
@@ -101,9 +79,6 @@ export default function HrhOnlineApp() {
   const eyebrow = meta.eyebrow || GROUP_BY_KEY[page] || "HRH Online";
   const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar";
   const hideDateRange = page === "campaignCalendar";
-  const rangeLabel = resolveDateRange(dateRange).label;
-  const num = (v) => (v === null || v === undefined ? "…" : Number(v).toLocaleString("en-PH"));
-  const peso = (v) => (v === null || v === undefined ? "…" : formatPeso(v));
 
   return (
     <div className="uf-root min-h-screen flex">
@@ -117,29 +92,6 @@ export default function HrhOnlineApp() {
           hideChannelFilter={hideChannelFilter}
           hideDateRange={hideDateRange}
         />
-
-        {/* Reference alert strip — Sales Overview KPIs for the current
-            filters. */}
-        <div className="uf-alertbar print:hidden">
-          <button type="button" className="uf-alert-item hot" onClick={() => setPage("overview")}>
-            <strong>● {num(pulse?.orders?.value)} orders</strong>
-          </button>
-          <div className="uf-alert-item">
-            <strong style={{ color: "#17833b" }}>● {peso(pulse?.gmv?.value)}</strong> GMV
-          </div>
-          <div className="uf-alert-item">
-            <strong style={{ color: "#1f6fb2" }}>● {peso(pulse?.nmv?.value)}</strong> NMV
-          </div>
-          <div className="uf-alert-item">
-            <strong style={{ color: "#b27000" }}>● {num(pulse?.units?.value)}</strong> units
-          </div>
-          <div className="uf-alert-item">
-            <strong>● {peso(pulse?.aov?.value)}</strong> AOV
-          </div>
-          <div className="uf-alert-item">
-            <strong>● {channel}</strong> {rangeLabel}
-          </div>
-        </div>
 
         <main className="flex-1 min-w-0 uf-workspace">
           <div className="uf-eyebrow">{eyebrow}</div>
