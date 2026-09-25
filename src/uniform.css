@@ -8,13 +8,10 @@
    rules under it normalise the dashboard's existing content (cards,
    headings, tables) to the same reference look. */
 
-/* Font: the reference's own stack, WITHOUT the Inter webfont the app loads
-   from Google Fonts — the reference file never loads Inter, so on a
-   Windows PC without Inter installed it renders in Segoe UI. Matching that
-   means leaving Inter out entirely (it's first in the stack and always
-   available here via the webfont). */
+/* Font: Inter (loaded from Google Fonts in index.html, 300–900), then the
+   reference's own fallback stack. */
 .uf-root {
-  --uf-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --uf-font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   font-family: var(--uf-font);
   font-size: 14px;
   color: var(--text-primary);
