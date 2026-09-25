@@ -488,3 +488,8 @@ button.uf-alert-item:hover:not(.hot) {
 .uf-icon-btn {
   line-height: normal;
 }
+/* Sidebar font, set explicitly on the sidebar and everything in it. */
+.uf-sidebar,
+.uf-sidebar * {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+}
