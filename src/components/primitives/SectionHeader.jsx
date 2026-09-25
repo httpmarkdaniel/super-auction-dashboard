@@ -1,13 +1,12 @@
 // A section header that leads with the "so what", not just a chart-type label —
-// the narrative beat this group of visuals exists to support.
+// the narrative beat this group of visuals exists to support. Styled as the
+// "LIVE DASHBOARD UNIFORM FORMAT" section heading (bold title, muted one-line
+// description underneath).
 export default function SectionHeader({ title, insight }) {
   return (
-    <div className="mb-3">
-      <div className="flex items-center gap-2.5">
-        <span className="w-1.5 h-5 rounded-sm bg-navy shrink-0" />
-        <h2 className="font-display text-[27px] leading-none uppercase tracking-wide text-series1">{title}</h2>
-      </div>
-      {insight && <p className="text-[15.5px] text-ink mt-1 ml-4">{insight}</p>}
+    <div className="mb-3.5">
+      <h2 className="text-[18px] leading-tight font-extrabold text-ink tracking-[-0.2px]">{title}</h2>
+      {insight && <p className="text-[12.5px] mt-1" style={{ color: "#8692a6" }}>{insight}</p>}
     </div>
   );
 }

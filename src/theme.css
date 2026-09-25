@@ -1,94 +1,98 @@
-/* Design tokens — matched to the BOPIS Operations Console (shared UI mandate
-   across internal dashboards). Values pulled from live computed styles at
-   bopis-five.vercel.app on 2026-07-22; swap here to re-brand. */
+/* Design tokens — the "LIVE DASHBOARD UNIFORM FORMAT" palette
+   (public/LIVE DASHBOARD UNIFORM FORMAT.html :root / body.dark), the shared
+   look every HMR Analytics dashboard is being moved to (Auction first,
+   2026-09-25). Token NAMES are unchanged so every existing Tailwind class
+   (bg-surface1, text-ink, border-gridline, ...) picks the new look up. */
 :root {
-  --surface-1: #ffffff;
-  --surface-2: #ffffff;
-  --page-plane: #f4f6fa;
-  --text-primary: #111827;
-  --text-secondary: #5b6573;
-  --text-muted: #94a0ae;
-  --gridline: #e7eaf0;
-  --baseline: #d7dce3;
-  --border: #e7eaf0;
+  --surface-1: #ffffff; /* --panel */
+  --surface-2: #f9fbfe; /* --panel-2 */
+  --page-plane: #f5f7fb; /* --bg */
+  --text-primary: #0b1530; /* --text */
+  --text-secondary: #617089;
+  --text-muted: #73809a; /* --muted */
+  --gridline: #dfe5ee; /* --line */
+  --gridline-2: #e9edf3; /* --line-2 */
+  --baseline: #d3dae5;
+  --border: #dfe5ee;
 
-  /* BOPIS navy — primary accent, active nav, primary buttons */
-  --navy: #22304f;
-  --navy-soft: #edf0f7;
+  /* Reference navy — active nav outline, tab underline, primary buttons */
+  --navy: #0e1b39;
+  --navy-soft: #edf2fa;
 
-  --series-1: #22304f; /* navy */
-  --series-2: #1baf7a; /* aqua */
-  --series-3: #eda100; /* yellow */
-  --series-4: #008300; /* green */
-  --series-5: #4a3aa7; /* violet */
-  --series-6: #e34948; /* red */
-  --series-7: #e87ba4; /* magenta */
-  --series-8: #eb6834; /* orange */
+  --series-1: #1f6fb2; /* --blue */
+  --series-2: #1baf7a;
+  --series-3: #e9c36a;
+  --series-4: #15803d; /* --green */
+  --series-5: #4a3aa7;
+  --series-6: #d62d2d; /* --red */
+  --series-7: #e87ba4;
+  --series-8: #a66900; /* --amber */
 
-  --brand-navy-deep: #22304f;
+  --brand-navy-deep: #0b1936; /* --navy */
 
-  --seq-100: #c8d9f5;
-  --seq-250: #6b93c9;
-  --seq-400: #2f5590;
-  --seq-450: #22304f;
-  --seq-500: #1c283f;
-  --seq-600: #151f30;
-  --seq-700: #0f1622;
+  --seq-100: #dce4f0;
+  --seq-250: #8fb1d6;
+  --seq-400: #3c7fb9;
+  --seq-450: #1f6fb2;
+  --seq-500: #175a91;
+  --seq-600: #0e1b39;
+  --seq-700: #0b1530;
 
-  --diverging-pos: #22304f;
-  --diverging-neg: #e34948;
-  --diverging-mid: #f0efec;
+  --diverging-pos: #1f6fb2;
+  --diverging-neg: #d62d2d;
+  --diverging-mid: #eef2f7;
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  --status-good: #15803d;
+  --status-warning: #e9a23b;
+  --status-serious: #e78b57;
+  --status-critical: #d62d2d;
 
-  /* BOPIS status-badge tones (bg/text pairs) */
-  --tone-red-bg: #faeaea;
-  --tone-red-text: #c42b2b;
-  --tone-amber-bg: #faf1df;
-  --tone-amber-text: #b07514;
-  --tone-green-bg: #e6f4ea;
-  --tone-green-text: #1e7b34;
+  /* Reference .st-green / .st-red / .st-amber chip tones */
+  --tone-red-bg: #fdeaea;
+  --tone-red-text: #d62d2d;
+  --tone-amber-bg: #fff3d9;
+  --tone-amber-text: #a66900;
+  --tone-green-bg: #e8f6ed;
+  --tone-green-text: #15803d;
 
-  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.05);
+  --shadow-card: 0 1px 2px rgba(13, 24, 45, 0.06), 0 8px 24px rgba(13, 24, 45, 0.04);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --surface-1: #1a1d24;
-    --surface-2: #20242c;
-    --page-plane: #14161b;
-    --text-primary: #f2f4f7;
-    --text-secondary: #a3adba;
-    --text-muted: #8892a3;
-    --gridline: #2b303a;
-    --baseline: #383e49;
-    --border: #2b303a;
+    --surface-1: #151f2f;
+    --surface-2: #111a28;
+    --page-plane: #0f1724;
+    --text-primary: #edf3fb;
+    --text-secondary: #b3c0d2;
+    --text-muted: #9aa8bc;
+    --gridline: #2b3748;
+    --gridline-2: #243143;
+    --baseline: #3a475a;
+    --border: #2b3748;
 
-    --navy: #7e93c2;
-    --navy-soft: #232a3a;
+    --navy: #4a7fbf;
+    --navy-soft: #1c2a3f;
 
-    --series-1: #7e93c2;
+    --series-1: #5ea3de;
     --series-2: #199e70;
-    --series-3: #c98500;
-    --series-4: #008300;
+    --series-3: #d9ae4f;
+    --series-4: #3fb56a;
     --series-5: #9085e9;
     --series-6: #e66767;
     --series-7: #d55181;
-    --series-8: #d95926;
+    --series-8: #d59a3a;
 
-    --brand-navy-deep: #2b3a5c;
+    --brand-navy-deep: #1c2a3f;
 
-    --diverging-pos: #7e93c2;
+    --diverging-pos: #5ea3de;
     --diverging-neg: #e66767;
-    --diverging-mid: #383835;
+    --diverging-mid: #243143;
 
-    --status-good: #0ca30c;
-    --status-warning: #fab219;
-    --status-serious: #ec835a;
-    --status-critical: #d03b3b;
+    --status-good: #3fb56a;
+    --status-warning: #e9a23b;
+    --status-serious: #e78b57;
+    --status-critical: #e66767;
 
     --tone-red-bg: #3a2222;
     --tone-red-text: #f18a8a;
@@ -97,39 +101,45 @@
     --tone-green-bg: #1e3324;
     --tone-green-text: #7cd99a;
 
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.25);
+    --shadow-card: none;
   }
 }
 
 /* Manual toggle override — wins regardless of OS preference */
 :root[data-theme="dark"] {
-  --surface-1: #1a1d24;
-  --surface-2: #20242c;
-  --page-plane: #14161b;
-  --text-primary: #f2f4f7;
-  --text-secondary: #a3adba;
-  --text-muted: #8892a3;
-  --gridline: #2b303a;
-  --baseline: #383e49;
-  --border: #2b303a;
+  --surface-1: #151f2f;
+  --surface-2: #111a28;
+  --page-plane: #0f1724;
+  --text-primary: #edf3fb;
+  --text-secondary: #b3c0d2;
+  --text-muted: #9aa8bc;
+  --gridline: #2b3748;
+  --gridline-2: #243143;
+  --baseline: #3a475a;
+  --border: #2b3748;
 
-  --navy: #7e93c2;
-  --navy-soft: #232a3a;
+  --navy: #4a7fbf;
+  --navy-soft: #1c2a3f;
 
-  --series-1: #7e93c2;
+  --series-1: #5ea3de;
   --series-2: #199e70;
-  --series-3: #c98500;
-  --series-4: #008300;
+  --series-3: #d9ae4f;
+  --series-4: #3fb56a;
   --series-5: #9085e9;
   --series-6: #e66767;
   --series-7: #d55181;
-  --series-8: #d95926;
+  --series-8: #d59a3a;
 
-  --brand-navy-deep: #2b3a5c;
+  --brand-navy-deep: #1c2a3f;
 
-  --diverging-pos: #7e93c2;
+  --diverging-pos: #5ea3de;
   --diverging-neg: #e66767;
-  --diverging-mid: #383835;
+  --diverging-mid: #243143;
+
+  --status-good: #3fb56a;
+  --status-warning: #e9a23b;
+  --status-serious: #e78b57;
+  --status-critical: #e66767;
 
   --tone-red-bg: #3a2222;
   --tone-red-text: #f18a8a;
@@ -138,5 +148,5 @@
   --tone-green-bg: #1e3324;
   --tone-green-text: #7cd99a;
 
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.25);
+  --shadow-card: none;
 }

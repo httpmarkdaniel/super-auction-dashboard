@@ -58,7 +58,7 @@ function HeadlineCard({ eyebrow, onClick, methodology, children }) {
     <Wrapper
       type={onClick ? "button" : undefined}
       onClick={onClick}
-      className={`relative text-left w-full h-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3 pb-3.5 group/tip ${
+      className={`relative text-left w-full h-full bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3 pb-3.5 group/tip ${
         onClick ? "cursor-pointer hover:border-navy/40 transition-colors" : ""
       }`}
     >
@@ -157,7 +157,7 @@ export default function HeroKPIs({ overview, rangeLabel = "Today", compareLabel,
           <button
             type="button"
             onClick={() => setDrilldown("totalBidAmount")}
-            className="text-left lg:col-span-4 relative bg-surface1 border border-gridline rounded-xl shadow-lg border-t-4 border-t-series8 px-6 pt-5 pb-5 group/tip hover:border-navy/40 transition-colors"
+            className="text-left lg:col-span-4 relative bg-surface1 border border-gridline rounded-xl shadow-lg px-6 pt-5 pb-5 group/tip hover:border-navy/40 transition-colors"
           >
             <div className="flex items-center gap-1.5 mb-3">
               <span className="text-[12px] uppercase tracking-[0.1em] text-muted font-semibold">Total Bid Amount · {rangeLabel}</span>

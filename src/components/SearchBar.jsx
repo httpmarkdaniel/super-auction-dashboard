@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const STATUS_DOT = {
   Sold: "bg-good",
@@ -11,6 +11,18 @@ const STATUS_DOT = {
 export default function SearchBar({ pool }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -28,22 +40,21 @@ export default function SearchBar({ pool }) {
   const showPanel = focused && query.trim().length > 0;
 
   return (
-    <div className="relative w-full max-w-[360px]">
-      <div className="flex items-center gap-2 bg-surface1 border border-gridline rounded-lg px-3 h-9 focus-within:border-navy">
-        <span className="text-muted text-[15.5px]">⌕</span>
+    <div className="uf-search-wrap relative">
+      {/* Reference .search pill (src/uniform.css); Ctrl/⌘ K focuses it. */}
+      <label className="uf-search">
+        ⌕
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 120)}
-          placeholder="Search orders, lots, vendors…"
-          className="flex-1 min-w-0 text-[15.5px] text-ink bg-transparent outline-none placeholder:text-muted"
+          placeholder="Search orders, lots, vendors"
         />
-        <span className="hidden sm:inline-flex items-center text-[12.5px] text-muted border border-gridline rounded px-1.5 py-0.5 shrink-0">
-          Ctrl K
-        </span>
-      </div>
+        <span className="uf-key hidden sm:inline">Ctrl K</span>
+      </label>
 
       {showPanel && (
         <div className="absolute left-0 right-0 mt-1.5 floating py-1.5 z-20 max-h-[320px] overflow-y-auto">

@@ -13,8 +13,11 @@
 }
 
 @layer utilities {
+  /* Table / collapsible-section header — the reference's .section-h h3
+     (public/LIVE DASHBOARD UNIFORM FORMAT.html): 16px bold, normal case,
+     UI sans. */
   .eyebrow {
-    @apply text-[16px] tracking-[0.08em] uppercase text-ink font-semibold font-display;
+    @apply text-[16px] text-ink font-bold font-sans;
   }
   /* Scorecard/KPI title typography — deliberately NOT .eyebrow's condensed
      display font/all-caps/tracking treatment (that's reserved for section/
@@ -22,21 +25,24 @@
      everywhere else — no gray), title case as authored, regular weight,
      compact. Hierarchy comes from weight/scale against the bold KPI value
      below it, not from the title's own typeface, color, or weight. */
+  /* ...now the reference's .klabel: 12px heavy muted, title case. */
   .kpi-label {
-    @apply text-[13px] leading-none font-sans font-normal text-ink;
+    @apply text-[12px] leading-none font-sans font-extrabold tracking-[0.3px];
+    color: #95a0b3;
   }
   /* Panel/section title — same visual language as .eyebrow (font, tracking,
      caps, color) but regular weight, for a scorecard/panel's uppermost
      title. Kept separate from .eyebrow itself, which stays semibold for
      genuine table/collapsible-section headers (AuctionSummaryTable,
      OperationsTable) outside this scope. */
+  /* ...now the reference's .section-h h3 too (16px bold, normal case). */
   .panel-title {
-    @apply text-[16px] tracking-[0.08em] uppercase text-ink font-normal font-display;
+    @apply text-[16px] text-ink font-bold font-sans;
   }
   /* BOPIS card language: flat white, thin border, soft shadow, no colored
      top rule — one shared look for cards, tiles, and floating overlays. */
   .card {
-    @apply bg-surface1 border border-gridline rounded-lg shadow-card;
+    @apply bg-surface1 border border-gridline rounded-[10px] shadow-card;
   }
   .tile {
     @apply bg-surface1 border border-gridline rounded-lg;

@@ -1,0 +1,473 @@
+/* "LIVE DASHBOARD UNIFORM FORMAT" shell — a port of the shell styles in
+   public/LIVE DASHBOARD UNIFORM FORMAT.html (sidebar, topbar, alert bar,
+   page header, controls, chips), shared by every dashboard moving to that
+   look (Auction first, 2026-09-25). Class names carry a `uf-` prefix so
+   they can't collide with a dashboard's own classes (.card, .sub, .name,
+   ...), and colours come from src/theme.css tokens so dark mode follows
+   the existing theme toggle. `.uf-root` is the dashboard's outer wrapper;
+   rules under it normalise the dashboard's existing content (cards,
+   headings, tables) to the same reference look. */
+
+.uf-root {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--page-plane);
+}
+.uf-mono {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+/* ---- Sidebar (reference .sidebar / .brand / .nav / .branch-status) ---- */
+.uf-sidebar {
+  width: 260px;
+  background: var(--surface-1);
+  border-right: 1px solid var(--gridline);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  z-index: 50;
+}
+.uf-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--gridline);
+}
+.uf-brandmark {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--gridline);
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #fff, #f6f8fb);
+  font-size: 18px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.uf-brand strong {
+  font-size: 18px;
+  display: block;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.uf-brand small {
+  color: #8a96ac;
+  letter-spacing: 1.2px;
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.uf-nav-title {
+  color: #9aa5b8;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  padding: 20px 16px 8px;
+  font-weight: 600;
+}
+.uf-nav {
+  display: grid;
+  gap: 4px;
+  padding: 0 8px;
+}
+.uf-nav button,
+.uf-nav a {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  width: 100%;
+}
+.uf-nav button:hover,
+.uf-nav a:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.uf-nav button.active {
+  background: #edf2fa;
+  color: var(--text-primary);
+  outline: 2px solid #101827;
+  outline-offset: -2px;
+}
+:root[data-theme="dark"] .uf-nav button.active {
+  background: #1c2a3f;
+  outline-color: #e8eef8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .uf-nav button.active {
+    background: #1c2a3f;
+    outline-color: #e8eef8;
+  }
+}
+.uf-nav-ico {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.uf-badge {
+  margin-left: auto;
+  background: #eef2f7;
+  color: #6f7f99;
+  border-radius: 9px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.uf-badge.dark {
+  background: #0e1e3c;
+  color: #fff;
+}
+.uf-branch-status {
+  margin-top: auto;
+  border-top: 1px solid var(--gridline);
+  padding: 14px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.uf-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #169b45;
+  box-shadow: 0 0 0 3px #dff3e6;
+  flex-shrink: 0;
+}
+.uf-sub {
+  color: #8995a8;
+  font-size: 11px;
+}
+
+/* ---- Topbar (reference .topbar / .search / .control / .icon-btn) ---- */
+.uf-topbar {
+  height: 62px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--gridline);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.uf-top-title {
+  min-width: 220px;
+  line-height: 1.25;
+}
+.uf-top-title strong {
+  font-size: 17px;
+  font-weight: 700;
+}
+.uf-top-title small {
+  display: block;
+  color: #8c98ad;
+  font-size: 12px;
+}
+.uf-search {
+  min-width: 270px;
+  max-width: 390px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--gridline);
+  background: var(--surface-2);
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--text-muted);
+}
+.uf-search input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  width: 100%;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.uf-key {
+  font-size: 11px;
+  color: #8a96a8;
+  border: 1px solid var(--gridline);
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-1);
+  white-space: nowrap;
+}
+.uf-control,
+.uf-icon-btn {
+  border: 1px solid var(--gridline);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-weight: 650;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.uf-icon-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  font-size: 17px;
+  flex-shrink: 0;
+}
+.uf-control:hover,
+.uf-icon-btn:hover {
+  background: var(--surface-2);
+}
+select.uf-control {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  background-image: linear-gradient(45deg, transparent 50%, #8a96a8 50%), linear-gradient(135deg, #8a96a8 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  max-width: 220px;
+  cursor: pointer;
+}
+.uf-live {
+  background: #e8f7ed;
+  color: #168243;
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.uf-userpill {
+  background: #f0f3f8;
+  border-radius: 14px;
+  padding: 9px 14px;
+  color: #5d6b83;
+  white-space: nowrap;
+  font-size: 14px;
+}
+:root[data-theme="dark"] .uf-userpill {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* ---- Alert bar (reference .alertbar / .alert-item) ---- */
+.uf-alertbar {
+  min-height: 38px;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--gridline);
+  display: flex;
+  overflow: auto;
+  white-space: nowrap;
+}
+.uf-alert-item {
+  padding: 10px 15px;
+  border-right: 1px solid var(--gridline);
+  font-size: 12px;
+  color: #63718a;
+  background: transparent;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  text-align: left;
+}
+.uf-alert-item strong {
+  color: var(--text-primary);
+  margin-right: 8px;
+  font-weight: 700;
+}
+.uf-alert-item.hot {
+  background: #d9332c;
+  color: #fff;
+}
+.uf-alert-item.hot strong {
+  color: #fff;
+}
+button.uf-alert-item {
+  cursor: pointer;
+}
+button.uf-alert-item:hover:not(.hot) {
+  background: var(--surface-2);
+}
+
+/* ---- Page header (reference .workspace / .eyebrow / .page-title / .lead) ---- */
+.uf-workspace {
+  padding: 28px 24px 40px;
+}
+.uf-eyebrow {
+  color: #98a4b7;
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.uf-page-title {
+  font-size: 28px;
+  margin: 0 0 6px;
+  letter-spacing: -0.5px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.uf-lead {
+  font-size: 16px;
+  color: #617089;
+  margin: 0 0 12px;
+  max-width: 760px;
+  line-height: 1.45;
+}
+.uf-lead b {
+  color: #0b7a2a;
+}
+.uf-toolbar-inline {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  align-items: center;
+}
+
+/* ---- Chips (reference .status / .st-*) ---- */
+.uf-status {
+  font-size: 12px;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-weight: 800;
+  display: inline-block;
+}
+.uf-st-green {
+  background: var(--tone-green-bg);
+  color: var(--tone-green-text);
+}
+.uf-st-red {
+  background: var(--tone-red-bg);
+  color: var(--tone-red-text);
+}
+.uf-st-amber {
+  background: var(--tone-amber-bg);
+  color: var(--tone-amber-text);
+}
+.uf-st-blue {
+  background: #e9f3fb;
+  color: #1769a5;
+}
+
+/* ---- Responsive (reference media queries) ---- */
+@media (max-width: 1200px) {
+  .uf-top-title,
+  .uf-userpill {
+    display: none;
+  }
+}
+@media (max-width: 860px) {
+  .uf-topbar {
+    position: static;
+    flex-wrap: wrap;
+    height: auto;
+    padding: 10px;
+  }
+  .uf-search {
+    order: 3;
+    max-width: none;
+    min-width: 100%;
+  }
+  .uf-workspace {
+    padding: 18px 12px;
+  }
+  .uf-hide-sm {
+    display: none !important;
+  }
+  .uf-page-title {
+    font-size: 24px;
+  }
+}
+
+/* ---- Normalising a dashboard's existing content to the reference ----
+   Cards: reference .card (10px radius, --line border, soft shadow, no
+   coloured top accent). Display font (Bebas) -> the reference's heavy
+   Inter for numbers/headings. Tables: reference th/td. */
+.uf-root .card,
+.uf-root .floating,
+.uf-root .tile {
+  border-radius: 10px;
+  border-color: var(--gridline);
+}
+.uf-root .font-display {
+  font-family: Inter, ui-sans-serif, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-weight: 850;
+  letter-spacing: -0.02em;
+}
+.uf-root table th {
+  background: var(--surface-2);
+  color: #8792a5;
+  font-size: 11px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  font-weight: 700;
+  border-bottom: 1px solid var(--gridline);
+}
+.uf-root table td {
+  border-bottom-color: var(--gridline-2);
+}
+.uf-root table tbody tr:hover td {
+  background: rgba(31, 111, 178, 0.035);
+}
+.uf-search-wrap {
+  min-width: 270px;
+  max-width: 390px;
+  flex: 1;
+}
+.uf-search-wrap .uf-search {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+}
+@media (max-width: 860px) {
+  .uf-search-wrap {
+    order: 3;
+    max-width: none;
+    min-width: 100%;
+  }
+}
+/* Hand-built cards (bg-surface1 + shadow-card, not the .card utility) get
+   the reference's 10px radius too. */
+.uf-root .shadow-card {
+  border-radius: 10px;
+}
+/* Tables that sit directly on the page (not already inside a card) get the
+   reference's table card: white panel, --line border, 10px radius. Tables
+   already inside a .card / shadow-card are left alone (no double border). */
+.uf-root table {
+  background: var(--surface-1);
+}
+.uf-root .overflow-x-auto:has(> table):not(.card .overflow-x-auto):not(.shadow-card .overflow-x-auto):not(.floating .overflow-x-auto) {
+  background: var(--surface-1);
+  border: 1px solid var(--gridline);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+}
+/* The Auction topbar carries more controls than the reference (date +
+   store + export + refresh + theme + user + sign-out), so the user pill
+   drops out earlier than the reference's 1200px to keep everything on one
+   line. */
+@media (max-width: 1600px) {
+  .uf-userpill {
+    display: none;
+  }
+}
+.uf-topbar select.uf-control {
+  max-width: 170px;
+  text-overflow: ellipsis;
+}

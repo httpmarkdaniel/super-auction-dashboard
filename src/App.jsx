@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import { CATEGORY_NAMES as CATEGORY_TABS } from "../api/_category.js";
-import Topbar from "./components/Topbar";
+import Topbar, { DateRangePicker } from "./components/Topbar";
+import "./uniform.css";
 import StorySection from "./components/primitives/StorySection";
 import HeroKPIs from "./components/HeroKPIs";
 import LiveMiniCard from "./components/primitives/LiveMiniCard";
@@ -1310,7 +1311,7 @@ function OverviewTab({
           <button
             type="button"
             onClick={() => setWinningMaxBidOpen(true)}
-            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
+            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
           >
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-3">Won Via — Max Bid vs. Regular Bid</div>
             {(() => {
@@ -1361,7 +1362,7 @@ function OverviewTab({
           <button
             type="button"
             onClick={() => setBidderCompositionOpen(true)}
-            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
+            className="text-left w-full bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3.5 pb-4 hover:border-navy/40 transition-colors"
           >
             <div className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold mb-2">Winning Bidders</div>
             <div className="flex items-baseline gap-2 mb-3">
@@ -1433,7 +1434,7 @@ function OverviewTab({
             })()}
           </button>
 
-          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card border-t-[3px] border-t-series8 px-4 pt-3.5 pb-4 group/tip">
+          <div className="relative bg-surface1 border border-gridline rounded-lg shadow-card px-4 pt-3.5 pb-4 group/tip">
             <div className="flex items-center gap-1.5 mb-2.5">
               <span className="text-[11px] uppercase tracking-[0.08em] text-muted font-semibold">Registration → Bidder</span>
               <span className="flex items-center justify-center w-3.5 h-3.5 rounded-full border border-muted text-muted text-[10.5px] font-bold shrink-0 leading-none">i</span>
@@ -1516,7 +1517,7 @@ function OverviewTab({
 const TITLES = {
   Overview: "Overview",
   "Operational Flags": "Operational Flags",
-  "Online Bidding": "Online Bidding",
+  "Online Bidding": "Active Auctions",
   "Upcoming Auctions": "Upcoming Auctions",
   Trends: "Yearly Trends",
   "Auction Types": "Sale Channels",
@@ -1530,6 +1531,28 @@ const TITLES = {
   "Vendor Summary": "Vendor Analysis",
   "Auction Result": "Auction Result",
   Export: "Export Report",
+};
+
+// Page header copy for the "LIVE DASHBOARD UNIFORM FORMAT" shell
+// (eyebrow = sidebar group, lead = one line on what the page is for).
+// Overview's lead is built from live numbers in App below.
+const PAGE_META = {
+  Overview: { eyebrow: "Dashboard" },
+  "Online Bidding": { eyebrow: "Dashboard", lead: "Live auctions right now — standing bids, bidder activity and time left on every lot." },
+  "Upcoming Auctions": { eyebrow: "Dashboard", lead: "Auctions scheduled to open next, with their lots and timing." },
+  "Full Auction Detail": { eyebrow: "Dashboard", lead: "Every auction and lot in the selected period — filter, sort and drill into the details." },
+  "Bidder Analytics": { eyebrow: "Dashboard", lead: "Who is bidding, how often and how much — bidding pace, engagement and top bidders." },
+  "Vendor Analytics": { eyebrow: "Dashboard", lead: "Vendor performance — lots consigned, sell-through and settled value." },
+  "Vendor Payables": { eyebrow: "Dashboard", lead: "What is owed to vendors — outstanding payables and how long they've been open." },
+  "Vendor Summary": { eyebrow: "Reports", lead: "Per-vendor totals for the auctions you select." },
+  "Auction Result": { eyebrow: "Reports", lead: "Auction results by branch, vendor and auction, with Excel and PDF export." },
+  "Operational Flags": { eyebrow: "Monitoring", lead: "Data and process exceptions that need someone to look at them." },
+  Trends: { eyebrow: "Dashboard", lead: "Year-over-year auction performance." },
+  "Auction Types": { eyebrow: "Dashboard", lead: "Performance by sale channel." },
+  Stores: { eyebrow: "Dashboard", lead: "Performance by store." },
+  "Bidding Pace": { eyebrow: "Dashboard", lead: "How quickly bids come in over an auction's life." },
+  "Revenue Breakdown": { eyebrow: "Dashboard", lead: "Where settled revenue comes from." },
+  Export: { eyebrow: "Reports", lead: "Download the dashboard's data." },
 };
 
 export default function App() {
@@ -1715,8 +1738,12 @@ export default function App() {
     [overview],
   );
 
+  const hero = overview.heroKPIs || {};
+  const pageMeta = PAGE_META[tab] || { eyebrow: "Dashboard" };
+  const filtersHidden = tab === "Auction Result" || tab === "Vendor Summary";
+
   return (
-    <div className="flex h-screen overflow-hidden bg-plane">
+    <div className="uf-root flex h-screen overflow-hidden">
       <Sidebar
         active={tab}
         onChange={setTab}
@@ -1725,6 +1752,8 @@ export default function App() {
         onClose={() =>
           setSidebarOpen(false)
         }
+        badges={{ activeAuctions: hero.activeAuctionsNow ?? undefined }}
+        store={store}
       />
 
       <main className="flex-1 flex flex-col min-w-0">
@@ -1740,7 +1769,7 @@ export default function App() {
           searchPool={searchPool}
           dateRange={effectiveDateRange}
           onDateRangeChange={effectiveSetDateRange}
-          hideFilters={tab === "Auction Result" || tab === "Vendor Summary"}
+          hideFilters={filtersHidden}
           storeOptions={storeOptions}
           updatedAt={formatUpdatedAt(
             lastUpdated,
@@ -1748,19 +1777,47 @@ export default function App() {
           onRefresh={handleManualRefresh}
         />
 
-        <div className="flex items-center gap-3 px-4 md:px-10 pt-5">
-          <h1 className="flex items-center gap-2.5 text-[15.5px] uppercase tracking-[0.14em] font-bold text-navy shrink-0">
-            <span className="w-12 h-[3px] bg-navy" />
-            {TITLES[tab] || tab}
-          </h1>
+        {/* Reference alert bar — today's live auction pulse, from the same
+            overview data the Overview cards use. */}
+        <div className="uf-alertbar">
+          <button type="button" className="uf-alert-item hot" onClick={() => setTab("Online Bidding")}>
+            <strong>● {(hero.activeAuctionsNow ?? 0).toLocaleString()} active auctions now</strong>
+          </button>
+          <div className="uf-alert-item">
+            <strong style={{ color: "#17833b" }}>● {formatPeso(hero.todaysBidAmount ?? 0)}</strong> today's standing bids
+          </div>
+          <div className="uf-alert-item">
+            <strong style={{ color: "#1f6fb2" }}>● {(hero.totalBidsToday ?? 0).toLocaleString()}</strong> clicks / bids today
+          </div>
+          <div className="uf-alert-item">
+            <strong style={{ color: "#b27000" }}>● {(hero.newBiddersToday ?? 0).toLocaleString()}</strong> new bidders today
+          </div>
+          <div className="uf-alert-item">
+            <strong>● {store}</strong> store filter
+          </div>
         </div>
 
-        <div
-          ref={contentRef}
-          className={`flex-1 overflow-y-auto px-4 py-4 sm:px-6 md:px-10 md:py-8 ${
-            tab === "Full Auction Detail" ? "max-w-none" : "max-w-[1400px]"
-          }`}
-        >
+        <div ref={contentRef} className="flex-1 overflow-y-auto">
+         <div className="uf-workspace">
+          <div className="uf-eyebrow">{pageMeta.eyebrow}</div>
+          <h1 className="uf-page-title">{TITLES[tab] || tab}</h1>
+          <p className="uf-lead">
+            {tab === "Overview" ? (
+              <>
+                <b>{formatPeso(hero.todaysBidAmount ?? 0)}</b> in standing bids today across {(hero.activeAuctionsNow ?? 0).toLocaleString()} live auctions. Settled
+                performance below covers {rangeLabel}.
+              </>
+            ) : (
+              pageMeta.lead
+            )}
+          </p>
+          {!filtersHidden && (
+            <div className="uf-toolbar-inline">
+              <DateRangePicker value={effectiveDateRange} onChange={effectiveSetDateRange} />
+              <span className="uf-control">⌂ {store}</span>
+              <span className="uf-live">Live data</span>
+            </div>
+          )}
           {tab === "Overview" && (
             <OverviewTab
               overview={overview}
@@ -1897,9 +1954,10 @@ export default function App() {
             />
           )}
 
-          <footer className="text-center text-[14.5px] text-muted pt-8 pb-2">
+          <footer className="text-center text-[12px] text-muted pt-8 pb-2">
             HMR Auction Services · Internal Use Only
           </footer>
+         </div>
         </div>
       </main>
     </div>
