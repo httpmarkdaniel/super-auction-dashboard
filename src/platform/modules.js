@@ -41,7 +41,7 @@ export const MODULES = [
   },
   {
     id: "customer-analytics",
-    name: "Customer Analytics",
+    name: "Customer",
     status: "available",
     description:
       "Customer growth, behavior, segmentation, retention and purchase patterns.",
