@@ -57,7 +57,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, onClick
   const positive = hasDelta && delta >= 0;
   return (
     <div
-      className={`rounded-2xl p-4 ${onClick ? "transition-shadow hover:shadow-md" : ""}`}
+      className={`card rounded-[10px] p-4 ${onClick ? "transition-shadow hover:shadow-md" : ""}`}
       style={{ background: retail.surface, border: `1px solid ${retail.border}`, boxShadow: retail.shadow, cursor: onClick ? "pointer" : undefined }}
       onClick={onClick}
       role={onClick ? "button" : undefined}
@@ -70,7 +70,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, onClick
             {icon}
           </span>
         )}
-        <div className="text-[13px] font-bold" style={{ color: retail.muted }}>
+        <div className="text-[12px] font-extrabold tracking-[0.3px]" style={{ color: "#95a0b3" }}>
           {label}
         </div>
         {methodology && <InfoIcon text={methodology} />}
@@ -80,7 +80,7 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon, onClick
           </span>
         )}
       </div>
-      <div className="text-[20px] font-extrabold leading-none tabular-nums" style={{ color: retail.ink }}>
+      <div className="text-[21px] font-extrabold leading-none tabular-nums tracking-[-0.3px]" style={{ color: retail.ink }}>
         {value}
       </div>
       {hasDelta && (

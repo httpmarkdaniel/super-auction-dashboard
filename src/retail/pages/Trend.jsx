@@ -102,16 +102,6 @@ export default function Trend({ filters }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-            Trend
-          </div>
-          <p className="text-[11.5px] mt-0.5" style={{ color: retail.muted }}>
-            Fixed trailing windows (this month to date / last 4 weeks) — not affected by the Date Range filter above.
-          </p>
-        </div>
-      </div>
 
       {loading && !data && <LoadingState label="Loading Trend…" />}
       {error && <ErrorState label={`Couldn't load Trend: ${error}`} />}

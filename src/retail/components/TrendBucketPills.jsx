@@ -19,7 +19,7 @@ export default function TrendBucketPills({ value, onChange, options = TREND_BUCK
             className="text-[11.5px] font-semibold px-2.5 h-6 rounded"
             style={
               active
-                ? { background: retail.navy, color: "#ffffff" }
+                ? { background: "#0e1b39", color: "#ffffff" }
                 : { background: "transparent", color: retail.ink2, border: `1px solid ${retail.border}` }
             }
           >

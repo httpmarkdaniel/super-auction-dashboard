@@ -14,7 +14,7 @@ export default function ToggleSm({ value, onChange, options }) {
             type="button"
             onClick={() => onChange(o.key)}
             className="text-[11.5px] font-semibold px-3 py-1 rounded-md whitespace-nowrap transition-colors"
-            style={active ? { background: retail.blue, color: "#ffffff" } : { background: "transparent", color: retail.ink2 }}
+            style={active ? { background: "#0e1b39", color: "#ffffff" } : { background: "transparent", color: retail.ink2 }}
           >
             {o.label}
           </button>

@@ -61,9 +61,6 @@ const ROWS = [
 export default function Methodology() {
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Methodology &amp; Data Notes
-      </div>
       <Panel>
         <DataTable
           columns={[

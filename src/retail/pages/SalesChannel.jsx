@@ -58,11 +58,6 @@ export default function SalesChannel({ filters }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Sales Channel
-        </div>
-      </div>
 
       {loading && !data && <LoadingState label="Loading Sales Channel…" />}
       {error && <ErrorState label={`Couldn't load Sales Channel: ${error}`} />}

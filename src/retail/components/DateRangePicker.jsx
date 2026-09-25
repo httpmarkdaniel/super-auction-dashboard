@@ -42,32 +42,8 @@ export default function DateRangePicker({ value, onChange }) {
 
   return (
     <div className="relative shrink-0" ref={containerRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 text-[13px] font-semibold px-3.5 h-10 rounded-xl whitespace-nowrap transition-colors"
-        style={
-          open
-            ? { background: retail.blue, color: "#ffffff", border: `1px solid ${retail.blue}` }
-            : { background: retail.bg, color: retail.ink2, border: `1px solid ${retail.border}` }
-        }
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
-        </svg>
-        {current.label}
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-        >
-          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="uf-control">
+        ▣ {current.label}
       </button>
 
       {open && (

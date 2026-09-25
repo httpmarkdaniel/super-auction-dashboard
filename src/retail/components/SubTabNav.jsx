@@ -14,11 +14,11 @@ export default function SubTabNav({ tabs, value, onChange }) {
             key={t.key}
             type="button"
             onClick={() => onChange(t.key)}
-            className="text-[12.5px] font-semibold px-3.5 py-2 -mb-px whitespace-nowrap shrink-0"
+            className="text-[14px] px-3.5 py-3 -mb-px whitespace-nowrap shrink-0"
             style={
               active
-                ? { color: retail.accentText, borderBottom: `2px solid ${retail.accent}` }
-                : { color: retail.ink2, borderBottom: "2px solid transparent" }
+                ? { color: retail.ink, fontWeight: 750, borderBottom: "2px solid #0e1b39" }
+                : { color: "#8994a7", fontWeight: 750, borderBottom: "2px solid transparent" }
             }
           >
             {t.label}

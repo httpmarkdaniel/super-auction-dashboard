@@ -1,5 +1,3 @@
-import { retail } from "../theme";
-
 // Single-store drill-down, layered on top of the existing Segment
 // (All/Retail/Wholesale) filter rather than replacing it — `stores` is
 // whichever store list the CURRENT segment already resolves to (see
@@ -13,8 +11,7 @@ export default function StoreSelect({ value, onChange, stores }) {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="text-[13px] font-semibold px-3 h-10 rounded-xl outline-none"
-      style={{ background: retail.bg, color: retail.ink2, border: `1px solid ${retail.border}` }}
+      className="uf-control outline-none"
     >
       <option value="">All Stores</option>
       {stores.map((s) => (

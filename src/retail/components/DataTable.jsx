@@ -66,8 +66,8 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
               {columns.map((c, i) => (
                 <th
                   key={c.key}
-                  className="text-left px-2.5 py-2.5 font-semibold whitespace-nowrap text-[12px] uppercase tracking-[0.02em]"
-                  style={{ color: retail.muted, background: retail.tableHeaderBg, ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, retail.tableHeaderBg) }}
+                  className="text-left px-2.5 py-2.5 font-bold whitespace-nowrap text-[11px] uppercase tracking-[0.7px]"
+                  style={{ color: "#8792a5", background: retail.tableHeaderBg, borderBottom: `1px solid ${retail.border}`, ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, retail.tableHeaderBg) }}
                 >
                   {c.label}
                 </th>
@@ -78,7 +78,7 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
             {visibleRows.map((r, i) => (
               <tr
                 key={r.id ?? i}
-                style={{ borderBottom: `1px solid #ebf0f6`, cursor: onRowClick ? "pointer" : undefined }}
+                style={{ borderBottom: `1px solid #e9edf3`, cursor: onRowClick ? "pointer" : undefined }}
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={onRowClick ? "hover:bg-black/[0.02]" : undefined}
               >
