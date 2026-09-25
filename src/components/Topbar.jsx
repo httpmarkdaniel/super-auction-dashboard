@@ -147,32 +147,6 @@ function RefreshButton({ onRefresh }) {
   );
 }
 
-// Light by default — the OS dark setting is ignored. Only an explicit click
-// on this toggle turns dark mode on (remembered under "theme-v2"; the older
-// "theme" key is ignored so a previously saved dark choice doesn't stick).
-const THEME_KEY = "theme-v2";
-
-function DarkModeToggle() {
-  const [isDark, setIsDark] = useState(() => typeof window !== "undefined" && localStorage.getItem(THEME_KEY) === "dark");
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
-  }, []);
-
-  function toggle() {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.dataset.theme = next ? "dark" : "light";
-    localStorage.setItem(THEME_KEY, next ? "dark" : "light");
-  }
-
-  return (
-    <IconButton title={isDark ? "Switch to light mode" : "Switch to dark mode"} onClick={toggle}>
-      ◔
-    </IconButton>
-  );
-}
-
 function ExportButton({ onClick }) {
   return (
     <button
@@ -223,7 +197,6 @@ export default function Topbar({
       <LiveDataBadge />
       <ExportButton onClick={onExportClick} />
       <RefreshButton onRefresh={onRefresh} />
-      <DarkModeToggle />
       <UserBadge />
       <IconButton title="Sign out">↪</IconButton>
     </header>
