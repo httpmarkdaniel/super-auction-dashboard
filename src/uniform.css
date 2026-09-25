@@ -3,8 +3,7 @@
    page header, controls, chips), shared by every dashboard moving to that
    look (Auction first, 2026-09-25). Class names carry a `uf-` prefix so
    they can't collide with a dashboard's own classes (.card, .sub, .name,
-   ...), and colours come from src/theme.css tokens so dark mode follows
-   the existing theme toggle. `.uf-root` is the dashboard's outer wrapper;
+   ...), and colours come from src/theme.css tokens (light only). `.uf-root` is the dashboard's outer wrapper;
    rules under it normalise the dashboard's existing content (cards,
    headings, tables) to the same reference look. */
 
@@ -99,10 +98,6 @@
   color: var(--text-primary);
   outline: 2px solid #101827;
   outline-offset: -2px;
-}
-:root[data-theme="dark"] .uf-nav button.active {
-  background: #1c2a3f;
-  outline-color: #e8eef8;
 }
 .uf-nav-ico {
   width: 18px;
@@ -252,10 +247,6 @@ select.uf-control {
   color: #5d6b83;
   white-space: nowrap;
   font-size: 14px;
-}
-:root[data-theme="dark"] .uf-userpill {
-  background: var(--surface-2);
-  color: var(--text-muted);
 }
 
 /* ---- Alert bar (reference .alertbar / .alert-item) ---- */
