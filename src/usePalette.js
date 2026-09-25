@@ -28,16 +28,19 @@ const DARK = {
   surface1: "#1a1d24",
 };
 
+// Chart palette follows the dashboard's manual theme (data-theme="dark" set
+// by Auction's toggle), not the computer's light/dark setting.
+function isDarkTheme() {
+  return typeof document !== "undefined" && document.documentElement.dataset.theme === "dark";
+}
+
 export default function usePalette() {
-  const [dark, setDark] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
+  const [dark, setDark] = useState(isDarkTheme);
 
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = (e) => setDark(e.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const obs = new MutationObserver(() => setDark(isDarkTheme()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
   }, []);
 
   return dark ? DARK : LIGHT;

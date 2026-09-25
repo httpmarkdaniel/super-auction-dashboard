@@ -147,26 +147,23 @@ function RefreshButton({ onRefresh }) {
   );
 }
 
-function getSystemPrefersDark() {
-  return typeof window !== "undefined" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-}
+// Light by default — the OS dark setting is ignored. Only an explicit click
+// on this toggle turns dark mode on (remembered under "theme-v2"; the older
+// "theme" key is ignored so a previously saved dark choice doesn't stick).
+const THEME_KEY = "theme-v2";
 
 function DarkModeToggle() {
-  const [isDark, setIsDark] = useState(() => {
-    const saved = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
-    return saved ? saved === "dark" : getSystemPrefersDark();
-  });
+  const [isDark, setIsDark] = useState(() => typeof window !== "undefined" && localStorage.getItem(THEME_KEY) === "dark");
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved) document.documentElement.dataset.theme = saved;
+    document.documentElement.dataset.theme = localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light";
   }, []);
 
   function toggle() {
     const next = !isDark;
     setIsDark(next);
     document.documentElement.dataset.theme = next ? "dark" : "light";
-    localStorage.setItem("theme", next ? "dark" : "light");
+    localStorage.setItem(THEME_KEY, next ? "dark" : "light");
   }
 
   return (
