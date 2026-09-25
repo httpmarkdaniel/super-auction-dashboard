@@ -5,7 +5,7 @@ import HomePage from "./pages/HomePage.jsx";
 import ComingSoonPage from "./pages/ComingSoonPage.jsx";
 import HrhOnlineApp from "./hrh-online/HrhOnlineApp.jsx";
 import RetailApp from "./retail/RetailApp.jsx";
-import CustomerAnalyticsApp from "./customer-analytics/CustomerAnalyticsApp.jsx";
+import MarketingApp from "./customer-analytics/CustomerAnalyticsApp.jsx";
 import { MODULES } from "./platform/modules.js";
 import "./index.css";
 
@@ -33,8 +33,10 @@ function resolvePage(pathname) {
     return <RetailApp />;
   }
 
-  if (matchesRoute(pathname, "/customer-analytics")) {
-    return <CustomerAnalyticsApp />;
+  // Marketing (customer list). /customer-analytics is its old address —
+  // kept so existing links still open it.
+  if (matchesRoute(pathname, "/marketing") || matchesRoute(pathname, "/customer-analytics")) {
+    return <MarketingApp />;
   }
 
   const comingSoonModule = MODULES.find(

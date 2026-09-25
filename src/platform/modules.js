@@ -41,11 +41,11 @@ export const MODULES = [
   },
   {
     id: "customer-analytics",
-    name: "Customer",
+    name: "Marketing",
     status: "available",
     description:
       "Customer growth, behavior, segmentation, retention and purchase patterns.",
-    route: "/customer-analytics",
+    route: "/marketing",
     actionLabel: "Open Dashboard",
   },
   {

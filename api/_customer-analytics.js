@@ -10,7 +10,7 @@ const client = createClient({
   request_timeout: 120000,
 });
 
-// Customer Analytics module (src/customer-analytics/) — dispatched from
+// Marketing dashboard (src/customer-analytics/) — dispatched from
 // api/retail-analytics.js as report=caStores/caCustomers rather than its
 // own top-level function, since the Hobby plan's 12-function cap is
 // already fully used by api/*.js.
@@ -34,26 +34,18 @@ const NAMED_WHERE = `
   AND lower(trim(customer_name)) NOT IN ('n/a', 'na', 'walk', 'none')
 `;
 
-// Search bar: customers who ever bought from a department, category or
-// subcategory matching the text — scanned in xv3.mart_net_sales (its
-// customer column is literally named `ct.customer_name`). Every search
-// word must appear in one of the three names; words are stemmed to a
+// Search bar: customers who ever bought from a department, category OR
+// subcategory whose name matches the text — scanned in xv3.mart_net_sales
+// (its customer column is literally named `ct.customer_name`). A name
+// matches when it contains every search word; words are stemmed to a
 // plural-tolerant prefix (see searchStems) so "furnitures" still matches
 // FURNITURE.
-const CAT_CUSTOMERS = `
-  SELECT DISTINCT \`ct.customer_name\` FROM xv3.mart_net_sales
-  WHERE arrayAll(w -> positionCaseInsensitive(
-    concat(ifNull(department_name, ''), ' ', ifNull(category_name, ''), ' ', ifNull(sub_category_name, '')), w) > 0,
-    {catWords:Array(String)})
-`;
-
-// A suggestion picked from the search dropdown filters on that exact
-// name at that one level instead of the broad 3-column text match.
-const CAT_LEVEL_COLUMN = { Department: "department_name", Category: "category_name", Subcategory: "sub_category_name" };
-const catExactCustomers = (column) => `
-  SELECT DISTINCT \`ct.customer_name\` FROM xv3.mart_net_sales
-  WHERE upper(trim(ifNull(${column}, ''))) = upper(trim({cat:String}))
-`;
+const CAT_MATCH = `(
+  arrayAll(w -> positionCaseInsensitive(ifNull(department_name, ''), w) > 0, {catWords:Array(String)})
+  OR arrayAll(w -> positionCaseInsensitive(ifNull(category_name, ''), w) > 0, {catWords:Array(String)})
+  OR arrayAll(w -> positionCaseInsensitive(ifNull(sub_category_name, ''), w) > 0, {catWords:Array(String)})
+)`;
+const CAT_CUSTOMERS = `SELECT DISTINCT \`ct.customer_name\` FROM xv3.mart_net_sales WHERE ${CAT_MATCH}`;
 
 // "furnitures" -> "furniture", "batteries" -> "batter" (matches BATTERY
 // and BATTERIES), "boxes" -> "box", "glasses" -> "glass". Substring match
@@ -119,9 +111,7 @@ export async function handleCaStores(req, res) {
 //   store = customers whose All Store Visited includes it (metrics still
 //           use every purchase, at every store)
 //   cat   = customers who ever bought from a matching department,
-//           category or subcategory (see CAT_CUSTOMERS); with catLevel
-//           (Department|Category|Subcategory) it's an exact name match
-//           at that level — a suggestion picked from the dropdown
+//           category or subcategory (see CAT_MATCH)
 //   q     = name / email / phone contains the text
 //   type  = New (1 purchase, i.e. one invoice, all time) | Returning (2+)
 // Totals and New/Returning counts come back for the same filters minus
@@ -142,9 +132,8 @@ export async function handleCaCustomers(req, res) {
     const dir = req.query.dir === "asc" ? "ASC" : "DESC";
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 5000);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const catColumn = CAT_LEVEL_COLUMN[req.query.catLevel] || "";
-    const catWords = catColumn ? [] : searchStems(cat);
-    const params = { store, cat, catWords, q, type, limit: pageSize, offset: (page - 1) * pageSize };
+    const catWords = searchStems(cat);
+    const params = { store, catWords, q, type, limit: pageSize, offset: (page - 1) * pageSize };
 
     // Narrow to matching customers first so a store/search pick doesn't
     // aggregate the whole customer base; each matching customer's FULL
@@ -153,7 +142,7 @@ export async function handleCaCustomers(req, res) {
       AND ({store:String} = '' OR customer_name IN (
         SELECT DISTINCT customer_name FROM xv3.mart_invoice_items WHERE ${NAMED_WHERE} AND ${STORE_EXPR} = {store:String}
       ))
-      ${catColumn ? `AND customer_name IN (${catExactCustomers(catColumn)})` : `AND (length({catWords:Array(String)}) = 0 OR customer_name IN (${CAT_CUSTOMERS}))`}
+      AND (length({catWords:Array(String)}) = 0 OR customer_name IN (${CAT_CUSTOMERS}))
       AND ({q:String} = '' OR positionCaseInsensitive(customer_name, {q:String}) > 0
         OR positionCaseInsensitive(ifNull(customer_email, ''), {q:String}) > 0
         OR positionCaseInsensitive(ifNull(customer_phone, ''), {q:String}) > 0)
@@ -216,12 +205,8 @@ export async function handleCaCustomers(req, res) {
     // each page row also gets WHAT they bought that matched it: the
     // matching dept › category › subcategory paths, matching item count
     // and sales, and the latest matching item. Same match rule as the
-    // filter itself (exact level when a suggestion was picked, stemmed
-    // 3-column text otherwise), in the same table (mart_net_sales).
-    const catActive = Boolean(catColumn) || catWords.length > 0;
-    const matchWhere = catColumn
-      ? `upper(trim(ifNull(${catColumn}, ''))) = upper(trim({cat:String}))`
-      : `arrayAll(w -> positionCaseInsensitive(concat(ifNull(department_name, ''), ' ', ifNull(category_name, ''), ' ', ifNull(sub_category_name, '')), w) > 0, {catWords:Array(String)})`;
+    // filter itself (CAT_MATCH), in the same table (mart_net_sales).
+    const catActive = catWords.length > 0;
     const matches =
       catActive && names.length
         ? await query(
@@ -233,9 +218,9 @@ export async function handleCaCustomers(req, res) {
               topK(3)(concat(ifNull(department_name, '—'), ' › ', ifNull(category_name, '—'), ' › ', ifNull(sub_category_name, '—'))) AS match_paths,
               uniqExact(concat(ifNull(department_name, ''), '|', ifNull(category_name, ''), '|', ifNull(sub_category_name, ''))) AS match_path_count
             FROM xv3.mart_net_sales
-            WHERE \`ct.customer_name\` IN {names:Array(String)} AND ${matchWhere}
+            WHERE \`ct.customer_name\` IN {names:Array(String)} AND ${CAT_MATCH}
             GROUP BY customer_name`,
-            { names, cat, catWords }
+            { names, catWords }
           )
         : [];
     const matchByName = new Map(matches.map((m) => [m.customer_name, m]));
@@ -246,7 +231,7 @@ export async function handleCaCustomers(req, res) {
     const totalRows = type === "New" ? newCustomers : type === "Returning" ? returningCustomers : toNum(first.total_customers);
 
     return res.status(200).json({
-      meta: { store, cat, catLevel: catColumn ? req.query.catLevel : "", catActive, q, type, page, pageSize },
+      meta: { store, cat, catActive, q, type, page, pageSize },
       totalRows,
       totalCustomers: toNum(first.total_customers),
       newCustomers,
@@ -282,39 +267,5 @@ export async function handleCaCustomers(req, res) {
   } catch (err) {
     console.error("[customer-analytics:customers]", err);
     return res.status(500).json({ error: "Failed to load customers", message: err?.message || "" });
-  }
-}
-
-// Search-bar suggestions — department / category / subcategory names
-// matching what's typed (same stemmed, every-word match as the customer
-// filter), most customers first. `customers` is ClickHouse's approximate
-// uniq() — fine for ranking suggestions, and several times faster than
-// an exact count on every keystroke.
-export async function handleCaCategorySuggest(req, res) {
-  try {
-    const words = searchStems(String(req.query.text || "").slice(0, 80));
-    if (!words.length) return res.status(200).json({ suggestions: [] });
-    const rows = await query(
-      `SELECT level, value, uniq(c) AS customers FROM (
-        SELECT \`ct.customer_name\` AS c,
-          arrayJoin([
-            ('Department', upper(trim(ifNull(department_name, '')))),
-            ('Category', upper(trim(ifNull(category_name, '')))),
-            ('Subcategory', upper(trim(ifNull(sub_category_name, ''))))
-          ]) AS lv,
-          lv.1 AS level, lv.2 AS value
-        FROM xv3.mart_net_sales
-        WHERE positionCaseInsensitive(concat(ifNull(department_name, ''), ' ', ifNull(category_name, ''), ' ', ifNull(sub_category_name, '')), {first:String}) > 0
-      )
-      WHERE value != '' AND arrayAll(w -> positionCaseInsensitive(value, w) > 0, {words:Array(String)})
-      GROUP BY level, value
-      ORDER BY customers DESC, value ASC
-      LIMIT 20`,
-      { words, first: words[0] }
-    );
-    return res.status(200).json({ suggestions: rows.map((r) => ({ level: r.level, value: r.value, customers: toNum(r.customers) })) });
-  } catch (err) {
-    console.error("[customer-analytics:suggest]", err);
-    return res.status(500).json({ error: "Failed to load suggestions", message: err?.message || "" });
   }
 }

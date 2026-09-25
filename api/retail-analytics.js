@@ -10,13 +10,13 @@ import { handleRetailStoreQuadrant } from "./_retail-store-quadrant.js";
 import { handleRetailProductVelocity } from "./_retail-product-velocity.js";
 import { handleRetailNeedsAttention } from "./_retail-needs-attention.js";
 import { handleRetailSalesSegmentBreakdown, handleRetailStoreEngagementBreakdown } from "./_retail-kpi-breakdown.js";
-import { handleCaStores, handleCaCustomers, handleCaCategorySuggest } from "./_customer-analytics.js";
+import { handleCaStores, handleCaCustomers } from "./_customer-analytics.js";
 
 // Retail's own dispatch entrypoint — same report=X pattern as
 // api/hrh-sales-analytics.js, fanning out to _retail-*.js handlers. One
 // dedicated top-level function for the whole module (rather than one per
 // report) since Vercel's Hobby plan caps at 12 serverless functions. The
-// Customer Analytics module (ca* reports) rides on this same function for
+// Marketing module (ca* reports) rides on this same function for
 // the same reason.
 export default async function handler(req, res) {
   if (req.query.report === "salesOverview") return handleRetailSalesOverview(req, res);
@@ -34,6 +34,5 @@ export default async function handler(req, res) {
   if (req.query.report === "storeEngagementBreakdown") return handleRetailStoreEngagementBreakdown(req, res);
   if (req.query.report === "caStores") return handleCaStores(req, res);
   if (req.query.report === "caCustomers") return handleCaCustomers(req, res);
-  if (req.query.report === "caCategorySuggest") return handleCaCategorySuggest(req, res);
   return res.status(400).json({ error: "Unknown report", message: `report=${req.query.report}` });
 }

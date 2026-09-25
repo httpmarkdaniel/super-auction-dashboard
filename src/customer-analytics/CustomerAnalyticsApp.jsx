@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import CategorySearch from "./CategorySearch";
 import "./customer-analytics.css";
 
-// Customer Analytics — layout and styling are a 1:1 port of
+// Marketing dashboard (customer list) — layout and styling are a 1:1 port of
 // public/LIVE DASHBOARD UNIFORM FORMAT.html (sidebar, topbar, alert bar,
 // eyebrow/title/lead, KPI grid, table card with tabs + filter row, detail
 // drawer, toast), rendered with real data from api/_customer-analytics.js
@@ -10,18 +9,11 @@ import "./customer-analytics.css";
 // date filter. The topbar search matches department/category/subcategory;
 // the store dropdown filters on All Store Visited.
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 10;
 const EXPORT_CHUNK = 5000;
 
 function peso(v) {
   return "₱" + Number(v).toLocaleString("en-PH", { maximumFractionDigits: 2 });
-}
-// Billions don't fit the reference's 34px KPI value — shorten those.
-function pesoShort(v) {
-  const n = Number(v || 0);
-  if (Math.abs(n) >= 1e9) return `₱${(n / 1e9).toFixed(2)}B`;
-  if (Math.abs(n) >= 1e8) return `₱${(n / 1e6).toFixed(1)}M`;
-  return peso(Math.round(n));
 }
 function num(v) {
   return Number(v || 0).toLocaleString("en-PH");
@@ -49,6 +41,7 @@ const COLUMNS = [
   { key: "allStores", label: "All Store Visited", cls: "clip" },
   { key: "topStore", label: "Frequent Store Visited", cls: "nowrap" },
   { key: "topSc", label: "Frequent Assisting SC", cls: "nowrap" },
+  { key: "sales", label: "Lifetime Sales", sort: "sales", cls: "nowrap", render: (r) => peso(Math.round(r.sales)) },
   { key: "customerType", label: "Customer Segment", cls: "nowrap", render: (r) => <span className={`status ${typeClass(r.customerType)}`}>{r.customerType}</span> },
 ];
 
@@ -104,7 +97,6 @@ const MATCH_CSV_COLUMNS = [
 const CSV_COLUMNS = [
   ...COLUMNS.map((c) => ({ key: c.key, label: c.label })),
   { key: "visits", label: "Visits" },
-  { key: "sales", label: "Lifetime Sales" },
 ];
 
 async function fetchCa(report, params = {}, signal) {
@@ -140,15 +132,12 @@ function Kpi({ label, value, meta, delta, type, info }) {
   );
 }
 
-export default function CustomerAnalyticsApp() {
+export default function MarketingApp() {
   const [dark, setDark] = useState(false);
   const [stores, setStores] = useState([]);
   const [store, setStore] = useState("");
   const [catInput, setCatInput] = useState("");
   const [cat, setCat] = useState("");
-  // A suggestion picked from the dropdown ({ level, value }) = exact
-  // filter at that level; null = broad text search on `cat`.
-  const [catPick, setCatPick] = useState(null);
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
@@ -173,7 +162,7 @@ export default function CustomerAnalyticsApp() {
   }, []);
 
   useEffect(() => {
-    document.title = "Customer Analytics · HMR Analytics";
+    document.title = "Marketing · HMR Analytics";
     const controller = new AbortController();
     fetchCa("caStores", {}, controller.signal)
       .then((j) => setStores(j.stores))
@@ -202,20 +191,7 @@ export default function CustomerAnalyticsApp() {
     return () => clearTimeout(t);
   }, [qInput]);
 
-  const onCatText = useCallback((t) => {
-    setCatInput(t);
-    setCatPick(null);
-  }, []);
-  const onCatPick = useCallback((item) => {
-    setCatInput(item.value);
-    setCat(item.value);
-    setCatPick(item);
-  }, []);
-  const fetchSuggestions = useCallback((text, signal) => fetchCa("caCategorySuggest", { text }, signal).then((j) => j.suggestions), []);
-
-  const catValue = catPick ? catPick.value : cat;
-  const catLabel = catPick ? `${catPick.level}: ${catPick.value}` : cat;
-  const params = { store, cat: catValue, catLevel: catPick?.level || "", q, type, sort: sort.key, dir: sort.dir };
+  const params = { store, cat, q, type, sort: sort.key, dir: sort.dir };
   // Page belongs to one filter combination — any filter change lands on
   // page 1 without a separate reset render/fetch.
   const filterKey = JSON.stringify(params);
@@ -257,7 +233,7 @@ export default function CustomerAnalyticsApp() {
       }
       const blob = new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");
-      const parts = ["customers", store || "all-stores", catValue, type].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
+      const parts = ["marketing-customers", store || "all-stores", cat, type].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
       a.href = URL.createObjectURL(blob);
       a.download = `${parts}.csv`;
       a.click();
@@ -291,7 +267,7 @@ export default function CustomerAnalyticsApp() {
   const totalPages = data ? Math.max(1, Math.ceil(data.totalRows / PAGE_SIZE)) : 1;
   const storeLabel = store || "All stores";
   const updatedLabel = updated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const scopeText = [store ? `who visited ${store}` : "", catPick ? `who bought from ${catPick.level.toLowerCase()} “${catPick.value}”` : cat ? `who bought “${cat}”` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
+  const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought from a “${cat}” department, category or subcategory` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
 
   return (
     <div className={`ca${dark ? " dark" : ""}`}>
@@ -300,11 +276,11 @@ export default function CustomerAnalyticsApp() {
           <div className="brand">
             <div className="brandmark">👥</div>
             <div>
-              <strong>Customer Analytics</strong>
+              <strong>Marketing</strong>
               <small>HMR Analytics</small>
             </div>
           </div>
-          <div className="nav-title">Customers</div>
+          <div className="nav-title">Marketing</div>
           <nav className="nav">
             <button type="button" className="active">
               <span className="nav-ico">▦</span>Customer List {data && <span className="badge dark">{num(total)}</span>}
@@ -325,19 +301,13 @@ export default function CustomerAnalyticsApp() {
         <main className="main">
           <header className="topbar">
             <div className="top-title">
-              <strong>Customer Analytics</strong>
+              <strong>Marketing</strong>
               <small className="mono">Updated {updatedLabel}</small>
             </div>
-            <CategorySearch
-              ref={searchRef}
-              variant="top"
-              text={catInput}
-              onText={onCatText}
-              pick={catPick}
-              onPick={onCatPick}
-              fetchSuggestions={fetchSuggestions}
-              placeholder="Search department, category, subcategory"
-            />
+            <label className="search">
+              ⌕ <input ref={searchRef} value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="Search department, category, subcategory" />
+              <span className="key">Ctrl K</span>
+            </label>
             <span className="control hide-sm">▣ All time</span>
             <select className="control" value={store} onChange={(e) => setStore(e.target.value)} title="Filter by All Store Visited">
               <option value="">⌂ All stores</option>
@@ -380,16 +350,16 @@ export default function CustomerAnalyticsApp() {
             <div className="alert-item">
               <strong>● {storeLabel}</strong> store filter
             </div>
-            {catLabel && (
+            {cat && (
               <div className="alert-item">
-                <strong style={{ color: "#b27000" }}>● {catLabel}</strong> {catPick ? "exact match" : "department / category / subcategory"}
+                <strong style={{ color: "#b27000" }}>● {cat}</strong> department / category / subcategory
               </div>
             )}
           </div>
 
           <div className="workspace">
             <div className="eyebrow">All time · {storeLabel}</div>
-            <h1 className="page-title">Customers</h1>
+            <h1 className="page-title">Marketing</h1>
             <p className="lead">
               <b>{data ? num(total) : "…"}</b> registered customers{scopeText ? ` ${scopeText}` : ""}. {num(returning)} returning and {num(newC)} new, across every purchase since
               records began.
@@ -398,19 +368,17 @@ export default function CustomerAnalyticsApp() {
               <span className="control">▣ All time</span>
               <span className="control">⌂ {storeLabel}</span>
               <span className="live">Live data</span>
-              {catLabel && <span className="status st-amber">⌕ {catLabel}</span>}
+              {cat && <span className="status st-amber">⌕ {cat}</span>}
               {error && <span className="status st-red">⚠ {error}</span>}
             </div>
 
-            <div className="grid4">
+            <div className="grid4 grid3">
               <Kpi label="Customers" value={data ? num(total) : "…"} meta="Registered (named) customers · all time" delta={scopeText || "No filters applied"}
                 info="Distinct customer names with at least one non-voided purchase. Walk-in / unnamed sales aren't counted." />
               <Kpi label="Returning Customers" value={data ? num(returning) : "…"} meta="2 or more purchases (invoices)" delta={`${pct(returning, total)} of customers`} type="up"
                 info="Customers with 2+ distinct invoices, all time." />
               <Kpi label="New Customers" value={data ? num(newC) : "…"} meta="Only 1 purchase so far" delta={`${pct(newC, total)} of customers`} type="warn"
                 info="Customers with exactly 1 invoice, all time." />
-              <Kpi label="Lifetime Sales" value={data ? pesoShort(data.totalSales) : "…"} meta={data ? `${peso(Math.round(data.totalSales))} · avg ${total ? peso(Math.round(data.totalSales / total)) : "—"} per customer` : "…"}
-                delta="All time · voided lines excluded" info="Sum of invoice_item_sold_amount for these customers' purchases at every store." />
             </div>
 
             <section className="card section-card">
@@ -444,14 +412,7 @@ export default function CustomerAnalyticsApp() {
                     (shared state) — the box right on the table is the one
                     people reach for first. Name search is separate and
                     labelled as such. */}
-                <CategorySearch
-                  text={catInput}
-                  onText={onCatText}
-                  pick={catPick}
-                  onPick={onCatPick}
-                  fetchSuggestions={fetchSuggestions}
-                  placeholder="⌕ Department, category or subcategory..."
-                />
+                <input value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="⌕ Department, category or subcategory..." />
                 <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Customer name, email or phone..." />
               </div>
 
@@ -558,7 +519,7 @@ export default function CustomerAnalyticsApp() {
             </div>
             {drawer.match && (
               <div className="drawer-card" style={{ marginTop: 10 }}>
-                <small>Why this customer matched “{catLabel}”</small>
+                <small>Why this customer matched “{cat}”</small>
                 <b>
                   {num(drawer.match.items)} matching {drawer.match.items === 1 ? "item" : "items"} · {peso(Math.round(drawer.match.sales))}
                 </b>

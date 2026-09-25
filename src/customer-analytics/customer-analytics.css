@@ -71,23 +71,11 @@
    file itself); minmax(0,1fr) keeps the table scrolling inside its card. */
 .ca .app{grid-template-columns:260px minmax(0,1fr)}
 @media(max-width:860px){.ca .app{grid-template-columns:minmax(0,1fr)}}
-/* Search suggestions dropdown (CategorySearch.jsx) — built from the
-   reference's own tokens (card border/shadow, .status chips, .sub). */
-.ca .suggest-box{position:relative}
-.ca .suggest-top{min-width:270px;max-width:390px;flex:1}.ca .suggest-top .search{max-width:none;min-width:0;width:100%}
-.ca .suggest-row{display:flex;align-items:center;gap:6px}
-.ca .suggest-list{position:absolute;left:0;top:calc(100% + 6px);width:max(100%,420px);max-width:calc(100vw - 24px);max-height:380px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 30px rgba(13,24,45,.14);z-index:40;padding:6px}
-.ca .suggest-hint{color:#8692a6;font-size:11px;padding:6px 8px 8px;border-bottom:1px solid var(--line-2);margin-bottom:4px}.ca .suggest-hint b{color:var(--text);font-weight:700}
-.ca .suggest-empty{color:#8894a8;font-size:12px;padding:12px 10px}
-.ca .suggest-item{width:100%;border:0;background:transparent;color:var(--text);display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;text-align:left}
-.ca .suggest-item.active,.ca .suggest-item:hover{background:var(--panel-2);outline:1px solid var(--line)}
-.ca .suggest-item .status{min-width:92px;text-align:center;flex-shrink:0}
-.ca .suggest-value{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ca .suggest-item .sub{white-space:nowrap}
-.ca .suggest-pick{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}.ca .suggest-pick button{border:0;background:transparent;color:inherit;padding:0;font-weight:800;line-height:1}
-@media(max-width:860px){.ca .suggest-top{order:3;max-width:none;min-width:100%}}
 /* "Why matched" columns (shown during a category search). */
 .ca td.match-cell{max-width:300px;min-width:200px}
 .ca .match-path{font-weight:700;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ca .drawer .match-path{white-space:normal}
 .ca .match-last{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+/* Three KPI cards (reference's grid4 layout, one column fewer). */
+.ca .grid4.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:860px){.ca .grid4.grid3{grid-template-columns:1fr}}
