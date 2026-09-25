@@ -211,14 +211,42 @@ export async function handleCaCustomers(req, res) {
         )
       : [];
     const detailByName = new Map(details.map((d) => [d.customer_name, d]));
-    const rows = light.map((r) => ({ ...r, ...(detailByName.get(r.customer_name) || {}) }));
+
+    // "Why matched" — when a department/category/subcategory search is on,
+    // each page row also gets WHAT they bought that matched it: the
+    // matching dept › category › subcategory paths, matching item count
+    // and sales, and the latest matching item. Same match rule as the
+    // filter itself (exact level when a suggestion was picked, stemmed
+    // 3-column text otherwise), in the same table (mart_net_sales).
+    const catActive = Boolean(catColumn) || catWords.length > 0;
+    const matchWhere = catColumn
+      ? `upper(trim(ifNull(${catColumn}, ''))) = upper(trim({cat:String}))`
+      : `arrayAll(w -> positionCaseInsensitive(concat(ifNull(department_name, ''), ' ', ifNull(category_name, ''), ' ', ifNull(sub_category_name, '')), w) > 0, {catWords:Array(String)})`;
+    const matches =
+      catActive && names.length
+        ? await query(
+            `SELECT \`ct.customer_name\` AS customer_name,
+              count() AS match_items,
+              toFloat64(sum(net_sales_amount)) AS match_sales,
+              argMax(product_name, transaction_date) AS match_last_item,
+              toString(max(transaction_date)) AS match_last_date,
+              topK(3)(concat(ifNull(department_name, '—'), ' › ', ifNull(category_name, '—'), ' › ', ifNull(sub_category_name, '—'))) AS match_paths,
+              uniqExact(concat(ifNull(department_name, ''), '|', ifNull(category_name, ''), '|', ifNull(sub_category_name, ''))) AS match_path_count
+            FROM xv3.mart_net_sales
+            WHERE \`ct.customer_name\` IN {names:Array(String)} AND ${matchWhere}
+            GROUP BY customer_name`,
+            { names, cat, catWords }
+          )
+        : [];
+    const matchByName = new Map(matches.map((m) => [m.customer_name, m]));
+    const rows = light.map((r) => ({ ...r, ...(detailByName.get(r.customer_name) || {}), match: matchByName.get(r.customer_name) || null }));
 
     const newCustomers = toNum(first.new_customers);
     const returningCustomers = toNum(first.returning_customers);
     const totalRows = type === "New" ? newCustomers : type === "Returning" ? returningCustomers : toNum(first.total_customers);
 
     return res.status(200).json({
-      meta: { store, cat, catLevel: catColumn ? req.query.catLevel : "", q, type, page, pageSize },
+      meta: { store, cat, catLevel: catColumn ? req.query.catLevel : "", catActive, q, type, page, pageSize },
       totalRows,
       totalCustomers: toNum(first.total_customers),
       newCustomers,
@@ -239,6 +267,16 @@ export async function handleCaCustomers(req, res) {
         visits: toNum(r.visits),
         sales: toNum(r.sales),
         customerType: r.customer_type,
+        match: r.match
+          ? {
+              items: toNum(r.match.match_items),
+              sales: toNum(r.match.match_sales),
+              lastItem: r.match.match_last_item || "",
+              lastDate: String(r.match.match_last_date || "").slice(0, 10),
+              paths: r.match.match_paths || [],
+              pathCount: toNum(r.match.match_path_count),
+            }
+          : null,
       })),
     });
   } catch (err) {

@@ -52,6 +52,55 @@ const COLUMNS = [
   { key: "customerType", label: "Customer Segment", cls: "nowrap", render: (r) => <span className={`status ${typeClass(r.customerType)}`}>{r.customerType}</span> },
 ];
 
+// "Why matched" columns — shown right after Customer Name only while a
+// department/category/subcategory search is active (row.match from the
+// API): what they bought that put them in this search.
+const MATCH_COLUMNS = [
+  {
+    key: "matchPaths",
+    label: "Matched Dept › Category › Subcategory",
+    cls: "match-cell",
+    render: (r) =>
+      r.match ? (
+        <>
+          <div className="match-path" title={r.match.paths.join("\n")}>
+            {r.match.paths[0]}
+          </div>
+          {r.match.pathCount > 1 && <div className="sub">+{num(r.match.pathCount - 1)} more matching {r.match.pathCount - 1 === 1 ? "subcategory" : "subcategories"}</div>}
+        </>
+      ) : (
+        <span className="sub">—</span>
+      ),
+  },
+  {
+    key: "matchItems",
+    label: "Matched Items",
+    cls: "match-cell",
+    render: (r) =>
+      r.match ? (
+        <>
+          <div className="name">
+            {num(r.match.items)} {r.match.items === 1 ? "item" : "items"}
+          </div>
+          <div className="sub match-last" title={r.match.lastItem}>
+            latest: {r.match.lastItem} · <span className="mono">{r.match.lastDate}</span>
+          </div>
+        </>
+      ) : (
+        <span className="sub">—</span>
+      ),
+  },
+  { key: "matchSales", label: "Matched Sales", cls: "nowrap", render: (r) => (r.match ? peso(Math.round(r.match.sales)) : <span className="sub">—</span>) },
+];
+
+const MATCH_CSV_COLUMNS = [
+  { label: "Matched Dept > Category > Subcategory", get: (r) => (r.match ? r.match.paths.join(" | ") : "") },
+  { label: "Matched Items", get: (r) => (r.match ? r.match.items : "") },
+  { label: "Latest Matched Item", get: (r) => (r.match ? r.match.lastItem : "") },
+  { label: "Latest Matched Date", get: (r) => (r.match ? r.match.lastDate : "") },
+  { label: "Matched Sales", get: (r) => (r.match ? r.match.sales.toFixed(2) : "") },
+];
+
 const CSV_COLUMNS = [
   ...COLUMNS.map((c) => ({ key: c.key, label: c.label })),
   { key: "visits", label: "Visits" },
@@ -198,11 +247,13 @@ export default function CustomerAnalyticsApp() {
     if (!total) return toast("Nothing to export");
     setExporting(true);
     try {
-      const lines = [CSV_COLUMNS.map((c) => csvCell(c.label)).join(",")];
+      const withMatch = Boolean(data?.meta?.catActive);
+      const cols = [...CSV_COLUMNS.map((c) => ({ label: c.label, get: (r) => r[c.key] })), ...(withMatch ? MATCH_CSV_COLUMNS : [])];
+      const lines = [cols.map((c) => csvCell(c.label)).join(",")];
       for (let p = 1; (p - 1) * EXPORT_CHUNK < total; p++) {
         toast(`Exporting ${num(Math.min(p * EXPORT_CHUNK, total))} of ${num(total)}…`);
         const chunk = await fetchCa("caCustomers", { ...params, page: p, pageSize: EXPORT_CHUNK });
-        for (const r of chunk.rows) lines.push(CSV_COLUMNS.map((c) => csvCell(r[c.key])).join(","));
+        for (const r of chunk.rows) lines.push(cols.map((c) => csvCell(c.get(r))).join(","));
       }
       const blob = new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");
@@ -233,6 +284,7 @@ export default function CustomerAnalyticsApp() {
     }
   }
 
+  const tableColumns = data?.meta?.catActive ? [COLUMNS[0], ...MATCH_COLUMNS, ...COLUMNS.slice(1)] : COLUMNS;
   const total = data?.totalCustomers ?? 0;
   const returning = data?.returningCustomers ?? 0;
   const newC = data?.newCustomers ?? 0;
@@ -412,7 +464,7 @@ export default function CustomerAnalyticsApp() {
                     <table className={compact ? "compact" : ""}>
                       <thead>
                         <tr>
-                          {COLUMNS.map((c) => {
+                          {tableColumns.map((c) => {
                             const active = c.sort && sort.key === c.sort;
                             return (
                               <th key={c.key} className={`${c.sort ? "sortable" : ""}${active ? " sorted" : ""}`} onClick={() => onSortHeader(c)}>
@@ -426,7 +478,7 @@ export default function CustomerAnalyticsApp() {
                       <tbody>
                         {data.rows.map((r) => (
                           <tr key={r.customerName} onClick={() => setDrawer(r)}>
-                            {COLUMNS.map((c) => (
+                            {tableColumns.map((c) => (
                               <td key={c.key} className={c.cls} title={c.cls.includes("clip") ? r[c.key] : undefined}>
                                 {c.render ? c.render(r) : r[c.key] || <span className="sub">—</span>}
                               </td>
@@ -504,6 +556,23 @@ export default function CustomerAnalyticsApp() {
                 <b>{drawer.topSc || "—"}</b>
               </div>
             </div>
+            {drawer.match && (
+              <div className="drawer-card" style={{ marginTop: 10 }}>
+                <small>Why this customer matched “{catLabel}”</small>
+                <b>
+                  {num(drawer.match.items)} matching {drawer.match.items === 1 ? "item" : "items"} · {peso(Math.round(drawer.match.sales))}
+                </b>
+                <div className="sub" style={{ marginTop: 6 }}>
+                  Latest: {drawer.match.lastItem} · <span className="mono">{drawer.match.lastDate}</span>
+                </div>
+                {drawer.match.paths.map((path) => (
+                  <div key={path} className="match-path" style={{ marginTop: 6 }}>
+                    {path}
+                  </div>
+                ))}
+                {drawer.match.pathCount > drawer.match.paths.length && <div className="sub">+{num(drawer.match.pathCount - drawer.match.paths.length)} more</div>}
+              </div>
+            )}
             <div className="drawer-card" style={{ marginTop: 10 }}>
               <small>Last Item Bought</small>
               <b>{drawer.lastItem || "—"}</b>

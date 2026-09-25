@@ -86,3 +86,8 @@
 .ca .suggest-item .sub{white-space:nowrap}
 .ca .suggest-pick{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0}.ca .suggest-pick button{border:0;background:transparent;color:inherit;padding:0;font-weight:800;line-height:1}
 @media(max-width:860px){.ca .suggest-top{order:3;max-width:none;min-width:100%}}
+/* "Why matched" columns (shown during a category search). */
+.ca td.match-cell{max-width:300px;min-width:200px}
+.ca .match-path{font-weight:700;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ca .drawer .match-path{white-space:normal}
+.ca .match-last{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
