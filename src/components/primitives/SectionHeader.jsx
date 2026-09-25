@@ -5,7 +5,7 @@
 export default function SectionHeader({ title, insight }) {
   return (
     <div className="mb-3.5">
-      <h2 className="text-[18px] leading-tight font-extrabold text-ink tracking-[-0.2px]">{title}</h2>
+      <h2 className="text-[18px] leading-tight font-bold text-ink">{title}</h2>
       {insight && <p className="text-[12.5px] mt-1" style={{ color: "#8692a6" }}>{insight}</p>}
     </div>
   );

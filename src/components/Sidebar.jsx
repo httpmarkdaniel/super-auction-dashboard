@@ -1,3 +1,5 @@
+import logo from "../assets/auctions-logo.png";
+
 // Auction sidebar — "LIVE DASHBOARD UNIFORM FORMAT" layout (see
 // src/uniform.css): brand block, uppercase group titles, glyph + label nav
 // items with the reference's outlined active state, count badge, and the
@@ -68,11 +70,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose, 
             onClose();
           }}
         >
-          <div className="uf-brandmark">🔨</div>
-          <div>
-            <strong>HMR Auctions</strong>
-            <small>Auction Dashboard</small>
-          </div>
+          <img src={logo} alt="HMR Auctions" className="uf-brand-logo" />
         </button>
 
         {GROUPS.map((g) => (

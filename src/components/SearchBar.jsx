@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 const STATUS_DOT = {
   Sold: "bg-good",
@@ -11,18 +11,6 @@ const STATUS_DOT = {
 export default function SearchBar({ pool }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    function onKey(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -41,17 +29,16 @@ export default function SearchBar({ pool }) {
 
   return (
     <div className="uf-search-wrap relative">
-      {/* Reference .search pill (src/uniform.css); Ctrl/⌘ K focuses it. */}
+      {/* Reference .search pill (src/uniform.css). */}
       <label className="uf-search">
         ⌕
         <input
-          ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 120)}
-          placeholder="Search orders, lots, vendors"
+          placeholder="Search orders, lots, vendors…"
         />
         <span className="uf-key hidden sm:inline">Ctrl K</span>
       </label>

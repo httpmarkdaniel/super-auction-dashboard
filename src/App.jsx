@@ -1517,7 +1517,7 @@ function OverviewTab({
 const TITLES = {
   Overview: "Overview",
   "Operational Flags": "Operational Flags",
-  "Online Bidding": "Active Auctions",
+  "Online Bidding": "Online Bidding",
   "Upcoming Auctions": "Upcoming Auctions",
   Trends: "Yearly Trends",
   "Auction Types": "Sale Channels",

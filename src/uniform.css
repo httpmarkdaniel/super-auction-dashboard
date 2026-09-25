@@ -8,8 +8,14 @@
    rules under it normalise the dashboard's existing content (cards,
    headings, tables) to the same reference look. */
 
+/* Font: the reference's own stack, WITHOUT the Inter webfont the app loads
+   from Google Fonts — the reference file never loads Inter, so on a
+   Windows PC without Inter installed it renders in Segoe UI. Matching that
+   means leaving Inter out entirely (it's first in the stack and always
+   available here via the webfont). */
 .uf-root {
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --uf-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  font-family: var(--uf-font);
   font-size: 14px;
   color: var(--text-primary);
   background: var(--page-plane);
@@ -162,7 +168,7 @@
   z-index: 20;
 }
 .uf-top-title {
-  min-width: 220px;
+  flex-shrink: 0;
   line-height: 1.25;
 }
 .uf-top-title strong {
@@ -318,7 +324,7 @@ button.uf-alert-item:hover:not(.hot) {
   font-size: 28px;
   margin: 0 0 6px;
   letter-spacing: -0.5px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
 }
 .uf-lead {
@@ -404,8 +410,15 @@ button.uf-alert-item:hover:not(.hot) {
   border-radius: 10px;
   border-color: var(--gridline);
 }
+.uf-root .font-sans,
+.uf-root input,
+.uf-root select,
+.uf-root button,
+.uf-root textarea {
+  font-family: var(--uf-font);
+}
 .uf-root .font-display {
-  font-family: Inter, ui-sans-serif, -apple-system, "Segoe UI", Arial, sans-serif;
+  font-family: var(--uf-font);
   font-weight: 850;
   letter-spacing: -0.02em;
 }
@@ -425,7 +438,7 @@ button.uf-alert-item:hover:not(.hot) {
   background: rgba(31, 111, 178, 0.035);
 }
 .uf-search-wrap {
-  min-width: 270px;
+  min-width: 170px;
   max-width: 390px;
   flex: 1;
 }
@@ -458,16 +471,14 @@ button.uf-alert-item:hover:not(.hot) {
   border-radius: 10px;
   box-shadow: var(--shadow-card);
 }
-/* The Auction topbar carries more controls than the reference (date +
-   store + export + refresh + theme + user + sign-out), so the user pill
-   drops out earlier than the reference's 1200px to keep everything on one
-   line. */
-@media (max-width: 1600px) {
-  .uf-userpill {
-    display: none;
-  }
-}
 .uf-topbar select.uf-control {
   max-width: 170px;
   text-overflow: ellipsis;
+}
+.uf-brand-logo {
+  width: 100%;
+  max-width: 170px;
+  height: auto;
+  object-fit: contain;
+  display: block;
 }
