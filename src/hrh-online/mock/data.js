@@ -139,18 +139,6 @@ export const customerAnalytics = {
 };
 
 // ---------------------------------------------------------------------
-// Operational Flags — illustrative categories only, not real HMR issues.
-// ---------------------------------------------------------------------
-export const operationalFlags = [
-  { id: "of1", severity: "critical", area: "Product Publishing", flag: "Unposted items aging past SLA", affectedCount: 214, ageDays: 12 },
-  { id: "of2", severity: "warning", area: "Fulfillment", flag: "Pending picks over 24h", affectedCount: 88, ageDays: 2 },
-  { id: "of3", severity: "warning", area: "Orders", flag: "Orders stuck in Pending payment", affectedCount: 63, ageDays: 5 },
-  { id: "of4", severity: "critical", area: "Inventory", flag: "Non-moving SKUs with no markdown", affectedCount: 340, ageDays: 30 },
-  { id: "of5", severity: "warning", area: "Cancellations", flag: "Cancellation rate above baseline (TikTok)", affectedCount: 268, ageDays: 7 },
-  { id: "of6", severity: "good", area: "Returns", flag: "Returns awaiting inspection", affectedCount: 19, ageDays: 1 },
-];
-
-// ---------------------------------------------------------------------
 // Product Analytics — weekly product sales-performance view (HMR Mart
 // Product Analytics carry-over). Keyed by the same channel selector values
 // as CHANNEL_OPTIONS. Pending the real ClickHouse contract (mart_net_sales

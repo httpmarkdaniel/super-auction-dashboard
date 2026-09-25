@@ -52,7 +52,7 @@ const PAGE_META = {
   campaignCalendar: { title: "Interactive Calendar", lead: "HRH Online campaign schedule across HMR Online, Shopee and TikTok." },
   markdown: { title: "Markdown Analytics", lead: "Marked-down products and how they sell." },
   customerSuccess: { title: "Customer Success", lead: "Customer service and satisfaction." },
-  [OPERATIONAL_FLAGS_KEY]: { title: "Operational Flags", lead: "Data and process exceptions that need someone to look at them.", eyebrow: "Monitoring" },
+  [OPERATIONAL_FLAGS_KEY]: { title: "Operational Flags", lead: "Live checks on orders, fulfillment, cancellations, returns, inventory, publishing and customer inquiries.", eyebrow: "Monitoring" },
 };
 const GROUP_BY_KEY = Object.fromEntries(NAV_GROUPS.flatMap((g) => g.items.map((it) => [it.key, g.label])));
 
@@ -77,7 +77,7 @@ export default function HrhOnlineApp() {
   const filters = { channel, dateRange };
   const meta = PAGE_META[page] || { title: page, lead: "" };
   const eyebrow = meta.eyebrow || GROUP_BY_KEY[page] || "HRH Online";
-  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar";
+  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar" || page === OPERATIONAL_FLAGS_KEY;
   const hideDateRange = page === "campaignCalendar";
 
   return (
@@ -103,7 +103,7 @@ export default function HrhOnlineApp() {
               {!hideChannelFilter && <span className="uf-control">◈ {channel}</span>}
             </div>
           )}
-          <Page filters={filters} />
+          <Page filters={filters} onNavigate={setPage} />
         </main>
       </div>
     </div>
