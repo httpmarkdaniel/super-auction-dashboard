@@ -5,6 +5,7 @@ import HomePage from "./pages/HomePage.jsx";
 import ComingSoonPage from "./pages/ComingSoonPage.jsx";
 import HrhOnlineApp from "./hrh-online/HrhOnlineApp.jsx";
 import RetailApp from "./retail/RetailApp.jsx";
+import CustomerAnalyticsApp from "./customer-analytics/CustomerAnalyticsApp.jsx";
 import { MODULES } from "./platform/modules.js";
 import "./index.css";
 
@@ -30,6 +31,10 @@ function resolvePage(pathname) {
 
   if (matchesRoute(pathname, "/retail")) {
     return <RetailApp />;
+  }
+
+  if (matchesRoute(pathname, "/customer-analytics")) {
+    return <CustomerAnalyticsApp />;
   }
 
   const comingSoonModule = MODULES.find(
