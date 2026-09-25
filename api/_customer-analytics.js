@@ -34,12 +34,35 @@ const NAMED_WHERE = `
   AND lower(trim(customer_name)) NOT IN ('n/a', 'na', 'walk', 'none')
 `;
 
-// Department / category / subcategory text match for the search bar.
-const CAT_MATCH = `(
-  positionCaseInsensitive(ifNull(department_name, ''), {cat:String}) > 0
-  OR positionCaseInsensitive(ifNull(category_name, ''), {cat:String}) > 0
-  OR positionCaseInsensitive(ifNull(sub_category_name, ''), {cat:String}) > 0
-)`;
+// Search bar: customers who ever bought from a department, category or
+// subcategory matching the text — scanned in xv3.mart_net_sales (its
+// customer column is literally named `ct.customer_name`). Every search
+// word must appear in one of the three names; words are stemmed to a
+// plural-tolerant prefix (see searchStems) so "furnitures" still matches
+// FURNITURE.
+const CAT_CUSTOMERS = `
+  SELECT DISTINCT \`ct.customer_name\` FROM xv3.mart_net_sales
+  WHERE arrayAll(w -> positionCaseInsensitive(
+    concat(ifNull(department_name, ''), ' ', ifNull(category_name, ''), ' ', ifNull(sub_category_name, '')), w) > 0,
+    {catWords:Array(String)})
+`;
+
+// "furnitures" -> "furniture", "batteries" -> "batter" (matches BATTERY
+// and BATTERIES), "boxes" -> "box", "glasses" -> "glass". Substring match
+// on the stem, so singular and plural both hit.
+function searchStems(text) {
+  return String(text)
+    .toLowerCase()
+    .split(/[^a-z0-9&']+/)
+    .filter(Boolean)
+    .map((w) => {
+      if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3);
+      if (w.length > 4 && /(ses|xes|zes|ches|shes)$/.test(w)) return w.slice(0, -2);
+      if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+      return w;
+    })
+    .slice(0, 6);
+}
 
 const SORTS = {
   sales: "sales",
@@ -87,8 +110,8 @@ export async function handleCaStores(req, res) {
 // customers). Filters:
 //   store = customers whose All Store Visited includes it (metrics still
 //           use every purchase, at every store)
-//   cat   = customers who ever bought an item whose department, category
-//           or subcategory contains the text
+//   cat   = customers who ever bought from a matching department,
+//           category or subcategory (see CAT_CUSTOMERS)
 //   q     = name / email / phone contains the text
 //   type  = New (1 purchase, i.e. one invoice, all time) | Returning (2+)
 // Totals and New/Returning counts come back for the same filters minus
@@ -109,7 +132,8 @@ export async function handleCaCustomers(req, res) {
     const dir = req.query.dir === "asc" ? "ASC" : "DESC";
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 5000);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const params = { store, cat, q, type, limit: pageSize, offset: (page - 1) * pageSize };
+    const catWords = searchStems(cat);
+    const params = { store, catWords, q, type, limit: pageSize, offset: (page - 1) * pageSize };
 
     // Narrow to matching customers first so a store/search pick doesn't
     // aggregate the whole customer base; each matching customer's FULL
@@ -118,9 +142,7 @@ export async function handleCaCustomers(req, res) {
       AND ({store:String} = '' OR customer_name IN (
         SELECT DISTINCT customer_name FROM xv3.mart_invoice_items WHERE ${NAMED_WHERE} AND ${STORE_EXPR} = {store:String}
       ))
-      AND ({cat:String} = '' OR customer_name IN (
-        SELECT DISTINCT customer_name FROM xv3.mart_invoice_items WHERE ${NAMED_WHERE} AND ${CAT_MATCH}
-      ))
+      AND (length({catWords:Array(String)}) = 0 OR customer_name IN (${CAT_CUSTOMERS}))
       AND ({q:String} = '' OR positionCaseInsensitive(customer_name, {q:String}) > 0
         OR positionCaseInsensitive(ifNull(customer_email, ''), {q:String}) > 0
         OR positionCaseInsensitive(ifNull(customer_phone, ''), {q:String}) > 0)
