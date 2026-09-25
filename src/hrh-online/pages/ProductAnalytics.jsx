@@ -373,9 +373,6 @@ export default function ProductAnalytics({ filters }) {
   return (
     <div>
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Product Analytics
-        </div>
         {subTab === "overview" && (
           <div className="flex items-center gap-3">
             {data?.meta && (

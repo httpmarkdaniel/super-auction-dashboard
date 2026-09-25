@@ -22,9 +22,6 @@ export default function OperationalFlags() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Operational Flags
-        </div>
         <DemoBadge text="Illustrative — not real HMR issues" />
       </div>
 

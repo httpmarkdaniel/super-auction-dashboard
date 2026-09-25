@@ -310,12 +310,6 @@ export default function CampaignCalendar() {
   return (
     <div>
       <div className="print:hidden">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink }}>
-          Interactive Calendar
-        </div>
-        <p className="text-[12px] mt-1 mb-4" style={{ color: hrh.muted }}>
-          HRH Online campaign schedule across HMR Online, Shopee and TikTok.
-        </p>
       </div>
 
       {/* Toolbar */}

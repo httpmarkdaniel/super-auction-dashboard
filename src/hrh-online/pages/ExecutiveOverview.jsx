@@ -325,12 +325,6 @@ export default function ExecutiveOverview({ filters }) {
     <div>
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] items-center gap-4 mb-4">
         <div>
-          <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-            Sales Overview
-          </div>
-          <p className="text-[12px] mt-0.5" style={{ color: "#5b6573" }}>
-            Key performance metrics and trends for HRH Online
-          </p>
         </div>
         {/* "Compare to" drives every change figure on this page, so it sits
             front and center rather than tucked in a corner. */}

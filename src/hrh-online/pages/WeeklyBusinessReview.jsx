@@ -375,12 +375,6 @@ export default function WeeklyBusinessReview({ filters }) {
 
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink }}>
-        Weekly Business Review
-      </div>
-      <p className="text-[12px] mt-1 mb-4" style={{ color: hrh.muted }}>
-        Platform and SKU performance summary for the selected period.
-      </p>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
       {ready && loading && !data && <LoadingState label="Loading Weekly Business Review…" />}

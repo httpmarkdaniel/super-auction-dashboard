@@ -2,35 +2,37 @@
 // light/dark theme toggle (this module has its own dark-navy-chrome /
 // light-canvas identity, always on, per the Phase 2 design brief).
 export const hrh = {
-  navy: "#0f1622",
+  // "LIVE DASHBOARD UNIFORM FORMAT" palette (2026-09-25 restyle — see
+  // src/uniform.css); same keys as before so every page picks it up.
+  navy: "#0b1936",
   navySoft: "#16202f",
   navyBorder: "#2b303a",
   navyAccentRow: "#22304f",
-  // Same orange as the Auction dashboard's brand accent (src/theme.css's
-  // --series-8, light mode) — HRH Online has its own fixed palette (not the
-  // Auction side's light/dark toggle), but the two dashboards' orange
-  // should read as the same HMR brand color.
+  // HMR orange — kept as-is: it's a chart/data colour across the pages
+  // (e.g. Units Sold bars, rate lines), so changing it would change what
+  // the charts show. Selection states use the uniform format's navy
+  // directly (see DateRangePicker/ChannelPills/SubTabNav).
   accent: "#eb6834",
   accentSoft: "#fdece2",
   accentText: "#b8481d",
-  // HMR's brand blue — the third color in the white/orange/blue triad the
-  // filter bar (and Sales Analytics' Order Value bar/area) sticks to.
-  blue: "#3f79d1",
-  blueSoft: "#e8f0fb",
-  blueText: "#2a5da3",
-  bg: "#f4f6fa",
+  blue: "#1f6fb2",
+  blueSoft: "#e9f3fb",
+  blueText: "#1769a5",
+  bg: "#f5f7fb",
   surface: "#ffffff",
-  border: "#e7eaf0",
-  ink: "#111827",
-  ink2: "#5b6573",
-  muted: "#94a0ae",
-  good: "#0ca30c",
-  bad: "#d03b3b",
+  surface2: "#f9fbfe",
+  border: "#dfe5ee",
+  border2: "#e9edf3",
+  ink: "#0b1530",
+  ink2: "#617089",
+  muted: "#73809a",
+  good: "#15803d",
+  bad: "#d62d2d",
   series: ["#22304f", "#d99a3d", "#1baf7a", "#4a3aa7", "#e34948"],
 };
 
 export const SEVERITY_COLORS = {
-  critical: { bg: "#faeaea", text: "#c42b2b" },
-  warning: { bg: "#faf1df", text: "#b07514" },
-  good: { bg: "#e6f4ea", text: "#1e7b34" },
+  critical: { bg: "#fdeaea", text: "#d62d2d" },
+  warning: { bg: "#fff3d9", text: "#a66900" },
+  good: { bg: "#e8f6ed", text: "#15803d" },
 };

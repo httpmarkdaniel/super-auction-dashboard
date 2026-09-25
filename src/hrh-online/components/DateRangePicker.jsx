@@ -2,16 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { RANGE_PRESETS, resolveDateRange } from "../dateRange";
 import { hrh } from "../theme";
 
-const FILTER_FONT = { fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.04em" };
 
 // Same button+popover interaction as the Auction Dashboard's DateRangePicker
 // (src/components/Topbar.jsx), but its OWN forked ../dateRange.js preset/
 // comparison logic (not the shared ../../utils/dateRange.js) — HRH Online
 // has 3 extra presets (Previous Week/Month/Year) that Auction's own date
 // picker doesn't and shouldn't get, so this is a deliberate fork, not an
-// accidental divergence. Restyled with HRH Online's own fixed dark-navy
-// palette (this module has its own chrome, independent of Auction's
-// light/dark theme toggle; see theme.js). `value` is either a preset key
+// accidental divergence. Button styled as the uniform format's topbar
+// .control (src/uniform.css). `value` is either a preset key
 // ("wtd"/"mtd"/"ytd"/"prevWeek"/"prevMonth"/"prevYear") or
 // { key: "custom", from, to }.
 export default function DateRangePicker({ value, onChange }) {
@@ -48,32 +46,8 @@ export default function DateRangePicker({ value, onChange }) {
 
   return (
     <div className="relative shrink-0" ref={containerRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 text-[17px] px-5 h-11 rounded-md whitespace-nowrap transition-all duration-150 hover:scale-[1.03]"
-        style={
-          open
-            ? { ...FILTER_FONT, background: hrh.accentSoft, color: hrh.accentText, border: `1px solid ${hrh.accent}`, boxShadow: "0 2px 10px rgba(235,104,52,0.25)" }
-            : { ...FILTER_FONT, background: hrh.surface, color: hrh.ink2, border: `1px solid ${hrh.border}` }
-        }
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
-        </svg>
-        {current.label}
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          className={`shrink-0 transition-transform duration-150 ${open ? "rotate-180" : ""}`}
-        >
-          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="uf-control">
+        ▣ {current.label}
       </button>
 
       {open && (
@@ -91,11 +65,11 @@ export default function DateRangePicker({ value, onChange }) {
                   onChange(p.key);
                   setOpen(false);
                 }}
-                className="w-full text-left px-4 py-2 text-[16px] transition-colors duration-150"
+                className="w-full text-left px-4 py-2 text-[14px] transition-colors duration-150"
                 style={{
-                  ...FILTER_FONT,
-                  color: selected ? hrh.accentText : hrh.ink,
-                  background: selected ? hrh.accentSoft : "transparent",
+                  color: hrh.ink,
+                  fontWeight: selected ? 650 : 400,
+                  background: selected ? "#edf2fa" : "transparent",
                 }}
               >
                 {p.label}
@@ -132,8 +106,8 @@ export default function DateRangePicker({ value, onChange }) {
               type="button"
               onClick={applyCustom}
               disabled={!draftFrom || !draftTo}
-              className="w-full text-center text-[16px] rounded-md px-2 py-2 disabled:opacity-40 transition-transform duration-150 hover:scale-[1.02]"
-              style={{ ...FILTER_FONT, background: hrh.accent, color: "#ffffff" }}
+              className="w-full text-center text-[14px] rounded-lg px-2 py-2 disabled:opacity-40"
+              style={{ background: "#0e1b39", color: "#ffffff", fontWeight: 650 }}
             >
               Apply
             </button>

@@ -1,7 +1,7 @@
 import { Children } from "react";
 import { hrh } from "../theme";
 
-// Compact executive KPI card — thin orange top accent, room for a future
+// Compact executive KPI card — reference .kpi look (no top accent), room for a future
 // comparison delta and a short contextual label, per the Phase 2 brief.
 // `previousLabel` (an already-formatted string, e.g. formatPeso(previous))
 // renders a "vs {previousLabel}" comparison line at the bottom of the card
@@ -14,19 +14,21 @@ export function KpiCard({ label, value, delta, sub, previousLabel, icon }) {
   const hasDelta = delta !== null && delta !== undefined;
   const positive = hasDelta && delta >= 0;
   return (
-    <div className="relative overflow-hidden rounded-md p-3.5" style={{ background: hrh.surface, border: `1px solid ${hrh.border}` }}>
-      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: hrh.accent }} />
-      <div className="flex items-center gap-1.5 mb-1.5">
+    <div
+      className="card relative overflow-hidden rounded-[10px] px-4 pt-4 pb-3.5"
+      style={{ background: hrh.surface, border: `1px solid ${hrh.border}`, boxShadow: "0 1px 2px rgba(13,24,45,.06),0 8px 24px rgba(13,24,45,.04)" }}
+    >
+      <div className="flex items-center gap-1.5 mb-2.5">
         {icon && (
-          <span className="shrink-0" style={{ color: hrh.accent }}>
+          <span className="shrink-0" style={{ color: "#95a0b3" }}>
             {icon}
           </span>
         )}
-        <div className="text-[11px] uppercase tracking-[0.06em] font-semibold" style={{ color: hrh.ink2 }}>
+        <div className="text-[12px] font-extrabold tracking-[0.3px]" style={{ color: "#95a0b3" }}>
           {label}
         </div>
       </div>
-      <div className="font-display text-[22px] leading-none tabular-nums" style={{ color: hrh.ink }}>
+      <div className="text-[26px] font-extrabold leading-none tabular-nums tracking-[-0.5px]" style={{ color: hrh.ink }}>
         {value}
       </div>
       {(hasDelta || sub) && (

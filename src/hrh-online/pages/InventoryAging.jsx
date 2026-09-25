@@ -103,9 +103,6 @@ export default function InventoryAging() {
 
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Inventory Aging
-      </div>
 
       {loading && !data && <LoadingState label="Loading Inventory Aging…" />}
       {error && <ErrorState label={`Couldn't load Inventory Aging: ${error}`} />}

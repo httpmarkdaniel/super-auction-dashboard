@@ -61,12 +61,12 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-[13px] border-collapse">
           <thead>
-            <tr style={{ background: hrh.navy }}>
+            <tr style={{ background: hrh.surface2 }}>
               {columns.map((c, i) => (
                 <th
                   key={c.key}
-                  className="text-left px-3 py-2 font-semibold text-white whitespace-nowrap text-[10.5px] uppercase tracking-[0.04em] first:rounded-l-sm last:rounded-r-sm"
-                  style={{ ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, hrh.navy) }}
+                  className="text-left px-3 py-2.5 font-bold whitespace-nowrap text-[11px] uppercase tracking-[0.7px]"
+                  style={{ color: "#8792a5", borderBottom: `1px solid ${hrh.border}`, ...(c.maxWidth ? { maxWidth: c.maxWidth } : null), ...stickyStyle(i, hrh.surface2) }}
                 >
                   {c.label}
                 </th>
@@ -77,7 +77,7 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
             {visibleRows.map((r, i) => (
               <tr
                 key={r.id ?? i}
-                style={{ borderBottom: `1px solid ${hrh.border}`, cursor: onRowClick ? "pointer" : undefined }}
+                style={{ borderBottom: `1px solid ${hrh.border2}`, cursor: onRowClick ? "pointer" : undefined }}
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={onRowClick ? "hover:bg-black/[0.03]" : undefined}
               >

@@ -355,9 +355,6 @@ export default function ReturnsAndCancellation({ filters }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="text-[13px] font-semibold uppercase tracking-[0.05em]" style={{ color: "#111827" }}>
-          Returns and Cancellation
-        </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>

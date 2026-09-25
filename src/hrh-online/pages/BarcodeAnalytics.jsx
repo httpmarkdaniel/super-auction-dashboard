@@ -310,9 +310,6 @@ export default function BarcodeAnalytics({ filters }) {
 
   return (
     <div>
-      <div className="text-[13px] font-semibold uppercase tracking-[0.05em] mb-4" style={{ color: "#111827" }}>
-        Stocks
-      </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
       {ready && loading && !data && <LoadingState label="Loading Stocks…" />}
