@@ -493,3 +493,13 @@ button.uf-alert-item:hover:not(.hot) {
 .uf-sidebar * {
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
+/* Alert strip fills the full width: items share the row instead of
+   leaving an empty stretch on the right; still scrolls sideways on
+   narrow screens rather than wrapping. */
+.uf-alertbar .uf-alert-item {
+  flex: 1 0 auto;
+  text-align: center;
+}
+.uf-alertbar .uf-alert-item:last-child {
+  border-right: 0;
+}
