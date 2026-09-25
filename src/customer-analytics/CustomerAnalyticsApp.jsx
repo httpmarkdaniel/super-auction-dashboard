@@ -155,7 +155,6 @@ function Kpi({ label, value, meta, delta, type, info }) {
 }
 
 export default function MarketingApp() {
-  const [dark, setDark] = useState(false);
   const [stores, setStores] = useState([]);
   const [store, setStore] = useState("");
   const [catInput, setCatInput] = useState("");
@@ -302,7 +301,7 @@ export default function MarketingApp() {
   const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought from a “${cat}” department, category or subcategory` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
 
   return (
-    <div className={`ca${dark ? " dark" : ""}`}>
+    <div className="ca">
       <div className="app">
         <aside className="sidebar">
           <div className="brand">
@@ -355,17 +354,6 @@ export default function MarketingApp() {
             </button>
             <button type="button" className="icon-btn" title="Refresh" onClick={refresh}>
               ↻
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title="Toggle theme"
-              onClick={() => {
-                setDark((d) => !d);
-                toast(dark ? "Light mode on" : "Dark mode on");
-              }}
-            >
-              ◔
             </button>
           </header>
 

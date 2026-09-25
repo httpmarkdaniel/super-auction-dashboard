@@ -1,6 +1,7 @@
 /* 1:1 port of public/LIVE DASHBOARD UNIFORM FORMAT.html's stylesheet,
    scoped under .ca (the module root) so it can't leak into the other
-   dashboards. `html,body` rules live on .ca itself; `body.dark` is .ca.dark.
+   dashboards. `html,body` rules live on .ca itself. Light only (the
+   reference's dark theme is not ported).
    Additions beyond the reference are at the bottom, marked. */
 .ca{
   --bg:#f5f7fb; --panel:#ffffff; --panel-2:#f9fbfe; --text:#0b1530; --muted:#73809a;
@@ -10,7 +11,6 @@
   margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;font-size:14px;min-height:100vh
 }
 .ca *{box-sizing:border-box}
-.ca.dark{--bg:#0f1724;--panel:#151f2f;--panel-2:#111a28;--text:#edf3fb;--muted:#9aa8bc;--line:#2b3748;--line-2:#243143;--chip:#202b3b;--shadow:none}
 .ca button,.ca input,.ca select{font:inherit}
 .ca button{cursor:pointer}
 .ca .app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
@@ -23,7 +23,6 @@
 .ca .nav button,.ca .nav a{border:0;background:transparent;color:var(--muted);text-align:left;padding:11px 12px;border-radius:8px;display:flex;align-items:center;gap:12px;font-weight:600;text-decoration:none}
 .ca .nav button:hover,.ca .nav a:hover{background:var(--panel-2);color:var(--text)}
 .ca .nav button.active{background:#edf2fa;color:var(--text);outline:2px solid #101827;outline-offset:-2px}
-.ca.dark .nav button.active{background:#1c2a3f;outline-color:#e8eef8}
 .ca .nav-ico{width:18px;text-align:center}.ca .badge{margin-left:auto;background:#eef2f7;color:#6f7f99;border-radius:9px;padding:1px 7px;font-size:11px;font-weight:800}.ca .badge.dark{background:#0e1e3c;color:white}
 .ca .branch-status{margin-top:auto;border-top:1px solid var(--line);padding:14px 16px;display:flex;gap:10px;align-items:center}.ca .dot{width:9px;height:9px;border-radius:50%;background:#169b45;box-shadow:0 0 0 3px #dff3e6;flex-shrink:0}.ca .mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
 .ca .main{min-width:0}
@@ -82,7 +81,6 @@
 /* Segment colours — the reference's .st-* chips plus a purple for
    Reactivated; .seg-text uses the chip's colour as plain text (alert bar). */
 .ca .st-purple{background:#f1ecfd;color:#6d3fd1}
-.ca.dark .st-purple{background:#2a2346;color:#b9a3f5}
 .ca .seg-text{background:transparent!important;padding:0}
 /* Six KPI cards: Customers + the 5 segments, 3 per row. */
 .ca .grid4.grid3 .kpi{min-height:150px}
