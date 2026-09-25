@@ -102,7 +102,7 @@ export default function Sidebar({ active, onChange, onLogoClick, open, onClose, 
         <div className="uf-branch-status">
           <span className="uf-dot pulse-dot" />
           <div className="min-w-0">
-            <strong className="block truncate text-[14px]">{store || "All Stores"}</strong>
+            <div className="truncate text-[14px]">{store || "All Stores"}</div>
             <div className="uf-sub uf-mono">Synced - Online</div>
           </div>
         </div>
