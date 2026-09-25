@@ -57,7 +57,6 @@
   font-size: 18px;
   display: block;
   font-weight: 700;
-  line-height: 1.2;
 }
 .uf-brand small {
   color: #8a96ac;
@@ -71,7 +70,6 @@
   letter-spacing: 1.2px;
   text-transform: uppercase;
   padding: 20px 16px 8px;
-  font-weight: 600;
 }
 .uf-nav {
   display: grid;
@@ -169,7 +167,6 @@
 }
 .uf-top-title {
   flex-shrink: 0;
-  line-height: 1.25;
 }
 .uf-top-title strong {
   font-size: 17px;
@@ -178,7 +175,7 @@
 .uf-top-title small {
   display: block;
   color: #8c98ad;
-  font-size: 12px;
+  font-size: smaller; /* the reference's <small> default: 11.67px at 14px */
 }
 .uf-search {
   min-width: 270px;
@@ -223,7 +220,6 @@
   align-items: center;
   gap: 8px;
   white-space: nowrap;
-  line-height: 1.2;
 }
 .uf-icon-btn {
   width: 40px;
@@ -325,7 +321,6 @@ button.uf-alert-item:hover:not(.hot) {
   margin: 0 0 6px;
   letter-spacing: -0.5px;
   font-weight: 700;
-  line-height: 1.2;
 }
 .uf-lead {
   font-size: 16px;
@@ -481,4 +476,18 @@ button.uf-alert-item:hover:not(.hot) {
   height: auto;
   object-fit: contain;
   display: block;
+}
+/* The reference has no CSS reset, so its shell text uses the browser's
+   normal line-height; Tailwind's preflight sets 1.5 app-wide, which made
+   every sidebar/topbar row taller. Back to normal for the shell only
+   (dashboard content keeps its own spacing). */
+.uf-sidebar,
+.uf-topbar,
+.uf-alertbar,
+.uf-eyebrow,
+.uf-page-title,
+.uf-toolbar-inline,
+.uf-control,
+.uf-icon-btn {
+  line-height: normal;
 }
