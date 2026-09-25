@@ -229,7 +229,7 @@ export default function CustomerAnalyticsApp() {
   const totalPages = data ? Math.max(1, Math.ceil(data.totalRows / PAGE_SIZE)) : 1;
   const storeLabel = store || "All stores";
   const updatedLabel = updated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought “${cat}”` : "", q ? `matching “${q}”` : ""].filter(Boolean).join(", ");
+  const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought “${cat}”` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
 
   return (
     <div className={`ca${dark ? " dark" : ""}`}>
@@ -372,7 +372,12 @@ export default function CustomerAnalyticsApp() {
                 ))}
               </div>
               <div className="filter-row">
-                <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="⌕ Filter by name, email or phone..." />
+                {/* Same department/category/subcategory search as the topbar
+                    (shared state) — the box right on the table is the one
+                    people reach for first. Name search is separate and
+                    labelled as such. */}
+                <input value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="⌕ Department, category or subcategory..." />
+                <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Customer name, email or phone..." />
                 {SORT_PILLS.map((p) => (
                   <button key={p.key} type="button" className={`pill-btn${sort.key === p.key && sort.dir === p.dir ? " active" : ""}`} onClick={() => setSort({ key: p.key, dir: p.dir })}>
                     {p.label}
