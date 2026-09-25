@@ -79,3 +79,20 @@
 /* Three KPI cards (reference's grid4 layout, one column fewer). */
 .ca .grid4.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:860px){.ca .grid4.grid3{grid-template-columns:1fr}}
+/* Segment colours — the reference's .st-* chips plus a purple for
+   Reactivated; .seg-text uses the chip's colour as plain text (alert bar). */
+.ca .st-purple{background:#f1ecfd;color:#6d3fd1}
+.ca.dark .st-purple{background:#2a2346;color:#b9a3f5}
+.ca .seg-text{background:transparent!important;padding:0}
+/* Six KPI cards: Customers + the 5 segments, 3 per row. */
+.ca .grid4.grid3 .kpi{min-height:150px}
+/* Date filter popover (DateFilter.jsx). */
+.ca .datefilter{position:relative}
+.ca .datefilter-card{position:absolute;top:calc(100% + 6px);left:0;z-index:40;padding:12px;width:330px;max-width:calc(100vw - 24px);box-shadow:0 12px 30px rgba(13,24,45,.14)}
+.ca .datefilter-presets{display:flex;flex-wrap:wrap;gap:6px}
+.ca .datefilter-custom{margin-top:12px;padding-top:12px;border-top:1px solid var(--line-2)}.ca .datefilter-custom small{color:#8d99ad;display:block;margin-bottom:6px}
+.ca .datefilter-inputs{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.ca .datefilter-inputs input{padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:var(--panel-2);color:var(--text)}
+.ca .toolbar-inline .datefilter-card{left:0}
+.ca .topbar .datefilter-card{left:auto;right:0}
+.ca .seg-note{margin:12px 16px 0}
+.ca .live{white-space:nowrap}

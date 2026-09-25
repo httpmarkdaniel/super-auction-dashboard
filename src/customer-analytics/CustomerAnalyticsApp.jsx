@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import DateFilter from "./DateFilter";
+import { rangeLabel } from "./period";
 import "./customer-analytics.css";
 
 // Marketing dashboard (customer list) — layout and styling are a 1:1 port of
 // public/LIVE DASHBOARD UNIFORM FORMAT.html (sidebar, topbar, alert bar,
 // eyebrow/title/lead, KPI grid, table card with tabs + filter row, detail
 // drawer, toast), rendered with real data from api/_customer-analytics.js
-// (report=caStores/caCustomers via /api/retail-analytics). All time — no
-// date filter. The topbar search matches department/category/subcategory;
+// (report=caStores/caCustomers via /api/retail-analytics). The date filter
+// (default All time) picks who's listed — customers who bought in the
+// period — and the lifecycle segment is measured at the period's end (see
+// SEGMENTS). The topbar search matches department/category/subcategory;
 // the store dropdown filters on All Store Visited.
 
 const PAGE_SIZE = 10;
@@ -21,8 +25,25 @@ function num(v) {
 function pct(part, whole) {
   return whole ? `${((part / whole) * 100).toFixed(1)}%` : "—";
 }
-function typeClass(t) {
-  return t === "Returning" ? "st-green" : "st-blue";
+// Marketing lifecycle segments — same rules as api/_customer-analytics.js
+// SEGMENT_KEYS, with M = the month the selected period ends in and M-1 /
+// M-2 the two months before it. `cond` builds the rule with real month
+// names for the cards.
+const SEGMENTS = [
+  { key: "New", cls: "st-blue", goal: "Welcome & Onboard", cond: (m) => `First purchase ever is in ${m[0]}` },
+  { key: "Retained", cls: "st-green", goal: "Reward Loyalty", cond: (m) => `Purchased in ${m[0]} AND (in ${m[1]} or ${m[2]})` },
+  { key: "Reactivated", cls: "st-purple", goal: "Understand Return Driver", cond: (m) => `Purchased in ${m[0]} but zero sales in ${m[1]} and ${m[2]}` },
+  { key: "Slipped", cls: "st-amber", goal: "Immediate Win-back", cond: (m) => `Zero sales in ${m[0]}, last visit within 60 days` },
+  { key: "Inactive", cls: "st-red", goal: "Re-engagement Campaign", cond: (m) => `Zero sales in ${m[0]}, last visit over 60 days ago` },
+];
+const SEGMENT_BY_KEY = Object.fromEntries(SEGMENTS.map((x) => [x.key, x]));
+function segClass(key) {
+  return SEGMENT_BY_KEY[key]?.cls || "st-blue";
+}
+// ["Sep 2026", "Aug 2026", "Jul 2026"] for an as-of date of 2026-09-xx.
+function segmentMonths(asOf) {
+  const [y, mo] = (asOf || new Date().toISOString().slice(0, 10)).split("-").map(Number);
+  return [0, 1, 2].map((back) => new Date(y, mo - 1 - back, 1).toLocaleDateString("en-PH", { month: "short", year: "numeric" }));
 }
 function csvCell(v) {
   return `"${String(v ?? "").replaceAll('"', '""')}"`;
@@ -41,8 +62,9 @@ const COLUMNS = [
   { key: "allStores", label: "All Store Visited", cls: "clip" },
   { key: "topStore", label: "Frequent Store Visited", cls: "nowrap" },
   { key: "topSc", label: "Frequent Assisting SC", cls: "nowrap" },
-  { key: "sales", label: "Lifetime Sales", sort: "sales", cls: "nowrap", render: (r) => peso(Math.round(r.sales)) },
-  { key: "customerType", label: "Customer Segment", cls: "nowrap", render: (r) => <span className={`status ${typeClass(r.customerType)}`}>{r.customerType}</span> },
+  // Header reads "Sales in Period" once a date filter is on.
+  { key: "sales", label: "Lifetime Sales", periodLabel: "Sales in Period", sort: "sales", cls: "nowrap", render: (r) => peso(Math.round(r.sales)) },
+  { key: "segment", label: "Customer Segment", cls: "nowrap", render: (r) => <span className={`status ${segClass(r.segment)}`}>{r.segment}</span> },
 ];
 
 // "Why matched" columns — shown right after Customer Name only while a
@@ -95,7 +117,7 @@ const MATCH_CSV_COLUMNS = [
 ];
 
 const CSV_COLUMNS = [
-  ...COLUMNS.map((c) => ({ key: c.key, label: c.label })),
+  ...COLUMNS.map((c) => ({ key: c.key, label: c.label, periodLabel: c.periodLabel })),
   { key: "visits", label: "Visits" },
 ];
 
@@ -140,7 +162,8 @@ export default function MarketingApp() {
   const [cat, setCat] = useState("");
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
-  const [type, setType] = useState("");
+  const [segment, setSegment] = useState("");
+  const [period, setPeriod] = useState({ key: "all", from: "", to: "" });
   const [sort, setSort] = useState({ key: "sales", dir: "desc" });
   const [pageInfo, setPageInfo] = useState({ key: "", page: 1 });
   const [compact, setCompact] = useState(false);
@@ -191,7 +214,7 @@ export default function MarketingApp() {
     return () => clearTimeout(t);
   }, [qInput]);
 
-  const params = { store, cat, q, type, sort: sort.key, dir: sort.dir };
+  const params = { from: period.from, to: period.to, store, cat, q, segment, sort: sort.key, dir: sort.dir };
   // Page belongs to one filter combination — any filter change lands on
   // page 1 without a separate reset render/fetch.
   const filterKey = JSON.stringify(params);
@@ -224,7 +247,7 @@ export default function MarketingApp() {
     setExporting(true);
     try {
       const withMatch = Boolean(data?.meta?.catActive);
-      const cols = [...CSV_COLUMNS.map((c) => ({ label: c.label, get: (r) => r[c.key] })), ...(withMatch ? MATCH_CSV_COLUMNS : [])];
+      const cols = [...CSV_COLUMNS.map((c) => ({ label: colLabel(c), get: (r) => r[c.key] })), ...(withMatch ? MATCH_CSV_COLUMNS : [])];
       const lines = [cols.map((c) => csvCell(c.label)).join(",")];
       for (let p = 1; (p - 1) * EXPORT_CHUNK < total; p++) {
         toast(`Exporting ${num(Math.min(p * EXPORT_CHUNK, total))} of ${num(total)}…`);
@@ -233,7 +256,7 @@ export default function MarketingApp() {
       }
       const blob = new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");
-      const parts = ["marketing-customers", store || "all-stores", cat, type].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
+      const parts = ["marketing-customers", period.key === "all" ? "all-time" : `${period.from}_to_${period.to}`, store || "all-stores", cat, segment].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
       a.href = URL.createObjectURL(blob);
       a.download = `${parts}.csv`;
       a.click();
@@ -262,11 +285,20 @@ export default function MarketingApp() {
 
   const tableColumns = data?.meta?.catActive ? [COLUMNS[0], ...MATCH_COLUMNS, ...COLUMNS.slice(1)] : COLUMNS;
   const total = data?.totalCustomers ?? 0;
-  const returning = data?.returningCustomers ?? 0;
-  const newC = data?.newCustomers ?? 0;
+  const segCounts = data?.segments || {};
+  const allTime = period.key === "all";
+  const periodText = rangeLabel(period);
+  const months = segmentMonths(data?.meta?.asOf || period.to);
+  // A period inside one month only lists people who bought that month, so
+  // it can't contain Slipped/Inactive (zero sales in that month) — say so
+  // instead of showing two unexplained zeros.
+  const noLapsed = data && !allTime && !segCounts.Slipped && !segCounts.Inactive;
   const totalPages = data ? Math.max(1, Math.ceil(data.totalRows / PAGE_SIZE)) : 1;
   const storeLabel = store || "All stores";
   const updatedLabel = updated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  function colLabel(c) {
+    return !allTime && c.periodLabel ? c.periodLabel : c.label;
+  }
   const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought from a “${cat}” department, category or subcategory` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
 
   return (
@@ -308,7 +340,7 @@ export default function MarketingApp() {
               ⌕ <input ref={searchRef} value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="Search department, category, subcategory" />
               <span className="key">Ctrl K</span>
             </label>
-            <span className="control hide-sm">▣ All time</span>
+            <DateFilter value={period} onChange={setPeriod} className="hide-sm" />
             <select className="control" value={store} onChange={(e) => setStore(e.target.value)} title="Filter by All Store Visited">
               <option value="">⌂ All stores</option>
               {stores.map((s) => (
@@ -341,12 +373,11 @@ export default function MarketingApp() {
             <div className="alert-item hot">
               <strong>● {data ? num(total) : "…"} customers</strong>
             </div>
-            <div className="alert-item">
-              <strong style={{ color: "#17833b" }}>● {num(returning)}</strong> returning (2+ purchases)
-            </div>
-            <div className="alert-item">
-              <strong style={{ color: "#1f6fb2" }}>● {num(newC)}</strong> new (1 purchase so far)
-            </div>
+            {SEGMENTS.map((x) => (
+              <div key={x.key} className="alert-item">
+                <strong className={`seg-text ${x.cls}`}>● {num(segCounts[x.key])}</strong> {x.key.toLowerCase()}
+              </div>
+            ))}
             <div className="alert-item">
               <strong>● {storeLabel}</strong> store filter
             </div>
@@ -358,14 +389,16 @@ export default function MarketingApp() {
           </div>
 
           <div className="workspace">
-            <div className="eyebrow">All time · {storeLabel}</div>
+            <div className="eyebrow">
+              {periodText} · {storeLabel}
+            </div>
             <h1 className="page-title">Marketing</h1>
             <p className="lead">
-              <b>{data ? num(total) : "…"}</b> registered customers{scopeText ? ` ${scopeText}` : ""}. {num(returning)} returning and {num(newC)} new, across every purchase since
-              records began.
+              <b>{data ? num(total) : "…"}</b> registered customers {allTime ? "since records began" : "who bought in this period"}
+              {scopeText ? `, ${scopeText}` : ""}. Segments are as of <b>{months[0]}</b>, compared with {months[1]} and {months[2]}.
             </p>
             <div className="toolbar-inline">
-              <span className="control">▣ All time</span>
+              <DateFilter value={period} onChange={setPeriod} />
               <span className="control">⌂ {storeLabel}</span>
               <span className="live">Live data</span>
               {cat && <span className="status st-amber">⌕ {cat}</span>}
@@ -373,12 +406,19 @@ export default function MarketingApp() {
             </div>
 
             <div className="grid4 grid3">
-              <Kpi label="Customers" value={data ? num(total) : "…"} meta="Registered (named) customers · all time" delta={scopeText || "No filters applied"}
-                info="Distinct customer names with at least one non-voided purchase. Walk-in / unnamed sales aren't counted." />
-              <Kpi label="Returning Customers" value={data ? num(returning) : "…"} meta="2 or more purchases (invoices)" delta={`${pct(returning, total)} of customers`} type="up"
-                info="Customers with 2+ distinct invoices, all time." />
-              <Kpi label="New Customers" value={data ? num(newC) : "…"} meta="Only 1 purchase so far" delta={`${pct(newC, total)} of customers`} type="warn"
-                info="Customers with exactly 1 invoice, all time." />
+              <Kpi label="Customers" value={data ? num(total) : "…"} meta={allTime ? "Registered (named) customers · all time" : `Bought in ${periodText}`} delta={scopeText || "No filters applied"}
+                info="Distinct customer names with at least one non-voided purchase in the period. Walk-in / unnamed sales aren't counted." />
+              {SEGMENTS.map((x) => (
+                <Kpi
+                  key={x.key}
+                  label={x.key}
+                  value={data ? num(segCounts[x.key]) : "…"}
+                  meta={`${x.cond(months)} · ${pct(segCounts[x.key] || 0, total)} of customers`}
+                  delta={`Goal: ${x.goal}`}
+                  type={x.key === "Retained" || x.key === "New" ? "up" : x.key === "Inactive" ? "down" : "warn"}
+                  info={`${x.key}: ${x.cond(months)}.`}
+                />
+              ))}
             </div>
 
             <section className="card section-card">
@@ -397,16 +437,18 @@ export default function MarketingApp() {
                 </div>
               </div>
               <div className="table-tabs">
-                {[
-                  { key: "", label: "All Customers", count: total },
-                  { key: "Returning", label: "Returning", count: returning },
-                  { key: "New", label: "New", count: newC },
-                ].map((t) => (
-                  <button key={t.key || "all"} type="button" className={type === t.key ? "active" : ""} onClick={() => setType(t.key)}>
+                {[{ key: "", label: "All Customers", count: total }, ...SEGMENTS.map((x) => ({ key: x.key, label: x.key, count: segCounts[x.key] }))].map((t) => (
+                  <button key={t.key || "all"} type="button" className={segment === t.key ? "active" : ""} onClick={() => setSegment(t.key)}>
                     {t.label} {data && <span className="badge">{num(t.count)}</span>}
                   </button>
                 ))}
               </div>
+              {noLapsed && (
+                <div className="callout seg-note">
+                  <strong>No Slipped or Inactive customers here:</strong> both mean zero sales in {months[0]}, but this period only lists people who bought in it. Pick a period that
+                  starts earlier (e.g. <em>Last 3 months</em> or <em>All time</em>) to see them.
+                </div>
+              )}
               <div className="filter-row">
                 {/* Same department/category/subcategory search as the topbar
                     (shared state) — the box right on the table is the one
@@ -416,7 +458,7 @@ export default function MarketingApp() {
                 <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Customer name, email or phone..." />
               </div>
 
-              {loading && !data && <div className="empty">Loading customers… (all time, can take a few seconds)</div>}
+              {loading && !data && <div className="empty">Loading customers… (can take a few seconds)</div>}
               {error && !data && <div className="empty">Couldn't load customers: {error}</div>}
               {data && data.rows.length === 0 && !loading && <div className="empty">No customers match these filters.</div>}
               {data && data.rows.length > 0 && (
@@ -429,7 +471,7 @@ export default function MarketingApp() {
                             const active = c.sort && sort.key === c.sort;
                             return (
                               <th key={c.key} className={`${c.sort ? "sortable" : ""}${active ? " sorted" : ""}`} onClick={() => onSortHeader(c)}>
-                                {c.label}
+                                {colLabel(c)}
                                 {active ? (sort.dir === "desc" ? " ↓" : " ↑") : ""}
                               </th>
                             );
@@ -485,11 +527,14 @@ export default function MarketingApp() {
             </p>
             <div className="drawer-grid">
               <div className="drawer-card">
-                <small>Customer Segment</small>
-                <span className={`status ${typeClass(drawer.customerType)}`}>{drawer.customerType}</span>
+                <small>Customer Segment · as of {months[0]}</small>
+                <span className={`status ${segClass(drawer.segment)}`}>{drawer.segment}</span>
+                <div className="sub" style={{ marginTop: 6 }}>
+                  Goal: {SEGMENT_BY_KEY[drawer.segment]?.goal}
+                </div>
               </div>
               <div className="drawer-card">
-                <small>Lifetime Sales</small>
+                <small>{allTime ? "Lifetime Sales" : "Sales in Period"}</small>
                 <b>{peso(drawer.sales)}</b>
               </div>
               <div className="drawer-card">
