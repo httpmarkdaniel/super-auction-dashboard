@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import CategorySearch from "./CategorySearch";
 import "./customer-analytics.css";
 
 // Customer Analytics — layout and styling are a 1:1 port of
@@ -103,6 +104,9 @@ export default function CustomerAnalyticsApp() {
   const [store, setStore] = useState("");
   const [catInput, setCatInput] = useState("");
   const [cat, setCat] = useState("");
+  // A suggestion picked from the dropdown ({ level, value }) = exact
+  // filter at that level; null = broad text search on `cat`.
+  const [catPick, setCatPick] = useState(null);
   const [qInput, setQInput] = useState("");
   const [q, setQ] = useState("");
   const [type, setType] = useState("");
@@ -156,7 +160,20 @@ export default function CustomerAnalyticsApp() {
     return () => clearTimeout(t);
   }, [qInput]);
 
-  const params = { store, cat, q, type, sort: sort.key, dir: sort.dir };
+  const onCatText = useCallback((t) => {
+    setCatInput(t);
+    setCatPick(null);
+  }, []);
+  const onCatPick = useCallback((item) => {
+    setCatInput(item.value);
+    setCat(item.value);
+    setCatPick(item);
+  }, []);
+  const fetchSuggestions = useCallback((text, signal) => fetchCa("caCategorySuggest", { text }, signal).then((j) => j.suggestions), []);
+
+  const catValue = catPick ? catPick.value : cat;
+  const catLabel = catPick ? `${catPick.level}: ${catPick.value}` : cat;
+  const params = { store, cat: catValue, catLevel: catPick?.level || "", q, type, sort: sort.key, dir: sort.dir };
   // Page belongs to one filter combination — any filter change lands on
   // page 1 without a separate reset render/fetch.
   const filterKey = JSON.stringify(params);
@@ -196,7 +213,7 @@ export default function CustomerAnalyticsApp() {
       }
       const blob = new Blob([`﻿${lines.join("\n")}`], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");
-      const parts = ["customers", store || "all-stores", cat, type].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
+      const parts = ["customers", store || "all-stores", catValue, type].filter(Boolean).join("_").replace(/[^A-Za-z0-9_]+/g, "-");
       a.href = URL.createObjectURL(blob);
       a.download = `${parts}.csv`;
       a.click();
@@ -229,7 +246,7 @@ export default function CustomerAnalyticsApp() {
   const totalPages = data ? Math.max(1, Math.ceil(data.totalRows / PAGE_SIZE)) : 1;
   const storeLabel = store || "All stores";
   const updatedLabel = updated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const scopeText = [store ? `who visited ${store}` : "", cat ? `who bought “${cat}”` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
+  const scopeText = [store ? `who visited ${store}` : "", catPick ? `who bought from ${catPick.level.toLowerCase()} “${catPick.value}”` : cat ? `who bought “${cat}”` : "", q ? `with name/email/phone matching “${q}”` : ""].filter(Boolean).join(", ");
 
   return (
     <div className={`ca${dark ? " dark" : ""}`}>
@@ -266,10 +283,16 @@ export default function CustomerAnalyticsApp() {
               <strong>Customer Analytics</strong>
               <small className="mono">Updated {updatedLabel}</small>
             </div>
-            <label className="search">
-              ⌕ <input ref={searchRef} value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="Search department, category, subcategory" />
-              <span className="key">Ctrl K</span>
-            </label>
+            <CategorySearch
+              ref={searchRef}
+              variant="top"
+              text={catInput}
+              onText={onCatText}
+              pick={catPick}
+              onPick={onCatPick}
+              fetchSuggestions={fetchSuggestions}
+              placeholder="Search department, category, subcategory"
+            />
             <span className="control hide-sm">▣ All time</span>
             <select className="control" value={store} onChange={(e) => setStore(e.target.value)} title="Filter by All Store Visited">
               <option value="">⌂ All stores</option>
@@ -312,9 +335,9 @@ export default function CustomerAnalyticsApp() {
             <div className="alert-item">
               <strong>● {storeLabel}</strong> store filter
             </div>
-            {cat && (
+            {catLabel && (
               <div className="alert-item">
-                <strong style={{ color: "#b27000" }}>● {cat}</strong> department / category / subcategory
+                <strong style={{ color: "#b27000" }}>● {catLabel}</strong> {catPick ? "exact match" : "department / category / subcategory"}
               </div>
             )}
           </div>
@@ -330,7 +353,7 @@ export default function CustomerAnalyticsApp() {
               <span className="control">▣ All time</span>
               <span className="control">⌂ {storeLabel}</span>
               <span className="live">Live data</span>
-              {cat && <span className="status st-amber">⌕ {cat}</span>}
+              {catLabel && <span className="status st-amber">⌕ {catLabel}</span>}
               {error && <span className="status st-red">⚠ {error}</span>}
             </div>
 
@@ -376,7 +399,14 @@ export default function CustomerAnalyticsApp() {
                     (shared state) — the box right on the table is the one
                     people reach for first. Name search is separate and
                     labelled as such. */}
-                <input value={catInput} onChange={(e) => setCatInput(e.target.value)} placeholder="⌕ Department, category or subcategory..." />
+                <CategorySearch
+                  text={catInput}
+                  onText={onCatText}
+                  pick={catPick}
+                  onPick={onCatPick}
+                  fetchSuggestions={fetchSuggestions}
+                  placeholder="⌕ Department, category or subcategory..."
+                />
                 <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Customer name, email or phone..." />
                 {SORT_PILLS.map((p) => (
                   <button key={p.key} type="button" className={`pill-btn${sort.key === p.key && sort.dir === p.dir ? " active" : ""}`} onClick={() => setSort({ key: p.key, dir: p.dir })}>
