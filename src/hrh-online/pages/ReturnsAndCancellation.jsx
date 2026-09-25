@@ -354,7 +354,10 @@ export default function ReturnsAndCancellation({ filters }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+      {/* Compare to — sits top-right of the page, level with the page
+          title, under the topbar's channel buttons (see .uf-compare-slot in
+          src/uniform.css). */}
+      <div className="uf-compare-slot">
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.04em]" style={{ color: hrh.muted }}>

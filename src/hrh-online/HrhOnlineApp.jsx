@@ -93,7 +93,7 @@ export default function HrhOnlineApp() {
           hideDateRange={hideDateRange}
         />
 
-        <main className="flex-1 min-w-0 uf-workspace">
+        <main className="flex-1 min-w-0 uf-workspace relative">
           <div className="uf-eyebrow">{eyebrow}</div>
           <h1 className="uf-page-title">{meta.title}</h1>
           {meta.lead && <p className="uf-lead">{meta.lead}</p>}

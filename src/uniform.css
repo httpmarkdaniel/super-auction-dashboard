@@ -503,3 +503,26 @@ button.uf-alert-item:hover:not(.hot) {
 .uf-alertbar .uf-alert-item:last-child {
   border-right: 0;
 }
+/* Page-level "Compare to" control (HRH Online): top-right of the page,
+   level with the eyebrow/title, directly under the topbar filters. Drops
+   back into the normal flow on narrower screens so it can't overlap the
+   title/lead. The workspace is its positioning parent. */
+.uf-compare-slot {
+  position: absolute;
+  top: 28px;
+  right: 24px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+@media (max-width: 1280px) {
+  .uf-compare-slot {
+    position: static;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  .uf-compare-slot > div {
+    align-items: flex-start;
+  }
+}

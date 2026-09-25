@@ -323,14 +323,13 @@ export default function ExecutiveOverview({ filters }) {
 
   return (
     <div>
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] items-center gap-4 mb-4">
-        <div>
-        </div>
-        {/* "Compare to" drives every change figure on this page, so it sits
-            front and center rather than tucked in a corner. */}
+      {/* "Compare to" drives every change figure on this page — top-right,
+          level with the page title, under the topbar's channel buttons (see
+          .uf-compare-slot in src/uniform.css). */}
+      <div className="uf-compare-slot">
         <div
-          className="justify-self-center flex flex-col items-center gap-1.5 rounded-lg px-4 py-2"
-          style={{ background: hrh.surface, border: `1.5px solid ${hrh.accent}`, boxShadow: "0 2px 8px rgba(235,104,52,.10)" }}
+          className="flex flex-col items-end gap-1.5 rounded-[10px] px-3.5 py-2"
+          style={{ background: hrh.surface, border: `1px solid ${hrh.border}`, boxShadow: "0 1px 2px rgba(13,24,45,.06),0 8px 24px rgba(13,24,45,.04)" }}
         >
           <div className="flex items-center gap-2.5">
             <span className="text-[11.5px] font-bold uppercase tracking-[0.06em]" style={{ color: hrh.ink }}>
@@ -345,7 +344,7 @@ export default function ExecutiveOverview({ filters }) {
                     type="button"
                     onClick={() => setCompareTo(o.key)}
                     className="text-[12.5px] font-bold px-3.5 h-7 transition-colors"
-                    style={active ? { background: hrh.accent, color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
+                    style={active ? { background: "#0e1b39", color: "#fff" } : { background: hrh.surface, color: hrh.ink2 }}
                   >
                     {o.label}
                   </button>
@@ -354,7 +353,7 @@ export default function ExecutiveOverview({ filters }) {
             </div>
           </div>
           {data?.meta?.current && (
-            <span className="text-[11.5px] font-semibold text-center" style={{ color: hrh.ink }}>
+            <span className="text-[11.5px] font-semibold text-right" style={{ color: hrh.ink }}>
               {effectivePeriodLabel(data.meta.current)}
               <span className="font-normal" style={{ color: hrh.ink2 }}>
                 {" "}
@@ -363,7 +362,6 @@ export default function ExecutiveOverview({ filters }) {
             </span>
           )}
         </div>
-        <div className="hidden lg:block" />
       </div>
 
       {!ready && <ErrorState label="Select both a From and To date for the custom range in the Date Range filter above." />}
