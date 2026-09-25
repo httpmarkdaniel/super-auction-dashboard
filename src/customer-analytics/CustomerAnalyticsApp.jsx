@@ -13,13 +13,6 @@ import "./customer-analytics.css";
 const PAGE_SIZE = 50;
 const EXPORT_CHUNK = 5000;
 
-const SORT_PILLS = [
-  { key: "sales", dir: "desc", label: "Top spenders" },
-  { key: "lastVisit", dir: "desc", label: "Most recent visit" },
-  { key: "daysInactive", dir: "desc", label: "Longest inactive" },
-  { key: "visits", dir: "desc", label: "Most visits" },
-];
-
 function peso(v) {
   return "₱" + Number(v).toLocaleString("en-PH", { maximumFractionDigits: 2 });
 }
@@ -408,11 +401,6 @@ export default function CustomerAnalyticsApp() {
                   placeholder="⌕ Department, category or subcategory..."
                 />
                 <input value={qInput} onChange={(e) => setQInput(e.target.value)} placeholder="Customer name, email or phone..." />
-                {SORT_PILLS.map((p) => (
-                  <button key={p.key} type="button" className={`pill-btn${sort.key === p.key && sort.dir === p.dir ? " active" : ""}`} onClick={() => setSort({ key: p.key, dir: p.dir })}>
-                    {p.label}
-                  </button>
-                ))}
               </div>
 
               {loading && !data && <div className="empty">Loading customers… (all time, can take a few seconds)</div>}
