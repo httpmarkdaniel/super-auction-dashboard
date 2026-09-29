@@ -173,7 +173,9 @@ function sortProductRows(rows, sortKey, valueField, stockField) {
   });
 }
 
-function trendCell(trend, pct) {
+function trendCell(fallbackTrend, pct) {
+  // Arrow/colour follow the % itself: any rise = up, any drop = down.
+  const trend = pct === null || pct === undefined ? fallbackTrend : pct > 0 ? "up" : pct < 0 ? "down" : "flat";
   return (
     <span className="font-semibold whitespace-nowrap" style={{ color: TREND_COLOR[trend] || hrh.muted }}>
       {TREND_GLYPH[trend] || "—"} {pct === null || pct === undefined ? "—" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
