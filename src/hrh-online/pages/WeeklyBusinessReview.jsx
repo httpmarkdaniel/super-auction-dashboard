@@ -58,6 +58,17 @@ function insightsKey(dateRange, current) {
   return `wbr-${preset}-${tail}`.toLowerCase().replace(/[^a-z0-9_-]/g, "");
 }
 
+// Manual traffic is keyed by period family + start date (not the preset),
+// so "Previous Month" (Aug) and "Month to Date"'s previous period (Aug)
+// share the same saved numbers — that's what gives MTD its comparison.
+const TRAFFIC_FAMILY = { wtd: "week", prevWeek: "week", mtd: "month", prevMonth: "month", ytd: "year", prevYear: "year" };
+function trafficKeyFor(dateRange, period) {
+  const preset = dateRange && typeof dateRange === "object" ? dateRange.key : dateRange;
+  const family = TRAFFIC_FAMILY[preset];
+  const tail = family ? `${family}-${period.from}` : `custom-${period.from}_${period.to}`;
+  return `wbr-traffic-${tail}`.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
 function formatDateLabel(iso) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-").map(Number);
@@ -427,8 +438,10 @@ export default function WeeklyBusinessReview({ filters }) {
   // Manual TikTok/Shopee traffic, typed in the Traffic column and saved per
   // period (same insights store). Previous period's saved entry gives the
   // comparison. Conversion Rate = Orders / Visitors.
-  const trafficKey = data ? `${insightsKey(dateRange, data.meta.current)}-traffic` : null;
-  const prevTrafficKey = data ? `${insightsKey(dateRange, data.meta.previous)}-traffic` : null;
+  const trafficKey = data ? trafficKeyFor(dateRange, data.meta.current) : null;
+  const prevTrafficKey = data ? trafficKeyFor(dateRange, data.meta.previous) : null;
+  // Entries saved before the key change lived under the preset-based key.
+  const legacyTrafficKey = data ? `${insightsKey(dateRange, data.meta.current)}-traffic` : null;
   const [manual, setManual] = useState({});
   const [manualSaved, setManualSaved] = useState("{}");
   const [prevManual, setPrevManual] = useState({});
@@ -441,13 +454,14 @@ export default function WeeklyBusinessReview({ filters }) {
         .then((r) => r.json())
         .then((j) => (j.text ? JSON.parse(j.text) : {}))
         .catch(() => ({}));
-    Promise.all([get(trafficKey), get(prevTrafficKey)]).then(([cur, prev]) => {
+    Promise.all([get(trafficKey), get(prevTrafficKey), get(legacyTrafficKey)]).then(([cur0, prev, legacy]) => {
+      const cur = Object.keys(cur0).length ? cur0 : legacy;
       setManual(cur);
       setManualSaved(JSON.stringify(cur));
       setPrevManual(prev);
       setManualStatus("");
     });
-  }, [trafficKey, prevTrafficKey]);
+  }, [trafficKey, prevTrafficKey, legacyTrafficKey]);
   const onManualChange = (platform, field, value) => setManual((m) => ({ ...m, [platform]: { ...m[platform], [field]: value } }));
   async function saveManual() {
     setManualStatus("Saving…");
