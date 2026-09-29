@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { hrh } from "../theme";
 import Modal from "../components/Modal";
-import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_MONTHS, withCampaignDefaults } from "../data/campaignCalendar";
+import { HMR_BRANCHES, PLATFORMS, SEASON_MONTHS } from "../data/campaignCalendar";
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
 // campaign calendar) as a dashboard page: month grid with HMR Online /
@@ -142,10 +142,9 @@ function DetailRow({ label, children }) {
 // Display-only day view: every Google Sheet column for that date (all
 // edits happen in the Sheet), plus the read-only Campaign Details,
 // Campaign Schedule and Posting Links of any campaign running that day.
-function DayDetails({ iso, sheetRow, sheetColumns, dayCampaigns, onClose }) {
+function DayDetails({ iso, sheetRow, sheetColumns, onClose }) {
   const dateLabel = parseIso(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const heading = "text-[12px] font-bold uppercase tracking-[0.05em] mt-4 mb-2";
-  const links = dayCampaigns.flatMap((c) => (c.postingLinks || []).filter((l) => l.url).map((l) => ({ ...l, title: c.title })));
   return (
     <Modal open onClose={onClose} wide title={sheetRow?.["Campaign Theme"] || "No sheet entry"} subtitle={dateLabel}>
       <div className={heading} style={{ color: hrh.ink }}>Campaign Calendar (Google Sheet)</div>
@@ -159,48 +158,14 @@ function DayDetails({ iso, sheetRow, sheetColumns, dayCampaigns, onClose }) {
         <div className="text-[12.5px]" style={{ color: hrh.muted }}>No row for this date in the Google Sheet.</div>
       )}
 
-      <div className={heading} style={{ color: hrh.ink }}>Campaign Details</div>
-      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>No platform campaigns on this day.</div>}
-      {dayCampaigns.map((c) => (
-        <div key={c.id} className="mb-2">
-          <DetailRow label="Campaign">{c.title}</DetailRow>
-          <DetailRow label="Platform">{PLATFORMS[c.platform].name}</DetailRow>
-          <DetailRow label="Type">{c.campaignType}</DetailRow>
-          {c.tagline && <DetailRow label="Tagline">{c.tagline}</DetailRow>}
-          {c.description && <DetailRow label="Description">{c.description}</DetailRow>}
-        </div>
-      ))}
-
-      <div className={heading} style={{ color: hrh.ink }}>Campaign Schedule</div>
-      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>—</div>}
-      {dayCampaigns.map((c) => (
-        <DetailRow key={c.id} label={c.title}>
-          {shortDate(c.date)}
-          {endOf(c) !== c.date ? ` – ${shortDate(endOf(c))}` : ""}
-          {c.planningStart ? ` · Planning ${shortDate(c.planningStart)}` : ""}
-          {c.teaserDate ? ` · Teaser ${shortDate(c.teaserDate)}` : ""}
-        </DetailRow>
-      ))}
-
-      <div className={heading} style={{ color: hrh.ink }}>Posting Links</div>
-      {links.length === 0 ? (
-        <div className="text-[12.5px]" style={{ color: hrh.muted }}>No posting links.</div>
-      ) : (
-        links.map((l, i) => (
-          <DetailRow key={i} label={`${l.title}${l.platform ? ` · ${l.platform}` : ""}`}>
-            <a href={l.url} target="_blank" rel="noreferrer" className="underline break-all" style={{ color: hrh.blueText }}>
-              {l.url}
-            </a>
-          </DetailRow>
-        ))
-      )}
     </Modal>
   );
 }
 
 export default function CampaignCalendar() {
   const today = todayIso();
-  const [campaigns] = useState(() => [...CAMPAIGN_EVENTS, ...CONTINUOUS_CAMPAIGNS].map(withCampaignDefaults));
+  // Sheet only — the old hard-coded platform campaigns were removed per request.
+  const campaigns = useMemo(() => [], []);
   const [view, setView] = useState(() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() };
@@ -222,6 +187,7 @@ export default function CampaignCalendar() {
       .catch((e) => setSheetError(e.message));
   }, []);
   const sheetByIso = useMemo(() => Object.fromEntries(sheet.rows.map((r) => [r.iso, r])), [sheet]);
+  const toNumber = (v) => Number(String(v || "").replace(/[^0-9.-]/g, "")) || 0;
   const [shareMsg, setShareMsg] = useState("");
 
   const viewKey = `${view.year}-${pad(view.month + 1)}`;
@@ -272,6 +238,11 @@ export default function CampaignCalendar() {
 
   // Default selection: this month's next headline launch, else its first campaign.
   const selected = campaigns.find((e) => e.id === selectedId) || summary.upcoming[0] || monthEvents[0] || null;
+  const monthSheetRows = sheet.rows.filter((r) => monthKey(r.iso) === viewKey);
+
+  // Side panel: today's sheet row if it is in this month, else the month's first.
+  const panelRow = sheetByIso[today] && monthKey(today) === viewKey ? sheetByIso[today] : monthSheetRows[0] || null;
+
   function openCampaign(c) {
     setSelectedId(c.id);
     setDayIso(c.date);
@@ -290,14 +261,11 @@ export default function CampaignCalendar() {
   }
 
   function exportRows() {
-    return [...visibleEvents].sort((a, b) => a.date.localeCompare(b.date));
+    return monthSheetRows;
   }
 
   function exportCsv() {
-    const rows = [
-      ["Start", "End", "Platform", "Campaign", "Objective"],
-      ...exportRows().map((e) => [e.date, endOf(e), PLATFORMS[e.platform].name, e.title, e.objective || ""]),
-    ];
+    const rows = [sheet.columns, ...exportRows().map((r) => sheet.columns.map((c) => r[c] ?? ""))];
     const csv = rows.map((r) => r.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");
     download(`HRH_Campaign_Calendar_${MONTH_NAMES[view.month].slice(0, 3)}_${view.year}.csv`, csv, "text/csv");
   }
@@ -310,11 +278,11 @@ export default function CampaignCalendar() {
       "PRODID:-//HMR//HRH Online Campaign Calendar//EN",
       ...exportRows().flatMap((e) => [
         "BEGIN:VEVENT",
-        `UID:${e.id}@hrh-online.hmr.ph`,
-        `DTSTART;VALUE=DATE:${e.date.replaceAll("-", "")}`,
-        `DTEND;VALUE=DATE:${addDaysIso(endOf(e), 1).replaceAll("-", "")}`,
-        `SUMMARY:${esc(e.title)}`,
-        `DESCRIPTION:${esc(PLATFORMS[e.platform].name)}`,
+        `UID:${e.iso}@hrh-online.hmr.ph`,
+        `DTSTART;VALUE=DATE:${e.iso.replaceAll("-", "")}`,
+        `DTEND;VALUE=DATE:${addDaysIso(e.iso, 1).replaceAll("-", "")}`,
+        `SUMMARY:${esc(e["Campaign Theme"] || "Campaign")}`,
+        `DESCRIPTION:${esc(e["Suggested Mechanic"] || "")}`,
         "END:VEVENT",
       ]),
       "END:VCALENDAR",
@@ -414,73 +382,25 @@ export default function CampaignCalendar() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-4 py-3 print:hidden">
-          <span className="text-[12.5px] font-bold mr-1" style={{ color: hrh.ink }}>
-            Platform View Layer:
-          </span>
-          <button
-            type="button"
-            onClick={() => setFilter("all")}
-            className="rounded-md border px-3 py-1.5 text-[12.5px] font-bold"
-            style={filter === "all" ? { background: "#071b33", color: "#fff", borderColor: "#071b33" } : { background: hrh.surface, color: hrh.ink, borderColor: hrh.border }}
-          >
-            All Overlays ({monthEvents.length})
-          </button>
-          {Object.entries(PLATFORMS).map(([key, p]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setFilter(key)}
-              className="rounded-md border px-3 py-1.5 text-[12.5px] font-bold"
-              style={filter === key ? { background: "#071b33", color: "#fff", borderColor: "#071b33" } : { ...PLATFORM_TONES[key], borderColor: hrh.border }}
-            >
-              {p.name} ({platformCounts[key]})
-            </button>
-          ))}
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search campaigns, events…"
-            className="rounded-md border px-3 py-1.5 text-[12.5px] outline-none w-full sm:w-56 xl:ml-auto"
-            style={{ borderColor: hrh.border, color: hrh.ink }}
-          />
-          <div className="flex items-center gap-1.5">
-            <span className="text-[12px]" style={{ color: hrh.muted }}>
-              Display Density:
-            </span>
-            <Btn active={cleanView} onClick={() => setCleanView(true)}>
-              {cleanView ? "✓ " : ""}Clean View
-            </Btn>
-            <Btn active={!cleanView} onClick={() => setCleanView(false)}>
-              {!cleanView ? "✓ " : ""}Show All
-            </Btn>
-          </div>
-        </div>
       </section>
 
       {/* Summary */}
       <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 py-3.5 print:hidden">
-        <SummaryCard icon="📊" iconBg="#eaf3ff" value={summary.total} label="Scheduled Campaigns" sub={deltaText} />
+        <SummaryCard icon="📊" iconBg="#eaf3ff" value={monthSheetRows.length} label="Campaign Days" sub={`in ${monthLabel}`} />
         <SummaryCard
-          icon="📅"
-          iconBg="#eaf3ff"
-          value={summary.peakDay ? shortDate(summary.peakDay) : "—"}
-          label="Peak Campaign Day"
-          sub={summary.peakDay ? `${summary.peakCount} campaigns · most active day` : "No campaigns this month"}
+          icon="🎉"
+          iconBg="#fff4e8"
+          value={monthSheetRows.filter((r) => r["Key Occasion"]).length}
+          label="Key Occasions"
+          sub={monthSheetRows.filter((r) => r["Key Occasion"]).slice(0, 3).map((r) => r["Key Occasion"]).join(" · ") || "—"}
         />
+        <SummaryCard icon="🛍" iconBg="#e9faf3" value={monthSheetRows.reduce((t, r) => t + toNumber(r["# Featured SKUs"]), 0).toLocaleString()} label="Featured SKUs" sub="sum across the month's days" />
         <SummaryCard
-          icon="🛍"
-          iconBg="#fff2e7"
-          value={summary.busiestCount ? PLATFORMS[summary.busiest].name : "—"}
-          label="Busiest Platform"
-          sub={summary.busiestCount ? `${summary.busiestCount} campaigns · ${Math.round((summary.busiestCount / summary.total) * 100)}% of total` : "No campaigns this month"}
-        />
-        <SummaryCard
-          icon="🚀"
-          iconBg="#f0ecff"
-          value={summary.upcoming.length}
-          label="Upcoming Launches"
-          sub={summary.upcoming[0] ? `Next: ${summary.upcoming[0].title} on ${shortDate(summary.upcoming[0].date)}` : "None left this month"}
+          icon="🏷"
+          iconBg="#efeaff"
+          value={monthSheetRows.length ? `${(monthSheetRows.reduce((t, r) => t + toNumber(r["Avg % Discount (Featured)"]), 0) / monthSheetRows.length).toFixed(1)}%` : "—"}
+          label="Avg % Discount"
+          sub="featured SKUs, daily average"
         />
       </section>
 
@@ -600,63 +520,36 @@ export default function CampaignCalendar() {
         </div>
 
         <aside className="rounded-md overflow-hidden xl:sticky xl:top-4 print:hidden" style={{ background: hrh.surface, border: `1px solid ${hrh.border}` }}>
-          {selected ? (
+          {panelRow ? (
             <>
               <div className="p-4" style={{ borderBottom: `1px solid ${hrh.border}` }}>
-                <div className="flex gap-2 items-center">
-                  <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ color: PLATFORM_TONES[selected.platform].color, background: PLATFORM_TONES[selected.platform].background }}>
-                    {PLATFORMS[selected.platform].name}
-                  </span>
-                  <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={STATUS_TONES[selectedStatus]}>
-                    {selectedStatus}
-                  </span>
-                </div>
+                <span className="rounded-full px-2.5 py-1 text-[11px] font-bold" style={{ color: "#fff", background: "#0b1d36" }}>
+                  {panelRow["Phase"] || "Campaign"}
+                </span>
                 <h2 className="text-[20px] font-bold leading-tight mt-3 mb-1.5" style={{ color: hrh.ink }}>
-                  {selected.title}
+                  {panelRow["Campaign Theme"]}
                 </h2>
                 <div className="text-[12.5px]" style={{ color: hrh.ink2 }}>
-                  📅 {(() => {
-                    const startYear = selected.date.slice(0, 4);
-                    const endYear = endOf(selected).slice(0, 4);
-                    if (selectedSpan === 1) return `${shortDate(selected.date)}, ${startYear}`;
-                    if (startYear === endYear) return `${shortDate(selected.date)} – ${shortDate(endOf(selected))}, ${startYear}`;
-                    return `${shortDate(selected.date)}, ${startYear} – ${shortDate(endOf(selected))}, ${endYear}`;
-                  })()}{" "}
-                  · {selectedSpan} day{selectedSpan > 1 ? "s" : ""}
+                  📅 {panelRow["Date"]} · {panelRow["Day"]}
                 </div>
               </div>
               <div className="px-4 py-2">
-                <DetailRow label="🎯 Objective">{selected.objective || "Coordinate platform execution, campaign assets, and daily promotional visibility."}</DetailRow>
-                {selected.tagline && <DetailRow label="💬 Tagline">{selected.tagline}</DetailRow>}
-                <DetailRow label="🏬 Platform">{PLATFORMS[selected.platform].name}</DetailRow>
-                <DetailRow label="📍 Scope">
-                  {SCOPE_LABELS[selected.scopeType]}
-                  {selected.scopeType === "selected" && selected.branches.length ? `: ${selected.branches.join(", ")}` : ""}
-                </DetailRow>
-                <DetailRow label="● Status">{selectedStatus}</DetailRow>
-                <DetailRow label="🏷 Tags">
-                  <div className="flex flex-wrap gap-1.5">
-                    {(selected.tags || [PLATFORMS[selected.platform].short, "Campaign"]).map((t) => (
-                      <span key={t} className="rounded-md border px-2 py-1 text-[10.5px] font-medium" style={{ background: "#f5f7fa", borderColor: hrh.border, color: "#4d6580" }}>
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                </DetailRow>
-                <div className="text-[12px] font-bold mt-4 mb-2" style={{ color: hrh.ink }}>
-                  ▣ Description
-                </div>
-                <p className="text-[12px] leading-relaxed" style={{ color: "#4e6783" }}>
-                  {selected.description || "Campaign activity scheduled for the selected date. Use this panel to review execution details, owners, assets, and notes."}
-                </p>
+                {["Campaign Pillar", "Focus / Assortment", "Key Occasion", "Suggested Mechanic", "Channels"].map((k) => (
+                  <DetailRow key={k} label={k}>{panelRow[k] || "—"}</DetailRow>
+                ))}
               </div>
-              <div className="px-4 pb-4 pt-2 text-[11.5px]" style={{ color: hrh.muted }}>
-                Display only — edit the Google Sheet to change the calendar. Click a day for its full details.
+              <div className="px-4 pb-4 pt-2">
+                <button type="button" onClick={() => setDayIso(panelRow.iso)} className="w-full rounded-md py-3 text-[13px] font-bold text-white" style={{ background: "#0c3a68" }}>
+                  View full details
+                </button>
+                <div className="text-[11.5px] mt-2" style={{ color: hrh.muted }}>
+                  Display only — edit the Google Sheet to change the calendar.
+                </div>
               </div>
             </>
           ) : (
             <div className="p-6 text-[12.5px]" style={{ color: hrh.muted }}>
-              Select a campaign on the calendar to see its details.
+              No Google Sheet entries for {monthLabel}.
             </div>
           )}
         </aside>
@@ -668,7 +561,6 @@ export default function CampaignCalendar() {
           iso={dayIso}
           sheetRow={sheetByIso[dayIso]}
           sheetColumns={sheet.columns}
-          dayCampaigns={campaigns.filter((c) => c.date <= dayIso && endOf(c) >= dayIso)}
           onClose={() => setDayIso(null)}
         />
       )}
