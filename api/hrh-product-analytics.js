@@ -295,6 +295,32 @@ async function fetchOtherStoreStock(itemIds) {
 // item_id in a row, sums quantities per store, and returns the top 5
 // stores by quantity as a flat sorted array — used identically by Product
 // mode (one item_id) and Category/Subcategory mode (many).
+// HRH Online (cms store 91) add-to-cart events per SKU, from the CMS
+// carts table — one row per item added to a cart. Matched on SKU
+// (posting_item_details.sku = xv3 barcode): the CMS item_id is a different
+// id space from xv3's ct.item_id. Dates are UTC, converted to Manila days.
+const HRH_CMS_STORE_ID = 91;
+async function fetchAddToCarts(skus, from, to) {
+  const map = new Map();
+  if (!skus.length) return map;
+  const rows = await (
+    await client.query({
+      query: `
+        SELECT JSONExtractString(posting_item_details, 'sku') AS sku, count() AS carts
+        FROM cms.stg_cms_carts
+        WHERE store_id = {storeId:Int64}
+          AND toDate(created_at, 'Asia/Manila') BETWEEN {from:String} AND {to:String}
+          AND JSONExtractString(posting_item_details, 'sku') IN {skus:Array(String)}
+        GROUP BY sku
+      `,
+      query_params: { storeId: HRH_CMS_STORE_ID, from, to, skus },
+      format: "JSONEachRow",
+    })
+  ).json();
+  for (const r of rows) map.set(r.sku, toNum(r.carts));
+  return map;
+}
+
 function rollUpOtherStoreStock(otherStoreMap, itemIds) {
   const merged = new Map();
   for (const id of itemIds) {
@@ -609,7 +635,7 @@ export default async function handler(req, res) {
     const identitySelect =
       groupBy === "product"
         ? `${GROUP_FIELD} AS group_key, any(barcode) AS barcode, argMax(product_name, transaction_date) AS display_name,`
-        : `${GROUP_FIELD} AS group_key, groupUniqArray(\`ct.item_id\`) AS item_ids,`;
+        : `${GROUP_FIELD} AS group_key, groupUniqArray(\`ct.item_id\`) AS item_ids, groupUniqArray(barcode) AS barcodes,`;
     const identityFilter = groupBy === "product" ? `AND ${GROUP_FIELD} IS NOT NULL` : `AND ${GROUP_FIELD} IS NOT NULL AND trim(${GROUP_FIELD}) != ''`;
 
     // Product comparison query prep (current vs previous window) — feeds
@@ -766,7 +792,15 @@ export default async function handler(req, res) {
       ),
     );
     // Both scoped to the same allItemIds, independent of each other.
-    const [inventoryMap, otherStoreMap] = await Promise.all([fetchInventory(allItemIds), fetchOtherStoreStock(allItemIds)]);
+    const [inventoryMap, otherStoreMap, cartMap] = await Promise.all([
+      fetchInventory(allItemIds),
+      fetchOtherStoreStock(allItemIds),
+      fetchAddToCarts(
+        (groupBy === "product" ? repeatRows.map((r) => r.barcode) : repeatRows.flatMap((r) => r.barcodes || [])).filter(Boolean),
+        wk1.from,
+        wk4.to,
+      ),
+    ]);
 
     // Trend rule (Repeat Sellers) — deliberately simple and deterministic:
     // Wk4 (current) vs. the AVERAGE of Wk1-3, +/-5% band = "flat". Averaging
@@ -829,6 +863,8 @@ export default async function handler(req, res) {
         currentStockQty: stockQty,
         currentStockValue: stockValue,
         otherStoreStock: rollUpOtherStoreStock(otherStoreMap, itemIds),
+        // Add to Carts across the same Wk1–Wk4 window (cms.stg_cms_carts).
+        addToCarts: (groupBy === "product" ? [r.barcode] : r.barcodes || []).reduce((t, sku) => t + (cartMap.get(sku) || 0), 0),
       };
     });
 

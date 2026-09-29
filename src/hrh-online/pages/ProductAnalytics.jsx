@@ -208,6 +208,7 @@ function repeatSellerColumns(granularity, periodBuckets, groupBy) {
     ...identityColumns(groupBy),
     ...bucketColumns,
     { key: "trend", label: "Trend", render: (r) => trendCell(r.trend, r.trendPct) },
+    { key: "addToCarts", label: "Add to Carts", render: (r) => (r.addToCarts === undefined ? "—" : formatNum(r.addToCarts)) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => currentStockCell(r) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
   ];
