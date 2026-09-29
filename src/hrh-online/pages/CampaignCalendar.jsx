@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { hrh } from "../theme";
 import Modal from "../components/Modal";
-import { HMR_BRANCHES, PLATFORMS, SEASON_MONTHS } from "../data/campaignCalendar";
+import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_MONTHS, withCampaignDefaults } from "../data/campaignCalendar";
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
 // campaign calendar) as a dashboard page: month grid with HMR Online /
@@ -142,7 +142,8 @@ function DetailRow({ label, children }) {
 // Display-only day view: every Google Sheet column for that date (all
 // edits happen in the Sheet), plus the read-only Campaign Details,
 // Campaign Schedule and Posting Links of any campaign running that day.
-function DayDetails({ iso, sheetRow, sheetColumns, onClose }) {
+function DayDetails({ iso, sheetRow, sheetColumns, dayCampaigns, onClose }) {
+  const links = dayCampaigns.flatMap((c) => (c.postingLinks || []).filter((l) => l.url).map((l) => ({ ...l, title: c.title })));
   const dateLabel = parseIso(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const heading = "text-[12px] font-bold uppercase tracking-[0.05em] mt-4 mb-2";
   return (
@@ -158,14 +159,51 @@ function DayDetails({ iso, sheetRow, sheetColumns, onClose }) {
         <div className="text-[12.5px]" style={{ color: hrh.muted }}>No row for this date in the Google Sheet.</div>
       )}
 
+      <div className={heading} style={{ color: hrh.ink }}>Campaign Details</div>
+      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>No platform campaigns on this day.</div>}
+      {dayCampaigns.map((c) => (
+        <div key={c.id} className="mb-2">
+          <DetailRow label="Campaign">{c.title}</DetailRow>
+          <DetailRow label="Platform">{PLATFORMS[c.platform].name}</DetailRow>
+          <DetailRow label="Type">{c.campaignType}</DetailRow>
+          {c.tagline && <DetailRow label="Tagline">{c.tagline}</DetailRow>}
+          {c.description && <DetailRow label="Description">{c.description}</DetailRow>}
+        </div>
+      ))}
+
+      <div className={heading} style={{ color: hrh.ink }}>Campaign Schedule</div>
+      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>—</div>}
+      {dayCampaigns.map((c) => (
+        <DetailRow key={c.id} label={c.title}>
+          {shortDate(c.date)}
+          {endOf(c) !== c.date ? ` – ${shortDate(endOf(c))}` : ""}
+          {c.planningStart ? ` · Planning ${shortDate(c.planningStart)}` : ""}
+          {c.teaserDate ? ` · Teaser ${shortDate(c.teaserDate)}` : ""}
+        </DetailRow>
+      ))}
+
+      <div className={heading} style={{ color: hrh.ink }}>Posting Links</div>
+      {links.length === 0 ? (
+        <div className="text-[12.5px]" style={{ color: hrh.muted }}>No posting links.</div>
+      ) : (
+        links.map((l, i) => (
+          <DetailRow key={i} label={`${l.title}${l.platform ? ` · ${l.platform}` : ""}`}>
+            <a href={l.url} target="_blank" rel="noreferrer" className="underline break-all" style={{ color: hrh.blueText }}>
+              {l.url}
+            </a>
+          </DetailRow>
+        ))
+      )}
     </Modal>
   );
 }
 
 export default function CampaignCalendar() {
   const today = todayIso();
-  // Sheet only — the old hard-coded platform campaigns were removed per request.
+  // Calendar grid is Sheet only; the old platform campaigns are kept ONLY
+  // for the day popup's Campaign Details / Schedule / Posting Links.
   const campaigns = useMemo(() => [], []);
+  const legacyCampaigns = useMemo(() => [...CAMPAIGN_EVENTS, ...CONTINUOUS_CAMPAIGNS].map(withCampaignDefaults), []);
   const [view, setView] = useState(() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() };
@@ -561,6 +599,7 @@ export default function CampaignCalendar() {
           iso={dayIso}
           sheetRow={sheetByIso[dayIso]}
           sheetColumns={sheet.columns}
+          dayCampaigns={legacyCampaigns.filter((c) => c.date <= dayIso && endOf(c) >= dayIso)}
           onClose={() => setDayIso(null)}
         />
       )}
