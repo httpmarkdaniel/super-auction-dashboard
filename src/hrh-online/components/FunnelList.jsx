@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { hrh } from "../theme";
 import { formatNum } from "../format";
 
@@ -16,6 +17,7 @@ const MIN_WIDTH_PCT = 18;
 const TAPER_LAST_PCT = 0.75; // last stage's bottom edge vs its own top edge
 
 export default function FunnelList({ stages, stageHeight = 52, gap = 4 }) {
+  const [hovered, setHovered] = useState(null);
   const max = Math.max(...stages.map((s) => s.value), 1);
   const widths = stages.map((s) => Math.max((s.value / max) * 100, MIN_WIDTH_PCT));
 
@@ -34,9 +36,17 @@ export default function FunnelList({ stages, stageHeight = 52, gap = 4 }) {
 
         return (
           <div key={s.label}>
-            <div className="relative group" style={{ height: stageHeight }}>
-              {s.hover && (
-                <div className="hidden group-hover:block absolute z-20 left-1/2 -translate-x-1/2 top-full mt-1 w-[360px] max-w-[90vw] rounded-md px-3 py-2 text-[11.5px] shadow-lg" style={{ background: hrh.navy, color: "#fff" }}>
+            <div
+              className="relative"
+              style={{ height: stageHeight, cursor: s.hover ? "help" : undefined }}
+              onMouseEnter={s.hover ? () => setHovered(i) : undefined}
+              onMouseLeave={s.hover ? () => setHovered(null) : undefined}
+            >
+              {s.hover && hovered === i && (
+                <div
+                  className="absolute left-1/2 top-full mt-1 w-[380px] max-w-[90vw] rounded-md px-3 py-2 text-[11.5px] shadow-lg"
+                  style={{ background: "#0b1d36", color: "#fff", zIndex: 1000, transform: "translateX(-50%)" }}
+                >
                   {s.hover}
                 </div>
               )}
