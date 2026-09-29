@@ -32,7 +32,6 @@ const TREND_GLYPH = { up: "▲", down: "▼", flat: "▬" };
 const TREND_COLOR = { up: hrh.good, down: hrh.bad, flat: hrh.muted };
 // Color alone (a red/green arrow) isn't accessible or self-explanatory on
 // its own — spell the trend out too.
-const TREND_LABEL = { up: "Increasing", down: "Declining", flat: "Steady" };
 // OUT OF STOCK is the "explained, nothing to do" case (green). HAS STOCK
 // needs a human to look at it (sold out despite stock on hand) —
 // "warning" (orange), not "good". UNKNOWN STOCK means the inventory match
@@ -174,10 +173,10 @@ function sortProductRows(rows, sortKey, valueField, stockField) {
   });
 }
 
-function trendCell(trend) {
+function trendCell(trend, pct) {
   return (
     <span className="font-semibold whitespace-nowrap" style={{ color: TREND_COLOR[trend] || hrh.muted }}>
-      {TREND_GLYPH[trend] || "—"} {TREND_LABEL[trend] || "—"}
+      {TREND_GLYPH[trend] || "—"} {pct === null || pct === undefined ? "—" : `${pct > 0 ? "+" : ""}${pct.toFixed(1)}%`}
     </span>
   );
 }
@@ -206,7 +205,7 @@ function repeatSellerColumns(granularity, periodBuckets, groupBy) {
   return [
     ...identityColumns(groupBy),
     ...bucketColumns,
-    { key: "trend", label: "Trend", render: (r) => trendCell(r.trend) },
+    { key: "trend", label: "Trend", render: (r) => trendCell(r.trend, r.trendPct) },
     { key: "currentStockQty", label: "Current Stock", render: (r) => currentStockCell(r) },
     { key: "currentStockValue", label: "Stock Value (SRP)", render: (r) => (r.currentStockValue === null ? "—" : formatPeso(r.currentStockValue)) },
   ];

@@ -422,6 +422,9 @@ async function runProductDrilldown(req, res) {
       } else if (wk4Gmv > 0) {
         trend = "up";
       }
+      // Real % behind the trend: Wk4 vs the prior 3-week average. No prior
+      // sales but Wk4 sales → +100% (same convention as the WBR SKU list).
+      const trendPct = priorAvg > 0 ? ((wk4Gmv - priorAvg) / priorAvg) * 100 : wk4Gmv > 0 ? 100 : 0;
       const inv = inventoryMap.get(String(r.group_key));
       return {
         sku: r.barcode,
@@ -435,6 +438,7 @@ async function runProductDrilldown(req, res) {
         wk4Sales: wk4Gmv,
         wk4Units: toNum(r.wk4_units),
         trend,
+        trendPct,
         currentStockQty: inv ? inv.stockQty : null,
         currentStockValue: inv ? inv.stockValue : null,
         otherStoreStock: rollUpOtherStoreStock(otherStoreMap, [r.group_key]),
@@ -781,6 +785,9 @@ export default async function handler(req, res) {
       } else if (wk4Gmv > 0) {
         trend = "up";
       }
+      // Real % behind the trend: Wk4 vs the prior 3-week average. No prior
+      // sales but Wk4 sales → +100% (same convention as the WBR SKU list).
+      const trendPct = priorAvg > 0 ? ((wk4Gmv - priorAvg) / priorAvg) * 100 : wk4Gmv > 0 ? 100 : 0;
       // Product mode: one item, one direct inventory lookup. Category/
       // subcategory mode: no single SKU, so `sku` becomes the item count
       // and stock rolls up (summed) across every item_id in the group —
@@ -818,6 +825,7 @@ export default async function handler(req, res) {
         wk4Sales: wk4Gmv,
         wk4Units: toNum(r.wk4_units),
         trend,
+        trendPct,
         currentStockQty: stockQty,
         currentStockValue: stockValue,
         otherStoreStock: rollUpOtherStoreStock(otherStoreMap, itemIds),
