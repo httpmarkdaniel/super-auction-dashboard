@@ -301,7 +301,7 @@ const platformTableColumns = (meta, manual, onManualChange, editingTraffic) => [
   { key: "momPct", label: `MoM % (MTD ${meta.momCurrentLabel} vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
   { key: "orders", label: "Orders", render: (r) => <DeltaValue value={r.orders} previous={r.prevOrders} format={formatNum} /> },
   { key: "aov", label: "AOV", render: (r) => <DeltaValue value={r.aov} previous={r.prevAov} format={formatPeso} /> },
-  { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : formatPct(r.conversionRate)) },
+  { key: "conversionRate", label: "Conversion Rate", render: (r) => (r.conversionRate === null || r.conversionRate === undefined ? "—" : <DeltaValue value={r.conversionRate} previous={r.prevConversionRate} format={formatPct} />) },
 ];
 
 // Plain increase/decrease % per platform vs. the comparison period (same
@@ -506,8 +506,23 @@ export default function WeeklyBusinessReview({ filters }) {
     if (!withTraffic.length) return r;
     const sum = (k) => withTraffic.reduce((t, x) => t + (Number(x[k]) || 0), 0);
     const sumPrev = (k) => (withTraffic.every((x) => x[k] !== null && x[k] !== undefined) ? sum(k) : null);
-    return { ...r, traffic: sum("traffic"), prevTraffic: sumPrev("prevTraffic"), pageViews: sum("pageViews"), prevPageViews: sumPrev("prevPageViews") };
-  });
+    const orders = withTraffic.reduce((t, x) => t + (x.orders || 0), 0);
+    const prevOrders = withTraffic.reduce((t, x) => t + (x.prevOrders || 0), 0);
+    const traffic = sum("traffic");
+    const prevTraffic = sumPrev("prevTraffic");
+    return {
+      ...r,
+      traffic,
+      prevTraffic,
+      pageViews: sum("pageViews"),
+      prevPageViews: sumPrev("prevPageViews"),
+      conversionRate: traffic ? (orders / traffic) * 100 : null,
+      prevConversionRate: prevTraffic ? (prevOrders / prevTraffic) * 100 : null,
+    };
+  }).map((r) =>
+    // Previous-period Conversion Rate = previous Orders / previous Visitors.
+    r.platform === "Total" || r.prevConversionRate !== undefined ? r : { ...r, prevConversionRate: r.prevTraffic ? (r.prevOrders / r.prevTraffic) * 100 : null },
+  );
   // "Top 10 by Units" and "Top 10 by Value" are genuinely different sets —
   // data.skuMovers is every SKU with real current-period activity, so
   // re-sorting here and taking the top 10 for whichever metric is selected
