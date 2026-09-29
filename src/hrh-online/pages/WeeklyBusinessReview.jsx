@@ -263,23 +263,30 @@ function TrafficInputs({ platform, manual, onChange }) {
   );
 }
 
-const platformTableColumns = (meta, manual, onManualChange) => [
+function TrafficPair({ r }) {
+  return (
+    <div className="flex gap-4">
+      <div>
+        <div className="text-[10px] uppercase" style={{ color: hrh.muted }}>Visitors</div>
+        <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />
+      </div>
+      <div>
+        <div className="text-[10px] uppercase" style={{ color: hrh.muted }}>Page Views</div>
+        <DeltaValue value={r.pageViews} previous={r.prevPageViews} format={formatNum} />
+      </div>
+    </div>
+  );
+}
+
+const platformTableColumns = (meta, manual, onManualChange, editingTraffic) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
   {
     key: "traffic",
     label: "Traffic (Visitors / Page Views)",
     render: (r) =>
-      MANUAL_TRAFFIC_PLATFORMS.includes(r.platform) ? (
-        <div>
-          {r.traffic !== null && r.traffic !== undefined && (
-            <div className="flex gap-4 mb-1.5">
-              <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />
-              <DeltaValue value={r.pageViews} previous={r.prevPageViews} format={formatNum} />
-            </div>
-          )}
-          <TrafficInputs platform={r.platform} manual={manual} onChange={onManualChange} />
-        </div>
+      MANUAL_TRAFFIC_PLATFORMS.includes(r.platform) && (editingTraffic || r.traffic === null || r.traffic === undefined) ? (
+        <TrafficInputs platform={r.platform} manual={manual} onChange={onManualChange} />
       ) : r.traffic === null || r.traffic === undefined ? (
         "—"
       ) : (
@@ -441,6 +448,7 @@ export default function WeeklyBusinessReview({ filters }) {
   const [manualSaved, setManualSaved] = useState("{}");
   const [prevManual, setPrevManual] = useState({});
   const [manualStatus, setManualStatus] = useState("");
+  const [editingTraffic, setEditingTraffic] = useState(false);
   useEffect(() => {
     if (!trafficKey) return;
     const get = (k) =>
@@ -468,6 +476,7 @@ export default function WeeklyBusinessReview({ filters }) {
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       setManualSaved(text);
       setManualStatus("Saved");
+      setEditingTraffic(false);
     } catch (err) {
       setManualStatus(`Couldn't save: ${err.message}`);
     }
@@ -514,8 +523,18 @@ export default function WeeklyBusinessReview({ filters }) {
             subtitle={`Current period: ${data.meta.currentLabel} · changes vs previous period ${data.meta.previousLabel}`}
             className="mb-4"
           >
-            <DataTable columns={platformTableColumns(data.meta, manual, onManualChange)} rows={platformRows} emptyLabel="No platform sales in this period." />
+            <DataTable columns={platformTableColumns(data.meta, manual, onManualChange, editingTraffic)} rows={platformRows} emptyLabel="No platform sales in this period." />
             <div className="flex items-center gap-3 mt-2">
+              {!editingTraffic && manualSaved !== "{}" && (
+                <button
+                  type="button"
+                  onClick={() => setEditingTraffic(true)}
+                  className="text-[12.5px] font-semibold px-4 py-1.5 rounded-md text-white"
+                  style={{ background: hrh.navy }}
+                >
+                  Edit Traffic
+                </button>
+              )}
               <button
                 type="button"
                 onClick={saveManual}
