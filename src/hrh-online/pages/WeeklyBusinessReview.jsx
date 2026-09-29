@@ -75,7 +75,8 @@ function formatDateLabel(iso) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-const fmtChange = (pct) => (pct === null || pct === undefined ? "New" : `${pct > 0 ? "+" : ""}${formatPct(pct)}`);
+// No prior-period sales → shown as +100% (reporting convention, per request).
+const fmtChange = (pct) => (pct === null || pct === undefined ? "+100.0%" : `${pct > 0 ? "+" : ""}${formatPct(pct)}`);
 const multi = (r) => r.breakdown && r.breakdown.length > 1;
 
 const SKU_DETAIL_COLUMNS = [
