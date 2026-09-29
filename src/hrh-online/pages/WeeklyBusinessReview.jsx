@@ -118,6 +118,7 @@ function DeltaValue({ value, previous, format }) {
 function InsightsPanel({ storageKey, periodLabel }) {
   const [saved, setSaved] = useState({ text: "", updatedAt: null });
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(true);
   const [status, setStatus] = useState("loading"); // loading | ready | saving | error
   const [error, setError] = useState(null);
 
@@ -131,6 +132,7 @@ function InsightsPanel({ storageKey, periodLabel }) {
         if (!res.ok) throw new Error(json.message || json.error || `Request failed (${res.status})`);
         setSaved(json);
         setDraft(json.text);
+        setEditing(!json.text);
         setStatus("ready");
       })
       .catch((err) => {
@@ -154,6 +156,7 @@ function InsightsPanel({ storageKey, periodLabel }) {
       if (!res.ok) throw new Error(json.message || json.error || `Request failed (${res.status})`);
       setSaved(json);
       setDraft(json.text);
+      setEditing(!json.text);
       setStatus("ready");
     } catch (err) {
       setError(err.message);
@@ -170,6 +173,23 @@ function InsightsPanel({ storageKey, periodLabel }) {
     <Panel title="Insights" subtitle={`Team notes for ${periodLabel} — saved for everyone viewing this period`}>
       {status === "loading" ? (
         <LoadingState label="Loading insights…" />
+      ) : !editing ? (
+        <>
+          <div className="whitespace-pre-wrap rounded-md border px-3 py-2.5 text-[13px] leading-relaxed" style={{ borderColor: hrh.border, color: hrh.ink, background: "#fff" }}>
+            {saved.text}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-[12.5px] font-semibold px-4 py-1.5 rounded-md text-white"
+              style={{ background: hrh.navy }}
+            >
+              Edit Insights
+            </button>
+            <span className="text-[11.5px]" style={{ color: hrh.muted }}>{savedAt ? `Last saved ${savedAt}` : ""}</span>
+          </div>
+        </>
       ) : (
         <>
           <textarea
