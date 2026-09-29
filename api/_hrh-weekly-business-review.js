@@ -442,7 +442,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       client
         .query({
           query: `
-            SELECT date, sum(totalUsers) AS users
+            SELECT date, sum(totalUsers) AS users, sum(screenPageViews) AS pageViews
             FROM ga4.ga4_pages_path_report FINAL
             WHERE property_id = '314716873'
               AND pagePath IN ('/shop/ONP', '/search/stores/ONP')
@@ -460,9 +460,16 @@ export async function handleWeeklyBusinessReview(req, res) {
     const prevKeyTo = previous.to.replaceAll("-", "");
     let curVisitors = 0;
     let prevVisitors = 0;
+    let curPageViews = 0;
+    let prevPageViews = 0;
     for (const r of visitorRows) {
-      if (r.date >= curKeyFrom && r.date <= curKeyTo) curVisitors += toNum(r.users);
-      else if (r.date >= prevKeyFrom && r.date <= prevKeyTo) prevVisitors += toNum(r.users);
+      if (r.date >= curKeyFrom && r.date <= curKeyTo) {
+        curVisitors += toNum(r.users);
+        curPageViews += toNum(r.pageViews);
+      } else if (r.date >= prevKeyFrom && r.date <= prevKeyTo) {
+        prevVisitors += toNum(r.users);
+        prevPageViews += toNum(r.pageViews);
+      }
     }
 
     const platformRows = ALL_CHANNELS.map((ch) => {
@@ -490,6 +497,8 @@ export async function handleWeeklyBusinessReview(req, res) {
         aov: safeDivide(cur.gmv, cur.orders),
         traffic: ch === "HMRPH ONLINE" ? curVisitors : null,
         prevTraffic: ch === "HMRPH ONLINE" ? prevVisitors : null,
+        pageViews: ch === "HMRPH ONLINE" ? curPageViews : null,
+        prevPageViews: ch === "HMRPH ONLINE" ? prevPageViews : null,
         // Conversion Rate = Orders / Visitors (HMRPH Online only).
         conversionRate: ch === "HMRPH ONLINE" && curVisitors > 0 ? (cur.orders / curVisitors) * 100 : null,
       };

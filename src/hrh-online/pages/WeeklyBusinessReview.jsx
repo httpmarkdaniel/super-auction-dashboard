@@ -244,7 +244,25 @@ function InsightsPanel({ storageKey, periodLabel }) {
 const platformTableColumns = (meta) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
-  { key: "traffic", label: "Traffic", render: (r) => (r.traffic === null || r.traffic === undefined ? "—" : <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />) },
+  {
+    key: "traffic",
+    label: "Traffic (Visitors / Page Views)",
+    render: (r) =>
+      r.traffic === null || r.traffic === undefined ? (
+        "—"
+      ) : (
+        <div className="flex gap-4">
+          <div>
+            <div className="text-[10px] uppercase" style={{ color: hrh.muted }}>Visitors</div>
+            <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase" style={{ color: hrh.muted }}>Page Views</div>
+            <DeltaValue value={r.pageViews} previous={r.prevPageViews} format={formatNum} />
+          </div>
+        </div>
+      ),
+  },
   { key: "momPct", label: `MoM % (MTD ${meta.momCurrentLabel} vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
   { key: "orders", label: "Orders", render: (r) => <DeltaValue value={r.orders} previous={r.prevOrders} format={formatNum} /> },
   { key: "aov", label: "AOV", render: (r) => <DeltaValue value={r.aov} previous={r.prevAov} format={formatPeso} /> },
