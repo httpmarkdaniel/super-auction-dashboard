@@ -617,6 +617,8 @@ export async function handleTrafficAnalytics(req, res) {
     // Add to Cart — HRH Online only (CMS store 91 = "HRH ONLINE", code ONP),
     // from cms.stg_cms_carts: one row per item added to a cart. Sales =
     // price × quantity of those cart lines; SKUs = distinct SKUs added.
+    // Stage count = distinct customers who added to cart (people, like
+    // Users), not cart lines — items added rides along as `items`.
     const cartParams = { from: current.from, to: current.to };
     // Top 10 SKUs by times added to cart (hover list on the funnel stage).
     const topCartSkusPromise = client
@@ -641,6 +643,7 @@ export async function handleTrafficAnalytics(req, res) {
       await client.query({
         query: `
           SELECT count() AS adds,
+                 uniqExact(customer_id) AS customers,
                  sum(toFloat64(price) * toFloat64(quantity)) AS sales,
                  uniqExact(JSONExtractString(posting_item_details, 'sku')) AS skus
           FROM cms.stg_cms_carts
@@ -652,7 +655,7 @@ export async function handleTrafficAnalytics(req, res) {
       })
     ).json();
     const topCartSkus = (await topCartSkusPromise).map((r) => ({ sku: r.sku, name: r.name, adds: toNum(r.adds), sales: toNum(r.sales) }));
-    const addToCartStage = { stage: "Add to Cart", count: toNum(cartRow.adds), sales: toNum(cartRow.sales), skus: toNum(cartRow.skus), topSkus: topCartSkus };
+    const addToCartStage = { stage: "Add to Cart", count: toNum(cartRow.customers), items: toNum(cartRow.adds), sales: toNum(cartRow.sales), skus: toNum(cartRow.skus), topSkus: topCartSkus };
     const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current, [addToCartStage]);
 
     // --- WHOLE SITE — the 6 other branches with a real online store, see

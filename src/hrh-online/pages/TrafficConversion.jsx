@@ -143,7 +143,7 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
             <FunnelList stages={funnelStages.map((f) => ({
                 label: f.stage,
                 value: f.count,
-                sub: f.sales !== undefined ? `${formatPeso(f.sales)} cart value · ${formatNum(f.skus)} SKUs` : null,
+                sub: f.sales !== undefined ? `customers · ${formatNum(f.items)} items · ${formatPeso(f.sales)} · ${formatNum(f.skus)} SKUs` : null,
                 hover: f.topSkus?.length ? (
                   <>
                     <div className="font-semibold mb-1">Top 10 SKUs added to cart</div>
