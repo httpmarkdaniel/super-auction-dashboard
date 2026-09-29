@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import ExportButton from "../components/ExportButton";
+import { exportDomTableToExcel } from "../exportTable";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import DataTable from "../components/DataTable";
@@ -116,9 +118,11 @@ function autoGranularity(dateRange) {
 }
 
 function ReportTable({ columns, rows, totalRow }) {
+  const tableRef = useRef(null);
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-[13px] border-collapse">
+      <ExportButton onClick={() => exportDomTableToExcel(tableRef.current, "Returns and Cancellation")} />
+      <table ref={tableRef} className="w-full text-[13px] border-collapse">
         <thead>
           <tr style={{ borderBottom: `1px solid ${hrh.border}` }}>
             {columns.map((c) => (

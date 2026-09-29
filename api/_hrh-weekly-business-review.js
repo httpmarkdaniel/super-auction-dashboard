@@ -339,7 +339,7 @@ export async function handleWeeklyBusinessReview(req, res) {
     // `current` — see resolveMomWindows above.
     const momWindows = resolveMomWindows();
     const weeks = sixWeeklyBucketsEndingAt(current.to);
-    const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows, channelProductRows] = await Promise.all([
+    const [curMap, wowMap, momCurMap, momPrevMap, prevMap, trendRows, productRows, channelProductRows, visitorRows] = await Promise.all([
       channelMetrics(current.from, current.to),
       wowWindow ? channelMetrics(wowWindow.from, wowWindow.to) : Promise.resolve(null),
       channelMetrics(momWindows.current.from, momWindows.current.to),
@@ -436,7 +436,34 @@ export async function handleWeeklyBusinessReview(req, res) {
           format: "JSONEachRow",
         })
         .then((r) => r.json()),
+      // HMRPH Online visitors — GA4 users on the ONP storefront pages (same
+      // source/paths as the Traffic & Conversion page). TikTok/Shopee have
+      // no traffic source, so they show "—".
+      client
+        .query({
+          query: `
+            SELECT date, sum(totalUsers) AS users
+            FROM ga4.ga4_pages_path_report FINAL
+            WHERE property_id = '314716873'
+              AND pagePath IN ('/shop/ONP', '/search/stores/ONP')
+              AND date BETWEEN {from:String} AND {to:String}
+            GROUP BY date
+          `,
+          query_params: { from: previous.from.replaceAll("-", ""), to: current.to.replaceAll("-", "") },
+          format: "JSONEachRow",
+        })
+        .then((r) => r.json()),
     ]);
+    const curKeyFrom = current.from.replaceAll("-", "");
+    const curKeyTo = current.to.replaceAll("-", "");
+    const prevKeyFrom = previous.from.replaceAll("-", "");
+    const prevKeyTo = previous.to.replaceAll("-", "");
+    let curVisitors = 0;
+    let prevVisitors = 0;
+    for (const r of visitorRows) {
+      if (r.date >= curKeyFrom && r.date <= curKeyTo) curVisitors += toNum(r.users);
+      else if (r.date >= prevKeyFrom && r.date <= prevKeyTo) prevVisitors += toNum(r.users);
+    }
 
     const platformRows = ALL_CHANNELS.map((ch) => {
       const cur = curMap.get(ch);
@@ -461,7 +488,10 @@ export async function handleWeeklyBusinessReview(req, res) {
         momCurrent: momCur.gmv,
         orders: cur.orders,
         aov: safeDivide(cur.gmv, cur.orders),
-        conversionRate: null, // see dataQuality — no defensible platform-specific denominator
+        traffic: ch === "HMRPH ONLINE" ? curVisitors : null,
+        prevTraffic: ch === "HMRPH ONLINE" ? prevVisitors : null,
+        // Conversion Rate = Orders / Visitors (HMRPH Online only).
+        conversionRate: ch === "HMRPH ONLINE" && curVisitors > 0 ? (cur.orders / curVisitors) * 100 : null,
       };
     });
     const curTotalGmv = platformRows.reduce((s, r) => s + r.sales, 0);
@@ -484,6 +514,8 @@ export async function handleWeeklyBusinessReview(req, res) {
       momCurrent: momCurTotalGmv,
       orders: curTotalOrders,
       aov: safeDivide(curTotalGmv, curTotalOrders),
+      traffic: null,
+      prevTraffic: null,
       conversionRate: null,
     };
 
@@ -812,7 +844,7 @@ export async function handleWeeklyBusinessReview(req, res) {
       skuMoversByChannel,
       skuInsights,
       dataQuality: [
-        "Conversion Rate is not populated for any platform: this dashboard's only traffic source is a single, site-wide GA4 property covering the HMRPH Online website only — it cannot represent TikTok/Shopee marketplace-app traffic at all, and using it for any platform (per instruction) was ruled out rather than presenting a misleading site-wide number as platform-specific.",
+        "Traffic and Conversion Rate (Orders / Visitors) are shown for HMRPH Online only — visitors are GA4 users on the /shop/ONP storefront pages. TikTok/Shopee have no traffic source.",
         "WoW % follows the page's selected Date Range filter and shows — when that window's actual length doesn't support the comparison (needs a <=7-day window) — a deliberate, disclosed threshold, not derived from any spec. MoM % is always Month-to-Date vs. the same elapsed days last month (e.g. Sep 1-24 vs Aug 1-24), independent of the Date Range filter, and is always shown.",
         "Grew/Dipped (Slide 4) count every SKU with any real GMV increase or decrease between the two periods (no minimum % threshold) — only an exact 0% change (identical GMV in both periods) is left uncategorized as genuinely flat.",
         "Disappeared/Problem SKU stock status reuses api/hrh-product-analytics.js's CURRENT stockStatus() logic, which is only 2 states (HAS STOCK / OUT OF STOCK) plus UNKNOWN STOCK for no inventory match — a 3rd \"Has Stock / Not Posted\" state existed there previously and was deliberately removed; it is not reintroduced here.",

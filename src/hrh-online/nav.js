@@ -29,6 +29,7 @@ export const NAV_GROUPS = [
     items: [
       { key: "weeklyBusinessReview", label: "Weekly Business Review" },
       { key: "campaignCalendar", label: "Interactive Calendar" },
+      { key: "actionItems", label: "Action Items" },
     ],
   },
 ];

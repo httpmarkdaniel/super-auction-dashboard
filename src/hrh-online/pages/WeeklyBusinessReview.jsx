@@ -224,7 +224,7 @@ function InsightsPanel({ storageKey, periodLabel }) {
 const platformTableColumns = (meta) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
-  { key: "wowPct", label: meta.wowPreviousLabel ? `WoW % (vs ${meta.wowPreviousLabel})` : "WoW %", render: (r) => <PctWithAmount pct={r.wowPct} previous={r.wowPrevious} /> },
+  { key: "traffic", label: "Traffic", render: (r) => (r.traffic === null || r.traffic === undefined ? "—" : <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />) },
   { key: "momPct", label: `MoM % (MTD ${meta.momCurrentLabel} vs ${meta.momPreviousLabel})`, render: (r) => <MomCell previous={r.momPrevious} current={r.momCurrent} pct={r.momPct} /> },
   { key: "orders", label: "Orders", render: (r) => <DeltaValue value={r.orders} previous={r.prevOrders} format={formatNum} /> },
   { key: "aov", label: "AOV", render: (r) => <DeltaValue value={r.aov} previous={r.prevAov} format={formatPeso} /> },

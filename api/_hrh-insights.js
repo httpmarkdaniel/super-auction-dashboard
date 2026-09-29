@@ -13,7 +13,7 @@ import { get, put } from "@vercel/blob";
 //   POST ?report=insights  body { key, text }  -> { key, text, updatedAt }
 
 const KEY_PATTERN = /^[a-z0-9_-]{1,100}$/;
-const MAX_TEXT_LENGTH = 20000;
+const MAX_TEXT_LENGTH = 100000;
 
 const blobPath = (key) => `insights/${key}.json`;
 

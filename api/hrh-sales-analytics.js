@@ -190,7 +190,8 @@ function buildVoucherSeriesTrend(rows, from, to, topN) {
   const byDate = new Map();
   for (const r of rows) {
     const key = topSet.has(r.voucher) ? r.voucher : "Other";
-    const bucket = byDate.get(r.d) || { orders: {}, discountPrice: {} };
+    const bucket = byDate.get(r.d) || { orders: {}, discountPrice: {}, orderPrice: {} };
+    bucket.orderPrice[key] = (bucket.orderPrice[key] || 0) + (r.orderPrice || 0);
     bucket.orders[key] = (bucket.orders[key] || 0) + r.orders;
     bucket.discountPrice[key] = (bucket.discountPrice[key] || 0) + r.discountPrice;
     byDate.set(r.d, bucket);
@@ -208,7 +209,13 @@ function buildVoucherSeriesTrend(rows, from, to, topN) {
     for (const k of seriesKeys) out[k] = b?.discountPrice[k] || 0;
     return out;
   });
-  return { series, ordersData, discountData };
+  const orderValueData = dates.map((date) => {
+    const b = byDate.get(date);
+    const out = { date };
+    for (const k of seriesKeys) out[k] = b?.orderPrice[k] || 0;
+    return out;
+  });
+  return { series, ordersData, discountData, orderValueData };
 }
 
 // `?report=traffic` / `?report=customers` dispatch to Traffic & Conversion's
@@ -685,7 +692,8 @@ export default async function handler(req, res) {
               voucher_code,
               any(voucher_name) AS voucher_name,
               count() AS orders,
-              sum(total_discount_price) AS discount_price
+              sum(total_discount_price) AS discount_price,
+              sum(total_order_price) AS order_price
             FROM cms.mart_cms_voucher_report
             WHERE store_name = {store:String} AND order_status != 'Cancelled'
               AND order_created_at >= {curFromDt:String} AND order_created_at < {curToExclusiveDt:String}
@@ -719,6 +727,7 @@ export default async function handler(req, res) {
         voucher: r.voucher_name || r.voucher_code,
         orders: toNum(r.orders),
         discountPrice: toNum(r.discount_price),
+        orderPrice: toNum(r.order_price),
       })),
       current.from,
       current.to,

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { hrh } from "../theme";
 import { EmptyState } from "./States";
 import Pagination from "./Pagination";
+import ExportButton from "./ExportButton";
+import { exportTableToExcel } from "../exportTable";
 
 // Generic dense table — dark navy header per the design brief, used by
 // every comparison/detail table across HRH Online. columns: [{ key, label,
@@ -22,7 +24,7 @@ import Pagination from "./Pagination";
 // column defs; columns without one default to 120px.
 const DEFAULT_STICKY_WIDTH = 120;
 
-export default function DataTable({ columns, rows, paginate = false, pageSize = 10, emptyLabel, stickyColumns = 0, onRowClick }) {
+export default function DataTable({ columns, rows, paginate = false, pageSize = 10, emptyLabel, stickyColumns = 0, onRowClick, exportName }) {
   const [page, setPage] = useState(1);
 
   // A new `rows` reference (new filter/channel/date selection) should land
@@ -58,6 +60,7 @@ export default function DataTable({ columns, rows, paginate = false, pageSize = 
 
   return (
     <div>
+      <ExportButton onClick={() => exportTableToExcel(columns, rows, exportName)} />
       <div className="overflow-x-auto -mx-1">
         <table className="w-full text-[13px] border-collapse">
           <thead>

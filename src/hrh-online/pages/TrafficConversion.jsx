@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import ExportButton from "../components/ExportButton";
+import { exportDomTableToExcel } from "../exportTable";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { KpiCard, KpiRow } from "../components/Kpi";
 import Panel from "../components/Panel";
 import FunnelList from "../components/FunnelList";
@@ -194,6 +196,7 @@ const SEARCH_KEYWORD_STORES = [
 ];
 
 function SearchKeywordsPanel({ dateRange }) {
+  const searchTableRef = useRef(null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -272,7 +275,8 @@ function SearchKeywordsPanel({ dateRange }) {
       {data && !error && rows.length === 0 && <EmptyState label="No searches in this period." />}
       {data && !error && rows.length > 0 && (
         <div className="max-h-[420px] overflow-y-auto">
-          <table className="w-full text-[12.5px]">
+          <ExportButton onClick={() => exportDomTableToExcel(searchTableRef.current, "Site Searches")} />
+          <table ref={searchTableRef} className="w-full text-[12.5px]">
             <thead style={{ position: "sticky", top: 0, background: hrh.surface }}>
               <tr style={{ borderBottom: `1px solid ${hrh.border}` }}>
                 <th className="text-left py-2 font-semibold" style={{ color: hrh.ink2 }}>

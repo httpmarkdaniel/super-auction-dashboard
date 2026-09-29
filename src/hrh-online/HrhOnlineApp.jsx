@@ -15,6 +15,7 @@ import CustomerSuccess from "./pages/CustomerSuccess";
 import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
 import CampaignCalendar from "./pages/CampaignCalendar";
 import OperationalFlags from "./pages/OperationalFlags";
+import ActionItems from "./pages/ActionItems";
 import { NAV_GROUPS, OPERATIONAL_FLAGS_KEY } from "./nav";
 import { defaultDateRange } from "./dateRange";
 import "../uniform.css";
@@ -32,6 +33,7 @@ const PAGES = {
   customerSuccess: CustomerSuccess,
   weeklyBusinessReview: WeeklyBusinessReview,
   campaignCalendar: CampaignCalendar,
+  actionItems: ActionItems,
   [OPERATIONAL_FLAGS_KEY]: OperationalFlags,
 };
 
@@ -50,6 +52,7 @@ const PAGE_META = {
   returnsCancellation: { title: "Returns and Cancellation", lead: "Returned and cancelled orders, and why." },
   weeklyBusinessReview: { title: "Weekly Business Review", lead: "Platform and SKU performance summary for the selected period." },
   campaignCalendar: { title: "Interactive Calendar", lead: "HRH Online campaign schedule across HMR Online, Shopee and TikTok." },
+  actionItems: { title: "Action Items", lead: "Item, owner, due date, action steps and status for each follow-up." },
   markdown: { title: "Markdown Analytics", lead: "Marked-down products and how they sell." },
   customerSuccess: { title: "Customer Success", lead: "Customer service and satisfaction." },
   [OPERATIONAL_FLAGS_KEY]: { title: "Operational Flags", lead: "Live checks on orders, fulfillment, cancellations, returns, inventory, publishing and customer inquiries.", eyebrow: "Monitoring" },
@@ -77,7 +80,7 @@ export default function HrhOnlineApp() {
   const filters = { channel, dateRange };
   const meta = PAGE_META[page] || { title: page, lead: "" };
   const eyebrow = meta.eyebrow || GROUP_BY_KEY[page] || "HRH Online";
-  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar" || page === OPERATIONAL_FLAGS_KEY;
+  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar" || page === "actionItems" || page === OPERATIONAL_FLAGS_KEY;
   const hideDateRange = page === "campaignCalendar";
 
   return (
