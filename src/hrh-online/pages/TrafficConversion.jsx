@@ -140,7 +140,11 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
         </div>
         <div className="xl:col-span-3">
           <Panel title="Conversion Funnel" subtitle={funnelSubtitle} className="h-full">
-            <FunnelList stages={funnelStages.map((f) => ({ label: f.stage, value: f.count }))} stageHeight={76} gap={8} />
+            <FunnelList stages={funnelStages.map((f) => ({
+                label: f.stage,
+                value: f.count,
+                sub: f.sales !== undefined ? `${formatPeso(f.sales)} cart value · ${formatNum(f.skus)} SKUs` : null,
+              }))} stageHeight={76} gap={8} />
             <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
               <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>
                 Total Revenue
@@ -425,7 +429,7 @@ export default function TrafficConversion({ filters }) {
             kpis={hrhData.kpis}
             trend={hrhTrend}
             funnelStages={hrhData.funnel}
-            funnelSubtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Checkout -> Completed Order"
+            funnelSubtitle="Page Views (hmr.ph/shop/ONP) -> Users -> Add to Cart -> Checkout -> Completed Order"
             totalRevenue={hrhData.totalRevenue}
             newVsReturning={hrhData.newVsReturning}
             newVsReturningSubtitle="Share of users in this period (hmr.ph/shop/ONP) — see api file comment: GA4's “new” is whole-site, not this-page, so this skews heavily Returning"

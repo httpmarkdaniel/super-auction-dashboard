@@ -45,6 +45,7 @@ export default function FunnelList({ stages, stageHeight = 52, gap = 4 }) {
               <div className="absolute inset-0 flex flex-col items-center justify-center leading-tight pointer-events-none">
                 <span className="text-[12px] font-semibold text-white">{s.label}</span>
                 <span className="text-[13px] font-bold text-white">{formatNum(s.value)}</span>
+                {s.sub && <span className="text-[10.5px] text-white opacity-90">{s.sub}</span>}
               </div>
             </div>
             {dropoffPct != null && (

@@ -614,7 +614,25 @@ export async function handleTrafficAnalytics(req, res) {
       curCheckouts: rawHrhOrderAgg.curOrders,
       ordersByDate: realOrdersByDate,
     };
-    const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current);
+    // Add to Cart — HRH Online only (CMS store 91 = "HRH ONLINE", code ONP),
+    // from cms.stg_cms_carts: one row per item added to a cart. Sales =
+    // price × quantity of those cart lines; SKUs = distinct SKUs added.
+    const [cartRow = {}] = await (
+      await client.query({
+        query: `
+          SELECT count() AS adds,
+                 sum(toFloat64(price) * toFloat64(quantity)) AS sales,
+                 uniqExact(JSONExtractString(posting_item_details, 'sku')) AS skus
+          FROM cms.stg_cms_carts
+          WHERE store_id = 91
+            AND toDate(created_at, 'Asia/Manila') BETWEEN {from:String} AND {to:String}
+        `,
+        query_params: { from: current.from, to: current.to },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const addToCartStage = { stage: "Add to Cart", count: toNum(cartRow.adds), sales: toNum(cartRow.sales), skus: toNum(cartRow.skus) };
+    const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current, [addToCartStage]);
 
     // --- WHOLE SITE — the 6 other branches with a real online store, see
     // BRANCHES/wholeSiteRows query comment. Identical methodology to HRH
