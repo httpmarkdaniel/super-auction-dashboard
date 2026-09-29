@@ -121,6 +121,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
   const seriesKeys = voucherSeries.map((s) => s.key);
   const ordersByVoucher = bucketRows(byVoucherTrend?.ordersData, bucket, seriesKeys);
   const discountByVoucher = bucketRows(byVoucherTrend?.orderValueData, bucket, seriesKeys);
+  const realDiscountByVoucher = bucketRows(byVoucherTrend?.discountData, bucket, seriesKeys);
   // Merge the two same-length, same-order bucketed arrays into one combo
   // dataset — `${key}__bar` (Discount Value) and `${key}__line` (Orders)
   // per voucher, per bucket (see PairedBarLineChart in Charts.jsx).
@@ -130,6 +131,7 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
     for (const key of seriesKeys) {
       row[`${key}__bar`] = discountRow[key] || 0;
       row[`${key}__line`] = ordersRow[key] || 0;
+      row[`${key}__extra`] = realDiscountByVoucher[i]?.[key] || 0;
     }
     return row;
   });
@@ -165,10 +167,10 @@ function VoucherAssistedSalesPanel({ voucherAssistedSales, bucket, onBucketChang
             Order Value &amp; Orders by Voucher
           </div>
           <div className="text-[10.5px]" style={{ color: hrh.muted }}>
-            Bars = Order Value (₱) · hover a bar for that voucher's Orders count
+            Bars = Order Value (₱) · hover a bar for that voucher's Discount Value and Orders
           </div>
         </div>
-        <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" stacked />
+        <PairedBarLineChart data={voucherComboData} series={voucherSeries} xKey="dateLabel" stacked barLabel="Order Value" />
       </div>
       <TopSalesDriversPanel topSalesDrivers={voucherAssistedSales?.topSalesDrivers} />
     </Panel>

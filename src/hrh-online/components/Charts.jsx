@@ -293,7 +293,7 @@ export function RateTrendComboChart({ data, bars, rateKey, rateName, height = 26
 // series — this works whether or not a Line is actually plotted, so the
 // secondary metric can live in the tooltip only, per explicit request,
 // without an extra visual layer on the chart itself).
-function PairedComboTooltip({ active, payload, label, barValueFormatter, lineValueFormatter, lineLabel }) {
+function PairedComboTooltip({ active, payload, label, barValueFormatter, lineValueFormatter, lineLabel, barLabel }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md px-3 py-2 text-[12px] max-w-[300px]" style={{ background: hrh.navy, border: `1px solid ${hrh.navyBorder}`, color: "#fff" }}>
@@ -301,6 +301,8 @@ function PairedComboTooltip({ active, payload, label, barValueFormatter, lineVal
       {payload.map((p) => {
         const key = p.dataKey.replace(/__bar$/, "");
         const lineValue = p.payload?.[`${key}__line`];
+        // Optional extra peso value per series (e.g. Discount Value beside Order Value bars).
+        const extraValue = p.payload?.[`${key}__extra`];
         return (
           <div key={p.dataKey} className="mb-1 last:mb-0">
             <div className="flex items-center gap-1.5">
@@ -308,11 +310,19 @@ function PairedComboTooltip({ active, payload, label, barValueFormatter, lineVal
               <span className="truncate font-semibold">{p.name}</span>
             </div>
             <div className="ml-3.5 flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
-              <span>Discount Value:</span>
+              <span>{barLabel}:</span>
               <span className="font-semibold" style={{ color: "#fff" }}>
                 {barValueFormatter(p.value)}
               </span>
             </div>
+            {extraValue !== undefined && (
+              <div className="ml-3.5 flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
+                <span>Discount Value:</span>
+                <span className="font-semibold" style={{ color: "#fff" }}>
+                  {barValueFormatter(extraValue)}
+                </span>
+              </div>
+            )}
             {lineValue !== undefined && (
               <div className="ml-3.5 flex items-center justify-between gap-4" style={{ color: "#a3adba" }}>
                 <span>{lineLabel}:</span>
@@ -345,6 +355,7 @@ export function PairedBarLineChart({
   height = 280,
   barValueFormatter = formatCompactPeso,
   lineValueFormatter = formatNum,
+  barLabel = "Discount Value",
   lineLabel = "Orders",
   lineName = (name) => `${name} (${lineLabel})`,
   showLines = false,
@@ -368,7 +379,7 @@ export function PairedBarLineChart({
             width={44}
           />
         )}
-        <Tooltip content={<PairedComboTooltip barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} lineLabel={lineLabel} />} />
+        <Tooltip content={<PairedComboTooltip barLabel={barLabel} barValueFormatter={barValueFormatter} lineValueFormatter={lineValueFormatter} lineLabel={lineLabel} />} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {series.map((s, i) => (
           <Bar
