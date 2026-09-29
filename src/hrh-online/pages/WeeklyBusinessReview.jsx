@@ -457,7 +457,9 @@ export default function WeeklyBusinessReview({ filters }) {
     Promise.all([get(trafficKey), get(prevTrafficKey), get(legacyTrafficKey)]).then(([cur0, prev, legacy]) => {
       const cur = Object.keys(cur0).length ? cur0 : legacy;
       setManual(cur);
-      setManualSaved(JSON.stringify(cur));
+      // Legacy entries load pre-filled but unsaved, so one Save moves them
+      // to the new key (and makes them count as the comparison period).
+      setManualSaved(JSON.stringify(cur0));
       setPrevManual(prev);
       setManualStatus("");
     });
