@@ -511,6 +511,9 @@ export async function computeHmrphOnlineLifecycle(from, to) {
     allRealCancelled,
     realOrdersReceived,
     realOrdersReceivedByMethod,
+    // The orders behind realOrdersReceived (each has created_at) — used by
+    // Traffic & Conversion for its Orders/Conversion Rate.
+    realOrders: [...realNonCancelled, ...stayingCancelled],
     directFulfilled,
     probableFulfilled,
     fulfilled,

@@ -1,4 +1,5 @@
 import { createClient } from "@clickhouse/client";
+import { computeHmrphOnlineLifecycle } from "./_hrh-orders-fulfillment.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -195,6 +196,7 @@ function aggregateOrderStatusRows(rows, current, previous) {
 // inserted between Users and Checkout.
 function buildTrafficSection(pageAgg, gmvAgg, orderAgg, current, extraFunnelStages = []) {
   const conversionRate = safeDivide(orderAgg.curOrders, pageAgg.curPageViews) * 100;
+  const checkoutCount = orderAgg.curCheckouts ?? orderAgg.curOrders;
   const prevConversionRate = safeDivide(orderAgg.prevOrders, pageAgg.prevPageViews) * 100;
   const revPerView = safeDivide(gmvAgg.curGmv, pageAgg.curPageViews);
   const prevRevPerView = safeDivide(gmvAgg.prevGmv, pageAgg.prevPageViews);
@@ -217,7 +219,7 @@ function buildTrafficSection(pageAgg, gmvAgg, orderAgg, current, extraFunnelStag
     { stage: "Page Views", count: pageAgg.curPageViews },
     { stage: "Users", count: pageAgg.curUsers },
     ...extraFunnelStages,
-    { stage: "Checkout", count: orderAgg.curOrders },
+    { stage: "Checkout", count: checkoutCount },
     { stage: "Completed Order", count: orderAgg.curPaidOrders },
   ];
 
@@ -595,7 +597,23 @@ export async function handleTrafficAnalytics(req, res) {
     // --- HRH Online (scoped to /shop/ONP + /search/stores/ONP) ---
     const hrhPageAgg = aggregatePageRows(pageRows, curFromKey, curToKey, prevFromKey, prevToKey);
     const hrhGmvAgg = aggregateGmvRows(salesRows, current, previous);
-    const hrhOrderAgg = aggregateOrderStatusRows(orderStatusRows, current, previous);
+    // HRH Online Orders = Real Orders Received (same logic as Orders &
+    // Fulfillment: deduped, minus dev/test, customer-initiated cancels and
+    // duplicate retries). Checkout funnel stage keeps the raw count.
+    const rawHrhOrderAgg = aggregateOrderStatusRows(orderStatusRows, current, previous);
+    const [curLifecycle, prevLifecycle] = await Promise.all([
+      computeHmrphOnlineLifecycle(current.from, current.to),
+      computeHmrphOnlineLifecycle(previous.from, previous.to),
+    ]);
+    const realOrdersByDate = new Map();
+    for (const o of curLifecycle.realOrders) realOrdersByDate.set(o.created_at, (realOrdersByDate.get(o.created_at) || 0) + 1);
+    const hrhOrderAgg = {
+      curOrders: curLifecycle.realOrdersReceived,
+      prevOrders: prevLifecycle.realOrdersReceived,
+      curPaidOrders: rawHrhOrderAgg.curPaidOrders,
+      curCheckouts: rawHrhOrderAgg.curOrders,
+      ordersByDate: realOrdersByDate,
+    };
     const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current);
 
     // --- WHOLE SITE — the 6 other branches with a real online store, see
