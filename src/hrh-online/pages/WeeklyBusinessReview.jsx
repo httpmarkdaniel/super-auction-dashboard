@@ -467,7 +467,7 @@ export default function WeeklyBusinessReview({ filters }) {
     }
   }
   const num = (v) => (v === "" || v === undefined || v === null ? null : Number(v));
-  const platformRows = data
+  const platformRowsRaw = data
     ? [...data.platformTable.rows, data.platformTable.total].map((r) => {
         if (!MANUAL_TRAFFIC_PLATFORMS.includes(r.platform)) return r;
         const visitors = num(manualSaved && JSON.parse(manualSaved)[r.platform]?.visitors);
@@ -483,6 +483,15 @@ export default function WeeklyBusinessReview({ filters }) {
         };
       })
     : [];
+  // Total row: sum of every platform that has traffic (GA4 + saved manual).
+  const platformRows = platformRowsRaw.map((r, i, all) => {
+    if (r.platform !== "Total") return r;
+    const withTraffic = all.filter((x) => x.platform !== "Total" && x.traffic !== null && x.traffic !== undefined);
+    if (!withTraffic.length) return r;
+    const sum = (k) => withTraffic.reduce((t, x) => t + (Number(x[k]) || 0), 0);
+    const sumPrev = (k) => (withTraffic.every((x) => x[k] !== null && x[k] !== undefined) ? sum(k) : null);
+    return { ...r, traffic: sum("traffic"), prevTraffic: sumPrev("prevTraffic"), pageViews: sum("pageViews"), prevPageViews: sumPrev("prevPageViews") };
+  });
   // "Top 10 by Units" and "Top 10 by Value" are genuinely different sets —
   // data.skuMovers is every SKU with real current-period activity, so
   // re-sorting here and taking the top 10 for whichever metric is selected
