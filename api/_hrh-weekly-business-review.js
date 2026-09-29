@@ -310,6 +310,25 @@ async function fetchStockQty(itemIds) {
 // tiny base), then explicitly removed again per user request — no minimum
 // peso floor here either.
 
+// sumMap returns [[keys], [values]] — per-channel cur/prev GMV and units
+// for one SKU, only channels with any sales in either period.
+function channelBreakdown(r) {
+  const toMap = (sm) => {
+    const m = new Map();
+    const [keys, vals] = Array.isArray(sm) ? sm : [[], []];
+    (keys || []).forEach((k, i) => m.set(k, toNum(vals[i])));
+    return m;
+  };
+  const cg = toMap(r.cur_gmv_by_ch), cu = toMap(r.cur_units_by_ch), pg = toMap(r.prev_gmv_by_ch), pu = toMap(r.prev_units_by_ch);
+  return ALL_CHANNELS.filter((ch) => (cg.get(ch) || 0) > 0 || (pg.get(ch) || 0) > 0).map((ch) => ({
+    platform: CHANNEL_DISPLAY[ch],
+    curGmv: cg.get(ch) || 0,
+    curUnits: cu.get(ch) || 0,
+    prevGmv: pg.get(ch) || 0,
+    prevUnits: pu.get(ch) || 0,
+  }));
+}
+
 function formatPesoLocal(n) {
   return `₱${Math.round(n).toLocaleString("en-PH")}`;
 }
@@ -384,7 +403,11 @@ export async function handleWeeklyBusinessReview(req, res) {
               sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
               maxIf(transaction_date, net_sales_amount > 0) AS last_sold_date,
               groupUniqArrayIf(sales_channel, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_channels,
-              groupUniqArrayIf(sales_channel, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_channels
+              groupUniqArrayIf(sales_channel, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_channels,
+              sumMapIf([sales_channel], [toFloat64(net_sales_amount)], net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_gmv_by_ch,
+              sumMapIf([sales_channel], [toFloat64(net_quantity)], net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units_by_ch,
+              sumMapIf([sales_channel], [toFloat64(net_sales_amount)], net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv_by_ch,
+              sumMapIf([sales_channel], [toFloat64(net_quantity)], net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units_by_ch
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
               AND sales_channel IN {channels:Array(String)}
@@ -605,6 +628,7 @@ export async function handleWeeklyBusinessReview(req, res) {
         pct: pctDelta(curGmv, prevGmv),
         curChannels: (r.cur_channels || []).map((c) => CHANNEL_DISPLAY[c] || c),
         prevChannels: (r.prev_channels || []).map((c) => CHANNEL_DISPLAY[c] || c),
+        byChannel: channelBreakdown(r),
         stockQty: stockMap.has(String(r.item_id)) ? stockMap.get(String(r.item_id)) : undefined,
         lastSoldDate: r.last_sold_date ? String(r.last_sold_date).slice(0, 10) : null,
       };
@@ -683,7 +707,15 @@ export async function handleWeeklyBusinessReview(req, res) {
         // Platform(s) the SKU sold on — prior period for Disappeared,
         // current period otherwise. pctChange: null = New (no prior sales).
         const platforms = (kind === "disappeared" ? p.prevChannels : p.curChannels).join(", ") || "—";
-        return { product: p.product, sku: p.sku, platform: platforms, pctChange: p.pct, detail, lastSoldDate: p.lastSoldDate };
+        // Per-platform split (shown when the SKU sold on 2+ platforms).
+        const breakdown = p.byChannel.map((c) => ({
+          platform: c.platform,
+          pctChange: pctDelta(c.curGmv, c.prevGmv),
+          gmv: kind === "disappeared" ? c.prevGmv : c.curGmv,
+          units: kind === "disappeared" ? c.prevUnits : c.curUnits,
+        }));
+        const stock = p.stockQty === undefined ? "UNKNOWN STOCK" : p.stockQty > 0 ? "HAS STOCK" : "OUT OF STOCK";
+        return { product: p.product, sku: p.sku, platform: platforms, pctChange: p.pct, detail, lastSoldDate: p.lastSoldDate, breakdown, stock, stockQty: p.stockQty ?? null };
       });
     }
 

@@ -75,12 +75,43 @@ function formatDateLabel(iso) {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
+const fmtChange = (pct) => (pct === null || pct === undefined ? "New" : `${pct > 0 ? "+" : ""}${formatPct(pct)}`);
+const multi = (r) => r.breakdown && r.breakdown.length > 1;
+
 const SKU_DETAIL_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 380 },
   { key: "sku", label: "SKU", render: (r) => r.sku || "—", width: 100 },
-  { key: "platform", label: "Platform" },
-  { key: "pctChange", label: "% Change", render: (r) => (r.pctChange === null || r.pctChange === undefined ? "New" : `${r.pctChange > 0 ? "+" : ""}${formatPct(r.pctChange)}`) },
-  { key: "detail", label: "Total Sales / Units / Stock" },
+  {
+    key: "platform",
+    label: "Platform",
+    render: (r) => (multi(r) ? <div className="leading-snug">{r.breakdown.map((b) => <div key={b.platform}>{b.platform}</div>)}</div> : r.platform),
+  },
+  {
+    key: "pctChange",
+    label: "% Change",
+    render: (r) =>
+      multi(r) ? (
+        <div className="leading-snug whitespace-nowrap">
+          {r.breakdown.map((b) => <div key={b.platform}>{b.platform}: {fmtChange(b.pctChange)}</div>)}
+          <div className="font-semibold">Total: {fmtChange(r.pctChange)}</div>
+        </div>
+      ) : (
+        fmtChange(r.pctChange)
+      ),
+  },
+  {
+    key: "detail",
+    label: "Total Sales / Units / Stock",
+    render: (r) =>
+      multi(r) ? (
+        <div className="leading-snug whitespace-nowrap">
+          {r.breakdown.map((b) => <div key={b.platform}>{b.platform}: {formatPeso(b.gmv)} ({formatNum(b.units)} units)</div>)}
+          <div className="font-semibold">{r.detail}</div>
+        </div>
+      ) : (
+        r.detail
+      ),
+  },
   { key: "lastSoldDate", label: "Last Date Sold", render: (r) => formatDateLabel(r.lastSoldDate) },
 ];
 
@@ -93,8 +124,20 @@ const SKU_DETAIL_COLUMNS = [
 // current stock, e.g. "₱321 (5 units) · 12 unit(s) still in stock" — a
 // signed +/- delta was tried first and dropped as confusing, per explicit
 // request.
+const STOCK_SORTS = [
+  { key: "default", label: "Default order" },
+  { key: "HAS STOCK", label: "With stock first" },
+  { key: "OUT OF STOCK", label: "Out of stock first" },
+];
+
 function SkuCountWithModal({ count, topSkus, category }) {
   const [open, setOpen] = useState(false);
+  const [stockSort, setStockSort] = useState("default");
+  const rows = useMemo(() => {
+    if (!topSkus || stockSort === "default") return topSkus;
+    // Stable sort: the chosen status first, everything else keeps its order.
+    return [...topSkus].sort((a, b) => (b.stock === stockSort) - (a.stock === stockSort));
+  }, [topSkus, stockSort]);
   if (!topSkus || topSkus.length === 0) return formatNum(count);
   return (
     <>
@@ -102,7 +145,13 @@ function SkuCountWithModal({ count, topSkus, category }) {
         {formatNum(count)}
       </span>
       <Modal open={open} onClose={() => setOpen(false)} title={`${category} — All SKUs`} subtitle={`${topSkus.length} SKU(s) this period`} wide>
-        <DataTable columns={SKU_DETAIL_COLUMNS} rows={topSkus} paginate pageSize={15} emptyLabel="No SKUs in this category." />
+        <div className="flex items-center gap-2 mb-2 text-[12px]" style={{ color: hrh.ink2 }}>
+          Sort by stock:
+          <select value={stockSort} onChange={(e) => setStockSort(e.target.value)} className="rounded border px-2 py-1 text-[12px]" style={{ borderColor: hrh.border, background: "#fff", color: hrh.ink }}>
+            {STOCK_SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+          </select>
+        </div>
+        <DataTable columns={SKU_DETAIL_COLUMNS} rows={rows} paginate pageSize={15} emptyLabel="No SKUs in this category." exportName={`${category} SKUs`} />
       </Modal>
     </>
   );
