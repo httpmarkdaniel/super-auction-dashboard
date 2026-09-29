@@ -243,14 +243,44 @@ function InsightsPanel({ storageKey, periodLabel }) {
 // previous comparable period. WoW compares the selected dates one week
 // earlier; MoM is always month-to-date vs the same days last month,
 // whatever the filter (headers carry the actual dates).
-const platformTableColumns = (meta) => [
+const MANUAL_TRAFFIC_PLATFORMS = ["TikTok", "Shopee"];
+
+function TrafficInputs({ platform, manual, onChange }) {
+  const v = manual[platform] || {};
+  const box = "w-[84px] rounded border px-1.5 py-1 text-[12px]";
+  const style = { borderColor: hrh.border, color: hrh.ink, background: "#fff" };
+  return (
+    <div className="flex gap-2">
+      <label className="text-[10px] uppercase" style={{ color: hrh.muted }}>
+        Visitors
+        <input type="number" min="0" className={box} style={style} value={v.visitors ?? ""} onChange={(e) => onChange(platform, "visitors", e.target.value)} />
+      </label>
+      <label className="text-[10px] uppercase" style={{ color: hrh.muted }}>
+        Page Views
+        <input type="number" min="0" className={box} style={style} value={v.pageViews ?? ""} onChange={(e) => onChange(platform, "pageViews", e.target.value)} />
+      </label>
+    </div>
+  );
+}
+
+const platformTableColumns = (meta, manual, onManualChange) => [
   { key: "platform", label: "Platform", render: (r) => <span className={r.platform === "Total" ? "font-semibold" : ""}>{r.platform}</span> },
   { key: "sales", label: "Sales", render: (r) => <DeltaValue value={r.sales} previous={r.prevSales} format={formatPeso} /> },
   {
     key: "traffic",
     label: "Traffic (Visitors / Page Views)",
     render: (r) =>
-      r.traffic === null || r.traffic === undefined ? (
+      MANUAL_TRAFFIC_PLATFORMS.includes(r.platform) ? (
+        <div>
+          {r.traffic !== null && r.traffic !== undefined && (
+            <div className="flex gap-4 mb-1.5">
+              <DeltaValue value={r.traffic} previous={r.prevTraffic} format={formatNum} />
+              <DeltaValue value={r.pageViews} previous={r.prevPageViews} format={formatNum} />
+            </div>
+          )}
+          <TrafficInputs platform={r.platform} manual={manual} onChange={onManualChange} />
+        </div>
+      ) : r.traffic === null || r.traffic === undefined ? (
         "—"
       ) : (
         <div className="flex gap-4">
@@ -402,7 +432,63 @@ export default function WeeklyBusinessReview({ filters }) {
     return () => controller.abort();
   }, [params, ready, load]);
 
-  const platformRows = data ? [...data.platformTable.rows, data.platformTable.total] : [];
+  // Manual TikTok/Shopee traffic, typed in the Traffic column and saved per
+  // period (same insights store). Previous period's saved entry gives the
+  // comparison. Conversion Rate = Orders / Visitors.
+  const trafficKey = data ? `${insightsKey(dateRange, data.meta.current)}-traffic` : null;
+  const prevTrafficKey = data ? `${insightsKey(dateRange, data.meta.previous)}-traffic` : null;
+  const [manual, setManual] = useState({});
+  const [manualSaved, setManualSaved] = useState("{}");
+  const [prevManual, setPrevManual] = useState({});
+  const [manualStatus, setManualStatus] = useState("");
+  useEffect(() => {
+    if (!trafficKey) return;
+    const get = (k) =>
+      fetch(`/api/hrh-sales-analytics?report=insights&key=${encodeURIComponent(k)}`)
+        .then((r) => r.json())
+        .then((j) => (j.text ? JSON.parse(j.text) : {}))
+        .catch(() => ({}));
+    Promise.all([get(trafficKey), get(prevTrafficKey)]).then(([cur, prev]) => {
+      setManual(cur);
+      setManualSaved(JSON.stringify(cur));
+      setPrevManual(prev);
+      setManualStatus("");
+    });
+  }, [trafficKey, prevTrafficKey]);
+  const onManualChange = (platform, field, value) => setManual((m) => ({ ...m, [platform]: { ...m[platform], [field]: value } }));
+  async function saveManual() {
+    setManualStatus("Saving…");
+    try {
+      const text = JSON.stringify(manual);
+      const res = await fetch("/api/hrh-sales-analytics?report=insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: trafficKey, text }),
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      setManualSaved(text);
+      setManualStatus("Saved");
+    } catch (err) {
+      setManualStatus(`Couldn't save: ${err.message}`);
+    }
+  }
+  const num = (v) => (v === "" || v === undefined || v === null ? null : Number(v));
+  const platformRows = data
+    ? [...data.platformTable.rows, data.platformTable.total].map((r) => {
+        if (!MANUAL_TRAFFIC_PLATFORMS.includes(r.platform)) return r;
+        const visitors = num(manualSaved && JSON.parse(manualSaved)[r.platform]?.visitors);
+        const pageViews = num(JSON.parse(manualSaved)[r.platform]?.pageViews);
+        if (visitors === null && pageViews === null) return r;
+        return {
+          ...r,
+          traffic: visitors ?? 0,
+          prevTraffic: num(prevManual[r.platform]?.visitors),
+          pageViews: pageViews ?? 0,
+          prevPageViews: num(prevManual[r.platform]?.pageViews),
+          conversionRate: visitors ? (r.orders / visitors) * 100 : null,
+        };
+      })
+    : [];
   // "Top 10 by Units" and "Top 10 by Value" are genuinely different sets —
   // data.skuMovers is every SKU with real current-period activity, so
   // re-sorting here and taking the top 10 for whichever metric is selected
@@ -428,7 +514,21 @@ export default function WeeklyBusinessReview({ filters }) {
             subtitle={`Current period: ${data.meta.currentLabel} · changes vs previous period ${data.meta.previousLabel}`}
             className="mb-4"
           >
-            <DataTable columns={platformTableColumns(data.meta)} rows={platformRows} emptyLabel="No platform sales in this period." />
+            <DataTable columns={platformTableColumns(data.meta, manual, onManualChange)} rows={platformRows} emptyLabel="No platform sales in this period." />
+            <div className="flex items-center gap-3 mt-2">
+              <button
+                type="button"
+                onClick={saveManual}
+                disabled={JSON.stringify(manual) === manualSaved || manualStatus === "Saving…"}
+                className="text-[12.5px] font-semibold px-4 py-1.5 rounded-md text-white disabled:opacity-40"
+                style={{ background: hrh.navy }}
+              >
+                Save Traffic
+              </button>
+              <span className="text-[11.5px]" style={{ color: hrh.muted }}>
+                {JSON.stringify(manual) !== manualSaved ? "Unsaved traffic changes" : manualStatus || "Type TikTok / Shopee visitors & page views, then save."}
+              </span>
+            </div>
           </Panel>
 
           {/* ============================== SLIDE 3 ============================== */}
