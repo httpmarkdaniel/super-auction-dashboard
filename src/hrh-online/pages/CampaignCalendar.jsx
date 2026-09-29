@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { hrh } from "../theme";
-import CampaignEditor from "../components/CampaignEditor";
+import Modal from "../components/Modal";
 import { CAMPAIGN_EVENTS, CONTINUOUS_CAMPAIGNS, HMR_BRANCHES, PLATFORMS, SEASON_MONTHS, withCampaignDefaults } from "../data/campaignCalendar";
 
 // Recreates "HRH_Online_Campaign_Calendar.html" (the marketing team's
@@ -139,9 +139,68 @@ function DetailRow({ label, children }) {
   );
 }
 
+// Display-only day view: every Google Sheet column for that date (all
+// edits happen in the Sheet), plus the read-only Campaign Details,
+// Campaign Schedule and Posting Links of any campaign running that day.
+function DayDetails({ iso, sheetRow, sheetColumns, dayCampaigns, onClose }) {
+  const dateLabel = parseIso(iso).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const heading = "text-[12px] font-bold uppercase tracking-[0.05em] mt-4 mb-2";
+  const links = dayCampaigns.flatMap((c) => (c.postingLinks || []).filter((l) => l.url).map((l) => ({ ...l, title: c.title })));
+  return (
+    <Modal open onClose={onClose} wide title={sheetRow?.["Campaign Theme"] || "No sheet entry"} subtitle={dateLabel}>
+      <div className={heading} style={{ color: hrh.ink }}>Campaign Calendar (Google Sheet)</div>
+      {sheetRow ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+          {sheetColumns.map((col) => (
+            <DetailRow key={col} label={col}>{sheetRow[col] || "—"}</DetailRow>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[12.5px]" style={{ color: hrh.muted }}>No row for this date in the Google Sheet.</div>
+      )}
+
+      <div className={heading} style={{ color: hrh.ink }}>Campaign Details</div>
+      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>No platform campaigns on this day.</div>}
+      {dayCampaigns.map((c) => (
+        <div key={c.id} className="mb-2">
+          <DetailRow label="Campaign">{c.title}</DetailRow>
+          <DetailRow label="Platform">{PLATFORMS[c.platform].name}</DetailRow>
+          <DetailRow label="Type">{c.campaignType}</DetailRow>
+          {c.tagline && <DetailRow label="Tagline">{c.tagline}</DetailRow>}
+          {c.description && <DetailRow label="Description">{c.description}</DetailRow>}
+        </div>
+      ))}
+
+      <div className={heading} style={{ color: hrh.ink }}>Campaign Schedule</div>
+      {dayCampaigns.length === 0 && <div className="text-[12.5px]" style={{ color: hrh.muted }}>—</div>}
+      {dayCampaigns.map((c) => (
+        <DetailRow key={c.id} label={c.title}>
+          {shortDate(c.date)}
+          {endOf(c) !== c.date ? ` – ${shortDate(endOf(c))}` : ""}
+          {c.planningStart ? ` · Planning ${shortDate(c.planningStart)}` : ""}
+          {c.teaserDate ? ` · Teaser ${shortDate(c.teaserDate)}` : ""}
+        </DetailRow>
+      ))}
+
+      <div className={heading} style={{ color: hrh.ink }}>Posting Links</div>
+      {links.length === 0 ? (
+        <div className="text-[12.5px]" style={{ color: hrh.muted }}>No posting links.</div>
+      ) : (
+        links.map((l, i) => (
+          <DetailRow key={i} label={`${l.title}${l.platform ? ` · ${l.platform}` : ""}`}>
+            <a href={l.url} target="_blank" rel="noreferrer" className="underline break-all" style={{ color: hrh.blueText }}>
+              {l.url}
+            </a>
+          </DetailRow>
+        ))
+      )}
+    </Modal>
+  );
+}
+
 export default function CampaignCalendar() {
   const today = todayIso();
-  const [campaigns, setCampaigns] = useState(() => [...CAMPAIGN_EVENTS, ...CONTINUOUS_CAMPAIGNS].map(withCampaignDefaults));
+  const [campaigns] = useState(() => [...CAMPAIGN_EVENTS, ...CONTINUOUS_CAMPAIGNS].map(withCampaignDefaults));
   const [view, setView] = useState(() => {
     const t = new Date();
     return { year: t.getFullYear(), month: t.getMonth() };
@@ -150,7 +209,19 @@ export default function CampaignCalendar() {
   const [cleanView, setCleanView] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
-  const [editingId, setEditingId] = useState(null);
+  const [dayIso, setDayIso] = useState(null);
+  const [sheet, setSheet] = useState({ columns: [], rows: [] });
+  const [sheetError, setSheetError] = useState(null);
+  useEffect(() => {
+    fetch("/api/hrh-sales-analytics?report=campaignSheet")
+      .then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.message || j.error);
+        setSheet(j);
+      })
+      .catch((e) => setSheetError(e.message));
+  }, []);
+  const sheetByIso = useMemo(() => Object.fromEntries(sheet.rows.map((r) => [r.iso, r])), [sheet]);
   const [shareMsg, setShareMsg] = useState("");
 
   const viewKey = `${view.year}-${pad(view.month + 1)}`;
@@ -201,11 +272,9 @@ export default function CampaignCalendar() {
 
   // Default selection: this month's next headline launch, else its first campaign.
   const selected = campaigns.find((e) => e.id === selectedId) || summary.upcoming[0] || monthEvents[0] || null;
-  const editing = campaigns.find((e) => e.id === editingId) || null;
-
   function openCampaign(c) {
     setSelectedId(c.id);
-    setEditingId(c.id);
+    setDayIso(c.date);
   }
 
   useEffect(() => {
@@ -271,21 +340,7 @@ export default function CampaignCalendar() {
     }
   }
 
-  function saveCampaign(updated) {
-    setCampaigns((list) => list.map((c) => (c.id === updated.id ? updated : c)));
-    setSelectedId(updated.id);
-    setEditingId(null);
-    if (!updated.continuous) {
-      const d = parseIso(updated.date);
-      setView({ year: d.getFullYear(), month: d.getMonth() });
-    }
-  }
 
-  function deleteCampaign(id) {
-    setCampaigns((list) => list.filter((c) => c.id !== id));
-    setSelectedId(null);
-    setEditingId(null);
-  }
 
   // Calendar cells: leading/trailing days of the neighboring months, only as many rows as the month needs.
   const firstDow = new Date(view.year, view.month, 1).getDay();
@@ -446,7 +501,7 @@ export default function CampaignCalendar() {
                 onClick={() => openCampaign(c)}
                 className="rounded border px-2.5 py-1.5 text-[11px] font-bold transition hover:-translate-y-px hover:shadow"
                 style={PLATFORM_TONES[c.platform]}
-                title="Edit campaign period"
+                title="View campaign"
               >
                 [{PLATFORMS[c.platform].name}] {c.title} · {shortDate(c.date)}–{shortDate(endOf(c))}
               </button>
@@ -475,7 +530,8 @@ export default function CampaignCalendar() {
                 return (
                   <div
                     key={i}
-                    className="relative min-h-[150px] px-2 pt-2 pb-6"
+                    className={`relative min-h-[150px] px-2 pt-2 pb-6 ${cell.out ? "" : "cursor-pointer"}`}
+                    onClick={cell.out ? undefined : () => setDayIso(cell.iso)}
                     style={{
                       background: cell.out ? "#fbfcfe" : isSelectedDay ? "#fbfdff" : hrh.surface,
                       borderRight: (i + 1) % 7 ? `1px solid ${hrh.border}` : "none",
@@ -498,11 +554,20 @@ export default function CampaignCalendar() {
                       {cell.label}
                     </div>
                     <div className="mt-1.5 flex flex-col gap-1">
+                      {!cell.out && sheetByIso[cell.iso] && (
+                        <div className="rounded-md px-1.5 py-1 text-[11px] leading-tight font-semibold" style={{ background: "#0b1d36", color: "#fff" }} title={sheetByIso[cell.iso]["Focus / Assortment"]}>
+                          {sheetByIso[cell.iso]["Campaign Theme"] || sheetByIso[cell.iso]["Campaign Pillar"]}
+                          {sheetByIso[cell.iso]["Key Occasion"] && <div className="font-normal text-[10px] opacity-80">{sheetByIso[cell.iso]["Key Occasion"]}</div>}
+                        </div>
+                      )}
                       {shown.map((e) => (
                         <button
                           key={e.id}
                           type="button"
-                          onClick={() => openCampaign(e)}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            openCampaign(e);
+                          }}
                           className="text-left rounded-md border px-1.5 py-1 text-[11px] leading-tight transition hover:-translate-y-px hover:shadow"
                           style={{ ...eventStyle(e), color: eventStyle(e).color || hrh.ink }}
                           title={`${PLATFORMS[e.platform].name}: ${e.title}`}
@@ -512,7 +577,7 @@ export default function CampaignCalendar() {
                         </button>
                       ))}
                       {cleanView && dayEvents.length > CLEAN_LIMIT && (
-                        <button type="button" onClick={() => setCleanView(false)} className="text-left pl-1 text-[11px] font-bold print:hidden" style={{ color: hrh.blueText }}>
+                        <button type="button" onClick={(ev) => { ev.stopPropagation(); setCleanView(false); }} className="text-left pl-1 text-[11px] font-bold print:hidden" style={{ color: hrh.blueText }}>
                           +{dayEvents.length - CLEAN_LIMIT} more
                         </button>
                       )}
@@ -585,10 +650,8 @@ export default function CampaignCalendar() {
                   {selected.description || "Campaign activity scheduled for the selected date. Use this panel to review execution details, owners, assets, and notes."}
                 </p>
               </div>
-              <div className="px-4 pb-4 pt-2">
-                <button type="button" onClick={() => setEditingId(selected.id)} className="w-full rounded-md py-3 text-[13px] font-bold text-white" style={{ background: "#0c3a68" }}>
-                  ✎ View / Edit Campaign
-                </button>
+              <div className="px-4 pb-4 pt-2 text-[11.5px]" style={{ color: hrh.muted }}>
+                Display only — edit the Google Sheet to change the calendar. Click a day for its full details.
               </div>
             </>
           ) : (
@@ -599,8 +662,15 @@ export default function CampaignCalendar() {
         </aside>
       </section>
 
-      {editing && (
-        <CampaignEditor key={editing.id} campaign={editing} campaigns={campaigns} onSave={saveCampaign} onDelete={deleteCampaign} onClose={() => setEditingId(null)} />
+      {sheetError && <div className="mt-3 text-[12px]" style={{ color: hrh.bad }}>Could not load the Google Sheet: {sheetError}</div>}
+      {dayIso && (
+        <DayDetails
+          iso={dayIso}
+          sheetRow={sheetByIso[dayIso]}
+          sheetColumns={sheet.columns}
+          dayCampaigns={campaigns.filter((c) => c.date <= dayIso && endOf(c) >= dayIso)}
+          onClose={() => setDayIso(null)}
+        />
       )}
     </div>
   );
