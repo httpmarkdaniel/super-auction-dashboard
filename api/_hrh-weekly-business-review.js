@@ -382,7 +382,9 @@ export async function handleWeeklyBusinessReview(req, res) {
               sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_units,
               sumIf(net_sales_amount, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_gmv,
               sumIf(net_quantity, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_units,
-              maxIf(transaction_date, net_sales_amount > 0) AS last_sold_date
+              maxIf(transaction_date, net_sales_amount > 0) AS last_sold_date,
+              groupUniqArrayIf(sales_channel, net_sales_amount > 0 AND transaction_date BETWEEN {curFrom:String} AND {curTo:String}) AS cur_channels,
+              groupUniqArrayIf(sales_channel, net_sales_amount > 0 AND transaction_date BETWEEN {prevFrom:String} AND {prevTo:String}) AS prev_channels
             FROM xv3.mart_net_sales
             WHERE store_name = {store:String}
               AND sales_channel IN {channels:Array(String)}
@@ -601,6 +603,8 @@ export async function handleWeeklyBusinessReview(req, res) {
         curUnits,
         prevUnits,
         pct: pctDelta(curGmv, prevGmv),
+        curChannels: (r.cur_channels || []).map((c) => CHANNEL_DISPLAY[c] || c),
+        prevChannels: (r.prev_channels || []).map((c) => CHANNEL_DISPLAY[c] || c),
         stockQty: stockMap.has(String(r.item_id)) ? stockMap.get(String(r.item_id)) : undefined,
         lastSoldDate: r.last_sold_date ? String(r.last_sold_date).slice(0, 10) : null,
       };
@@ -676,7 +680,10 @@ export async function handleWeeklyBusinessReview(req, res) {
         // Last Date Sold — most useful for Disappeared (when did it stop
         // selling?), included for every category since it's the same real
         // maxIf(transaction_date) field regardless of kind.
-        return { product: p.product, sku: p.sku, detail, lastSoldDate: p.lastSoldDate };
+        // Platform(s) the SKU sold on — prior period for Disappeared,
+        // current period otherwise. pctChange: null = New (no prior sales).
+        const platforms = (kind === "disappeared" ? p.prevChannels : p.curChannels).join(", ") || "—";
+        return { product: p.product, sku: p.sku, platform: platforms, pctChange: p.pct, detail, lastSoldDate: p.lastSoldDate };
       });
     }
 

@@ -67,6 +67,8 @@ function formatDateLabel(iso) {
 const SKU_DETAIL_COLUMNS = [
   { key: "product", label: "Product", maxWidth: 380 },
   { key: "sku", label: "SKU", render: (r) => r.sku || "—", width: 100 },
+  { key: "platform", label: "Platform" },
+  { key: "pctChange", label: "% Change", render: (r) => (r.pctChange === null || r.pctChange === undefined ? "New" : `${r.pctChange > 0 ? "+" : ""}${formatPct(r.pctChange)}`) },
   { key: "detail", label: "Total Sales / Units / Stock" },
   { key: "lastSoldDate", label: "Last Date Sold", render: (r) => formatDateLabel(r.lastSoldDate) },
 ];
@@ -287,7 +289,7 @@ const PLATFORM_CHANGE_COLUMNS = [
 const SKU_MOVEMENT_COLUMNS = [
   { key: "category", label: "Category" },
   { key: "skus", label: "SKUs", render: (r) => <SkuCountWithModal count={r.skus} topSkus={r.topSkus} category={r.category} /> },
-  { key: "movement", label: "Movement" },
+  { key: "movement", label: "Movement (Total)" },
   { key: "lastPeriodSales", label: "Last Period Sales", render: (r) => formatPeso(r.lastPeriodSales) },
   { key: "lastPeriodUnits", label: "Last Period Units", render: (r) => formatNum(r.lastPeriodUnits) },
   {
