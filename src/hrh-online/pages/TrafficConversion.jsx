@@ -144,6 +144,21 @@ function TrafficKpiFunnelSection({ kpis, trend, funnelStages, funnelSubtitle, to
                 label: f.stage,
                 value: f.count,
                 sub: f.sales !== undefined ? `${formatPeso(f.sales)} cart value · ${formatNum(f.skus)} SKUs` : null,
+                hover: f.topSkus?.length ? (
+                  <>
+                    <div className="font-semibold mb-1">Top 10 SKUs added to cart</div>
+                    {f.topSkus.map((t, i) => (
+                      <div key={t.sku || i} className="flex justify-between gap-3 py-0.5">
+                        <span className="truncate">
+                          {i + 1}. {t.name || t.sku} <span className="opacity-70">({t.sku})</span>
+                        </span>
+                        <span className="whitespace-nowrap font-semibold">
+                          {formatNum(t.adds)} · {formatPeso(t.sales)}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                ) : null,
               }))} stageHeight={76} gap={8} />
             <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: `1px solid ${hrh.border}` }}>
               <span className="text-[11px] font-semibold uppercase tracking-[0.05em]" style={{ color: hrh.ink2 }}>

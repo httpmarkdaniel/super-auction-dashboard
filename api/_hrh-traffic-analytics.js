@@ -617,6 +617,26 @@ export async function handleTrafficAnalytics(req, res) {
     // Add to Cart — HRH Online only (CMS store 91 = "HRH ONLINE", code ONP),
     // from cms.stg_cms_carts: one row per item added to a cart. Sales =
     // price × quantity of those cart lines; SKUs = distinct SKUs added.
+    const cartParams = { from: current.from, to: current.to };
+    // Top 10 SKUs by times added to cart (hover list on the funnel stage).
+    const topCartSkusPromise = client
+      .query({
+        query: `
+          SELECT JSONExtractString(posting_item_details, 'sku') AS sku,
+                 any(JSONExtractString(posting_item_details, 'name')) AS name,
+                 count() AS adds,
+                 sum(toFloat64(price) * toFloat64(quantity)) AS sales
+          FROM cms.stg_cms_carts
+          WHERE store_id = 91
+            AND toDate(created_at, 'Asia/Manila') BETWEEN {from:String} AND {to:String}
+          GROUP BY sku
+          ORDER BY adds DESC, sales DESC
+          LIMIT 10
+        `,
+        query_params: cartParams,
+        format: "JSONEachRow",
+      })
+      .then((r) => r.json());
     const [cartRow = {}] = await (
       await client.query({
         query: `
@@ -631,7 +651,8 @@ export async function handleTrafficAnalytics(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const addToCartStage = { stage: "Add to Cart", count: toNum(cartRow.adds), sales: toNum(cartRow.sales), skus: toNum(cartRow.skus) };
+    const topCartSkus = (await topCartSkusPromise).map((r) => ({ sku: r.sku, name: r.name, adds: toNum(r.adds), sales: toNum(r.sales) }));
+    const addToCartStage = { stage: "Add to Cart", count: toNum(cartRow.adds), sales: toNum(cartRow.sales), skus: toNum(cartRow.skus), topSkus: topCartSkus };
     const hrhSection = buildTrafficSection(hrhPageAgg, hrhGmvAgg, hrhOrderAgg, current, [addToCartStage]);
 
     // --- WHOLE SITE — the 6 other branches with a real online store, see

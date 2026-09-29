@@ -34,7 +34,12 @@ export default function FunnelList({ stages, stageHeight = 52, gap = 4 }) {
 
         return (
           <div key={s.label}>
-            <div className="relative" style={{ height: stageHeight }}>
+            <div className="relative group" style={{ height: stageHeight }}>
+              {s.hover && (
+                <div className="hidden group-hover:block absolute z-20 left-1/2 -translate-x-1/2 top-full mt-1 w-[360px] max-w-[90vw] rounded-md px-3 py-2 text-[11.5px] shadow-lg" style={{ background: hrh.navy, color: "#fff" }}>
+                  {s.hover}
+                </div>
+              )}
               <div
                 className="absolute inset-0"
                 style={{
