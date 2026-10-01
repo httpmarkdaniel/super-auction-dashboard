@@ -231,6 +231,31 @@ const CANCEL_DRILLDOWN_COLUMNS = [
   { key: "cancellationReason", label: "Reason", render: (r) => r.cancellationReason || "—" },
 ];
 
+// Drilldown column filled from PayMongo per order (see
+// api/_hrh-paymongo-expired.js ?orders=) — undefined while loading.
+function paymongoReasonColumn(byOrder, failed) {
+  return {
+    key: "paymongoReason",
+    label: "PayMongo Reason",
+    maxWidth: 300,
+    render: (r) => {
+      if (failed) return <span style={{ color: hrh.muted }}>Couldn't reach PayMongo</span>;
+      if (!byOrder) return <span style={{ color: hrh.muted }}>Loading…</span>;
+      const pm = byOrder[String(r.orderNumber)];
+      if (!pm) return "—";
+      const detail = pm.errorLabel || pm.errorMessage || pm.lookupError;
+      return (
+        <span>
+          <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: PAYMONGO_REASON_COLOR[pm.reason] || hrh.muted }} />
+          {pm.reason}
+          {pm.method ? ` (${pm.method})` : ""}
+          {detail && <span style={{ color: hrh.muted }}> — {detail}</span>}
+        </span>
+      );
+    },
+  };
+}
+
 const RETURN_DRILLDOWN_COLUMNS = [
   { key: "invoiceNo", label: "Invoice #" },
   { key: "customer", label: "Customer" },
@@ -458,6 +483,29 @@ export default function ReturnsAndCancellation({ filters }) {
     drilldown?.kind === "return"
       ? (data?.returns?.orders || []).filter((o) => o.category === drilldown.category).sort((a, b) => b.amount - a.amount)
       : [];
+  const drilldownOrderKey = cancelDrilldownOrders.map((o) => o.orderNumber).join(",");
+  const [pmByOrder, setPmByOrder] = useState(null);
+  const [pmByOrderFailed, setPmByOrderFailed] = useState(false);
+  useEffect(() => {
+    setPmByOrder(null);
+    setPmByOrderFailed(false);
+    if (!drilldownOrderKey) return;
+    const controller = new AbortController();
+    fetch(`/api/hrh-sales-analytics?${new URLSearchParams({ report: "paymongoExpired", orders: drilldownOrderKey })}`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.error) throw new Error(json.message || json.error);
+        setPmByOrder(json.byOrder || {});
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") setPmByOrderFailed(true);
+      });
+    return () => controller.abort();
+  }, [drilldownOrderKey]);
+  const cancelDrilldownColumns = useMemo(
+    () => [...CANCEL_DRILLDOWN_COLUMNS, paymongoReasonColumn(pmByOrder, pmByOrderFailed)],
+    [pmByOrder, pmByOrderFailed]
+  );
   const periodLabel = data?.meta?.current ? `${data.meta.current.from} – ${data.meta.current.to}` : "";
 
   return (
@@ -735,7 +783,7 @@ export default function ReturnsAndCancellation({ filters }) {
             subtitle={`${cancelDrilldownOrders.length} orders — HMRPH Online, ${periodLabel}`}
             wide
           >
-            <DataTable columns={CANCEL_DRILLDOWN_COLUMNS} rows={cancelDrilldownOrders} paginate pageSize={10} emptyLabel="No orders in this category." />
+            <DataTable columns={cancelDrilldownColumns} rows={cancelDrilldownOrders} paginate pageSize={10} emptyLabel="No orders in this category." />
           </Modal>
 
           <Modal

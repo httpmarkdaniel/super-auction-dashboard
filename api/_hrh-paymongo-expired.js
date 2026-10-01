@@ -143,6 +143,37 @@ async function mapLimit(items, limit, fn) {
 export async function handlePaymongoExpired(req, res) {
   const key = process.env.PAYMONGO_SECRET_KEY;
   if (!key) return res.status(500).json({ error: "PAYMONGO_SECRET_KEY is not set" });
+  const auth = `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
+
+  // ?orders=250788,250789,… — PayMongo outcome for specific order numbers
+  // (used by the Cancellation Reasons drilldown, so it follows whatever
+  // orders that table already shows, including future periods).
+  if (req.query.orders) {
+    const nums = [...new Set(String(req.query.orders).split(",").map((x) => x.trim()).filter((x) => /^\d{1,20}$/.test(x)))].slice(0, 500);
+    if (!nums.length) return res.status(200).json({ byOrder: {} });
+    try {
+      const piRows = await (
+        await client.query({
+          query: `
+            SELECT order_number, argMax(payment_gateway_reference_code, _airbyte_extracted_at) AS pi
+            FROM cms.orders WHERE order_number IN ({nums:Array(String)}) GROUP BY order_number
+          `,
+          query_params: { nums },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const piByOrder = new Map(piRows.map((r) => [String(r.order_number), String(r.pi || "")]));
+      const results = await mapLimit(nums, CONCURRENCY, async (n) => {
+        const pi = piByOrder.get(n) || "";
+        return [n, pi.startsWith("pi_") ? await fetchIntent(pi, auth) : { status: null, reason: "Not paid through PayMongo" }];
+      });
+      res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=3600");
+      return res.status(200).json({ byOrder: Object.fromEntries(results) });
+    } catch (err) {
+      return res.status(500).json({ error: "Couldn't load PayMongo outcomes", message: err.message });
+    }
+  }
+
   const { from = "2000-01-01", to = "2100-01-01" } = req.query;
   const isoDate = /^\d{4}-\d{2}-\d{2}$/;
   if (!isoDate.test(from) || !isoDate.test(to)) return res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
@@ -177,8 +208,6 @@ export async function handlePaymongoExpired(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-
-    const auth = `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
 
     const rows = await mapLimit(orders, CONCURRENCY, async (o) => {
       const pi = String(o.payment_intent_id || "");
