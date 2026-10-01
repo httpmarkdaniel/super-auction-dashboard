@@ -351,7 +351,7 @@ function PaymongoExpiredPanel({ from, to }) {
           <div className="text-[11px] mt-3" style={{ color: hrh.muted }}>
             Source: cms.mart_cms_order_report_detailed (cancellation_reason = “Expired Order - No Payment for 1 day”, by order date) ·
             Payment Intent from cms.orders.payment_gateway_reference_code · outcome from the PayMongo API. “Never started payment” = no
-            payment method was ever attached; “Opened checkout, let it expire” = PayMongo code CLOSED (customer reached the e-wallet/bank
+            payment method was ever attached; “Opened checkout, let it expire” = PayMongo code CLOSED / EXPIRED (customer reached the e-wallet/bank
             page and never authorized).
           </div>
         </>

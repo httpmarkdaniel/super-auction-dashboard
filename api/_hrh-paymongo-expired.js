@@ -34,6 +34,7 @@ const METHOD_LABEL = {
   card: "Card",
   billease: "Billease",
   dob: "Online Banking",
+  brankas: "Online Banking (Brankas)",
   dob_ubp: "UnionBank",
   brankas_bdo: "BDO",
   brankas_landbank: "Landbank",
@@ -57,7 +58,10 @@ function pickError(e) {
 // "failed" + failed_code/failed_message (also mirrored in
 // last_payment_error for card declines). failed_code "CLOSED" ("Payment
 // checkout has expired.") = customer reached the e-wallet/bank page and
-// never authorized — not a decline.
+// never authorized — not a decline. Brankas (online banking) reports the
+// same thing as "EXPIRED" ("Session expired before transaction
+// completed."). Maya's PY0105 = insufficient wallet balance.
+const CHECKOUT_EXPIRED_CODES = new Set(["CLOSED", "EXPIRED"]);
 const DECLINE_LABEL = {
   processor_declined: "Declined by bank",
   generic_decline: "Declined",
@@ -68,6 +72,7 @@ const DECLINE_LABEL = {
   stolen_card: "Card reported stolen",
   cvc_invalid: "Wrong CVC",
   "3ds_failed": "3D Secure check failed",
+  PY0105: "Insufficient Maya balance",
 };
 
 function classify(attrs) {
@@ -82,7 +87,7 @@ function classify(attrs) {
   let reason;
   if (status === "succeeded" || last.status === "paid") reason = "Paid on PayMongo, still cancelled by CMS";
   else if (status === "processing") reason = "Payment still processing at PayMongo";
-  else if (errorCode === "CLOSED") reason = "Opened checkout, let it expire";
+  else if (CHECKOUT_EXPIRED_CODES.has(errorCode)) reason = "Opened checkout, let it expire";
   else if (errorCode || last.status === "failed") reason = "Payment declined";
   else if (status === "awaiting_next_action") reason = "Chose a method, didn't continue";
   else if (status === "awaiting_payment_method") reason = "Never started payment";
@@ -95,7 +100,7 @@ function classify(attrs) {
     attempts: payments.length,
     errorCode,
     errorMessage,
-    errorLabel: errorCode && errorCode !== "CLOSED" ? DECLINE_LABEL[errorCode] || errorCode : null,
+    errorLabel: errorCode && !CHECKOUT_EXPIRED_CODES.has(errorCode) ? DECLINE_LABEL[errorCode] || errorCode : null,
   };
 }
 
