@@ -256,6 +256,110 @@ function isDateRangeReady(dateRange) {
   return Boolean(dateRange);
 }
 
+// "Expired Order - No Payment for 1 day" broken down by what PayMongo
+// itself recorded for each order's Payment Intent — see
+// api/_hrh-paymongo-expired.js (?report=paymongoExpired). Loaded on its own
+// so a slow PayMongo lookup never holds up the rest of the page.
+const PAYMONGO_REASON_COLOR = {
+  "Never started payment": hrh.muted,
+  "Chose a method, didn't continue": hrh.series[2],
+  "Opened checkout, let it expire": hrh.blue,
+  "Payment declined": hrh.bad,
+  "Paid on PayMongo, still cancelled by CMS": hrh.good,
+};
+const PAYMONGO_SUMMARY_COLUMNS = [
+  {
+    key: "reason",
+    label: "PayMongo Outcome",
+    render: (r) => (
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-block w-2 h-2 rounded-full" style={{ background: PAYMONGO_REASON_COLOR[r.reason] || hrh.ink2 }} />
+        {r.reason}
+      </span>
+    ),
+  },
+  { key: "orders", label: "Orders", render: (r) => formatNum(r.orders) },
+  { key: "amount", label: "Value", render: (r) => formatPeso(r.amount) },
+  { key: "share", label: "Share", render: (r) => formatPct(r.share) },
+];
+const PAYMONGO_ORDER_COLUMNS = [
+  { key: "order_number", label: "Order #" },
+  { key: "created_at", label: "Order Date", render: (r) => String(r.created_at || "").slice(0, 10) },
+  { key: "payment_type", label: "Payment Type (CMS)", render: (r) => r.payment_type || "—" },
+  { key: "method", label: "PayMongo Method", render: (r) => r.paymongo.method || "—" },
+  { key: "reason", label: "PayMongo Outcome", render: (r) => r.paymongo.reason },
+  {
+    key: "detail",
+    label: "Detail",
+    maxWidth: 280,
+    render: (r) => r.paymongo.errorLabel || r.paymongo.errorMessage || r.paymongo.lookupError || "—",
+  },
+  { key: "amount", label: "Amount", render: (r) => formatPeso(r.amount) },
+];
+
+function PaymongoExpiredPanel({ from, to }) {
+  const [pm, setPm] = useState(null);
+  const [pmError, setPmError] = useState(null);
+  const [reasonFilter, setReasonFilter] = useState(null);
+
+  useEffect(() => {
+    if (!from || !to) return;
+    const controller = new AbortController();
+    setPm(null);
+    setPmError(null);
+    setReasonFilter(null);
+    fetch(`/api/hrh-sales-analytics?${new URLSearchParams({ report: "paymongoExpired", from, to })}`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok || json.error) throw new Error(json.message || json.error || `Request failed (${res.status})`);
+        setPm(json);
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") setPmError(err.message);
+      });
+    return () => controller.abort();
+  }, [from, to]);
+
+  const summaryRows = (pm?.summary || []).map((r) => ({ ...r, share: safeDivide(r.orders, pm.total) * 100 }));
+  const orderRows = (pm?.rows || []).filter((r) => !reasonFilter || r.paymongo.reason === reasonFilter);
+
+  return (
+    <Panel
+      title="Why “No Payment for 1 day” Orders Expired — from PayMongo"
+      subtitle={
+        reasonFilter
+          ? `Showing ${reasonFilter} — click it again to show all`
+          : "PayMongo's own record of each expired order's Payment Intent. Click an outcome to filter the orders below."
+      }
+      className="mb-4"
+    >
+      {!pm && !pmError && <LoadingState label="Asking PayMongo…" />}
+      {pmError && <ErrorState label={`Couldn't load PayMongo outcomes: ${pmError}`} />}
+      {pm && (
+        <>
+          <DataTable
+            columns={PAYMONGO_SUMMARY_COLUMNS}
+            rows={summaryRows}
+            onRowClick={(r) => setReasonFilter((cur) => (cur === r.reason ? null : r.reason))}
+            emptyLabel="No orders expired as “No Payment for 1 day” in this period."
+          />
+          {pm.total > 0 && (
+            <div className="mt-4">
+              <DataTable columns={PAYMONGO_ORDER_COLUMNS} rows={orderRows} paginate pageSize={10} exportName="PayMongo Expired Orders" />
+            </div>
+          )}
+          <div className="text-[11px] mt-3" style={{ color: hrh.muted }}>
+            Source: cms.mart_cms_order_report_detailed (cancellation_reason = “Expired Order - No Payment for 1 day”, by order date) ·
+            Payment Intent from cms.orders.payment_gateway_reference_code · outcome from the PayMongo API. “Never started payment” = no
+            payment method was ever attached; “Opened checkout, let it expire” = PayMongo code CLOSED (customer reached the e-wallet/bank
+            page and never authorized).
+          </div>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 // Real ClickHouse-backed Returns and Cancellation — see
 // api/_hrh-orders-fulfillment.js (dispatched via ?report=ordersFulfillment,
 // same endpoint Orders & Fulfillment uses) for the full methodology.
@@ -494,6 +598,8 @@ export default function ReturnsAndCancellation({ filters }) {
               />
             </Panel>
           </div>
+
+          <PaymongoExpiredPanel from={data.meta?.current?.from} to={data.meta?.current?.to} />
         </>
       )}
 

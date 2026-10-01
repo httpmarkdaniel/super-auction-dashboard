@@ -51,23 +51,41 @@ function pickError(e) {
   };
 }
 
-// PayMongo intent → one readable reason. Statuses per PayMongo docs:
-// awaiting_payment_method, awaiting_next_action, processing, succeeded.
+// PayMongo intent → one readable reason. Verified against live intents
+// (2026-10-01): status is awaiting_payment_method / awaiting_next_action /
+// processing / succeeded; each attempt is a payments[] entry with status
+// "failed" + failed_code/failed_message (also mirrored in
+// last_payment_error for card declines). failed_code "CLOSED" ("Payment
+// checkout has expired.") = customer reached the e-wallet/bank page and
+// never authorized — not a decline.
+const DECLINE_LABEL = {
+  processor_declined: "Declined by bank",
+  generic_decline: "Declined",
+  insufficient_funds: "Insufficient funds",
+  card_expired: "Card expired",
+  fraudulent: "Blocked as possible fraud",
+  lost_card: "Card reported lost",
+  stolen_card: "Card reported stolen",
+  cvc_invalid: "Wrong CVC",
+  "3ds_failed": "3D Secure check failed",
+};
+
 function classify(attrs) {
   const payments = Array.isArray(attrs.payments) ? attrs.payments : [];
   const last = payments.length ? payments[payments.length - 1]?.attributes || {} : {};
   const lastErr = pickError(attrs.last_payment_error);
-  const payErr = pickError({ failed_code: last.failed_code, failed_message: last.failed_message });
-  const err = lastErr.code || lastErr.message ? lastErr : payErr;
-  const method = methodLabel(last.source?.type || last.payment_method_type || attrs.payment_method_type || null);
+  const errorCode = last.failed_code || lastErr.code || null;
+  const errorMessage = last.failed_message || lastErr.message || null;
+  const method = methodLabel(last.source?.type || null);
   const status = attrs.status || null;
 
   let reason;
   if (status === "succeeded" || last.status === "paid") reason = "Paid on PayMongo, still cancelled by CMS";
   else if (status === "processing") reason = "Payment still processing at PayMongo";
-  else if (err.code || err.message || last.status === "failed") reason = "Payment attempted but failed";
-  else if (status === "awaiting_next_action") reason = "Started payment, didn't complete authorization";
-  else if (status === "awaiting_payment_method") reason = "Never chose a payment method";
+  else if (errorCode === "CLOSED") reason = "Opened checkout, let it expire";
+  else if (errorCode || last.status === "failed") reason = "Payment declined";
+  else if (status === "awaiting_next_action") reason = "Chose a method, didn't continue";
+  else if (status === "awaiting_payment_method") reason = "Never started payment";
   else reason = "Unknown PayMongo status";
 
   return {
@@ -75,8 +93,9 @@ function classify(attrs) {
     reason,
     method,
     attempts: payments.length,
-    errorCode: err.code,
-    errorMessage: err.message,
+    errorCode,
+    errorMessage,
+    errorLabel: errorCode && errorCode !== "CLOSED" ? DECLINE_LABEL[errorCode] || errorCode : null,
   };
 }
 
@@ -155,35 +174,6 @@ export async function handlePaymongoExpired(req, res) {
     ).json();
 
     const auth = `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
-
-    // Temporary shape check (field names + outcome fields only, no customer
-    // data / client_key) — PayMongo's docs don't spell out
-    // last_payment_error or payments[] fields.
-    if (req.query.debug === "shape") {
-      const sample = orders.filter((o) => String(o.payment_intent_id).startsWith("pi_")).slice(0, 25);
-      const shapes = await mapLimit(sample, CONCURRENCY, async (o) => {
-        const resp = await fetch(`${PAYMONGO_BASE}/payment_intents/${encodeURIComponent(o.payment_intent_id)}`, {
-          headers: { accept: "application/json", authorization: auth },
-        });
-        if (!resp.ok) return { http: resp.status };
-        const a = (await resp.json())?.data?.attributes || {};
-        return {
-          keys: Object.keys(a),
-          status: a.status,
-          payment_method_allowed: a.payment_method_allowed,
-          last_payment_error: a.last_payment_error,
-          next_action_type: a.next_action?.type || null,
-          payments: (a.payments || []).map((p) => ({
-            keys: Object.keys(p.attributes || {}),
-            status: p.attributes?.status,
-            failed_code: p.attributes?.failed_code,
-            failed_message: p.attributes?.failed_message,
-            source_type: p.attributes?.source?.type,
-          })),
-        };
-      });
-      return res.status(200).json({ shapes });
-    }
 
     const rows = await mapLimit(orders, CONCURRENCY, async (o) => {
       const pi = String(o.payment_intent_id || "");
