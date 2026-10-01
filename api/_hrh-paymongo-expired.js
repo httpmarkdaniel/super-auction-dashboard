@@ -1,0 +1,211 @@
+import { createClient } from "@clickhouse/client";
+
+const client = createClient({
+  url: process.env.CLICKHOUSE_HOST,
+  username: process.env.CLICKHOUSE_USER,
+  password: process.env.CLICKHOUSE_PASSWORD,
+  database: process.env.CLICKHOUSE_DATABASE,
+});
+
+// Underscore-prefixed (Hobby plan 12-function cap) — api/hrh-sales-analytics.js
+// dispatches here on `?report=paymongoExpired`.
+//
+// The CMS auto-cancels unpaid HRH Online orders as "Expired Order - No Payment
+// for 1 day" and never saves PayMongo's own outcome (cms.orders
+// transaction_status / transaction_response are empty for every pi_ order).
+// Each of those orders does keep its PayMongo Payment Intent ID in
+// cms.orders.payment_gateway_reference_code, so this asks PayMongo directly
+// (GET /v1/payment_intents/{id}, secret key in PAYMONGO_SECRET_KEY, server
+// side only) and turns status + last_payment_error into a readable reason.
+const HRH_STORE = "HRH ONLINE";
+const EXPIRED_REASON = "Expired Order - No Payment for 1 day";
+const PAYMONGO_BASE = "https://api.paymongo.com/v1";
+const CONCURRENCY = 8;
+
+// Expired intents don't change any more, so results are kept per warm
+// instance (Fluid Compute reuses instances) to avoid re-asking PayMongo.
+const CACHE_TTL_MS = 6 * 3600 * 1000;
+const intentCache = new Map();
+
+const METHOD_LABEL = {
+  gcash: "GCash",
+  paymaya: "Maya",
+  grab_pay: "GrabPay",
+  card: "Card",
+  billease: "Billease",
+  dob: "Online Banking",
+  dob_ubp: "UnionBank",
+  brankas_bdo: "BDO",
+  brankas_landbank: "Landbank",
+  brankas_metrobank: "Metrobank",
+  qrph: "QR Ph",
+  shopee_pay: "ShopeePay",
+};
+const methodLabel = (t) => METHOD_LABEL[t] || (t ? String(t) : null);
+
+function pickError(e) {
+  if (!e || typeof e !== "object") return { code: null, message: null };
+  return {
+    code: e.failed_code || e.code || e.sub_code || null,
+    message: e.failed_message || e.message || e.detail || null,
+  };
+}
+
+// PayMongo intent → one readable reason. Statuses per PayMongo docs:
+// awaiting_payment_method, awaiting_next_action, processing, succeeded.
+function classify(attrs) {
+  const payments = Array.isArray(attrs.payments) ? attrs.payments : [];
+  const last = payments.length ? payments[payments.length - 1]?.attributes || {} : {};
+  const lastErr = pickError(attrs.last_payment_error);
+  const payErr = pickError({ failed_code: last.failed_code, failed_message: last.failed_message });
+  const err = lastErr.code || lastErr.message ? lastErr : payErr;
+  const method = methodLabel(last.source?.type || last.payment_method_type || attrs.payment_method_type || null);
+  const status = attrs.status || null;
+
+  let reason;
+  if (status === "succeeded" || last.status === "paid") reason = "Paid on PayMongo, still cancelled by CMS";
+  else if (status === "processing") reason = "Payment still processing at PayMongo";
+  else if (err.code || err.message || last.status === "failed") reason = "Payment attempted but failed";
+  else if (status === "awaiting_next_action") reason = "Started payment, didn't complete authorization";
+  else if (status === "awaiting_payment_method") reason = "Never chose a payment method";
+  else reason = "Unknown PayMongo status";
+
+  return {
+    status,
+    reason,
+    method,
+    attempts: payments.length,
+    errorCode: err.code,
+    errorMessage: err.message,
+  };
+}
+
+async function fetchIntent(pi, auth) {
+  const hit = intentCache.get(pi);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  const resp = await fetch(`${PAYMONGO_BASE}/payment_intents/${encodeURIComponent(pi)}`, {
+    headers: { accept: "application/json", authorization: auth },
+  });
+  let value;
+  if (resp.ok) {
+    const body = await resp.json();
+    value = classify(body?.data?.attributes || {});
+  } else {
+    let detail = "";
+    try {
+      detail = (await resp.json())?.errors?.[0]?.detail || "";
+    } catch {
+      /* non-JSON error body */
+    }
+    value = { status: null, reason: `PayMongo lookup failed (HTTP ${resp.status})`, lookupError: detail || null };
+  }
+  if (resp.ok) intentCache.set(pi, { at: Date.now(), value });
+  return value;
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await fn(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+export async function handlePaymongoExpired(req, res) {
+  const key = process.env.PAYMONGO_SECRET_KEY;
+  if (!key) return res.status(500).json({ error: "PAYMONGO_SECRET_KEY is not set" });
+  const { from = "2000-01-01", to = "2100-01-01" } = req.query;
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  if (!isoDate.test(from) || !isoDate.test(to)) return res.status(400).json({ error: "from/to must be YYYY-MM-DD" });
+
+  try {
+    const orders = await (
+      await client.query({
+        query: `
+          WITH m AS (
+            SELECT order_number, any(reference_code) AS ref, any(payment_type) AS payment_type,
+                   any(checkout_method) AS checkout_method,
+                   formatDateTime(any(order_created_at), '%Y-%m-%d %H:%i:%S') AS created_at,
+                   formatDateTime(any(cancelled_date), '%Y-%m-%d %H:%i:%S') AS cancelled_at,
+                   toFloat64(sum(price)) AS items_total, toFloat64(ifNull(any(shipping_fee), 0)) AS ship,
+                   toFloat64(ifNull(any(discount_amount), 0)) AS disc
+            FROM cms.mart_cms_order_report_detailed
+            WHERE store_name = {store:String} AND cancellation_reason = {reason:String}
+              AND toDate(order_created_at) BETWEEN {from:String} AND {to:String}
+            GROUP BY order_number
+          ),
+          o AS (
+            SELECT reference_code, argMax(payment_gateway_reference_code, _airbyte_extracted_at) AS pi
+            FROM cms.orders WHERE reference_code IN (SELECT ref FROM m) GROUP BY reference_code
+          )
+          SELECT m.order_number, m.ref AS reference_code, ifNull(o.pi, '') AS payment_intent_id, m.payment_type,
+                 m.checkout_method, m.created_at, m.cancelled_at,
+                 round(m.items_total + m.ship - m.disc, 2) AS amount
+          FROM m LEFT JOIN o ON o.reference_code = m.ref
+          ORDER BY m.created_at DESC
+        `,
+        query_params: { store: HRH_STORE, reason: EXPIRED_REASON, from, to },
+        format: "JSONEachRow",
+      })
+    ).json();
+
+    const auth = `Basic ${Buffer.from(`${key}:`).toString("base64")}`;
+
+    // Temporary shape check (field names + outcome fields only, no customer
+    // data / client_key) — PayMongo's docs don't spell out
+    // last_payment_error or payments[] fields.
+    if (req.query.debug === "shape") {
+      const sample = orders.filter((o) => String(o.payment_intent_id).startsWith("pi_")).slice(0, 25);
+      const shapes = await mapLimit(sample, CONCURRENCY, async (o) => {
+        const resp = await fetch(`${PAYMONGO_BASE}/payment_intents/${encodeURIComponent(o.payment_intent_id)}`, {
+          headers: { accept: "application/json", authorization: auth },
+        });
+        if (!resp.ok) return { http: resp.status };
+        const a = (await resp.json())?.data?.attributes || {};
+        return {
+          keys: Object.keys(a),
+          status: a.status,
+          payment_method_allowed: a.payment_method_allowed,
+          last_payment_error: a.last_payment_error,
+          next_action_type: a.next_action?.type || null,
+          payments: (a.payments || []).map((p) => ({
+            keys: Object.keys(p.attributes || {}),
+            status: p.attributes?.status,
+            failed_code: p.attributes?.failed_code,
+            failed_message: p.attributes?.failed_message,
+            source_type: p.attributes?.source?.type,
+          })),
+        };
+      });
+      return res.status(200).json({ shapes });
+    }
+
+    const rows = await mapLimit(orders, CONCURRENCY, async (o) => {
+      const pi = String(o.payment_intent_id || "");
+      const pm = pi.startsWith("pi_")
+        ? await fetchIntent(pi, auth)
+        : { status: null, reason: "No PayMongo Payment Intent on the order" };
+      return { ...o, amount: Number(o.amount) || 0, paymongo: pm };
+    });
+
+    const byReason = new Map();
+    for (const r of rows) {
+      const k = r.paymongo.reason;
+      const b = byReason.get(k) || { reason: k, orders: 0, amount: 0 };
+      b.orders += 1;
+      b.amount += r.amount;
+      byReason.set(k, b);
+    }
+    const summary = [...byReason.values()].sort((a, b) => b.orders - a.orders);
+
+    res.setHeader("Cache-Control", "s-maxage=600, stale-while-revalidate=3600");
+    return res.status(200).json({ from, to, total: rows.length, summary, rows });
+  } catch (err) {
+    return res.status(500).json({ error: "Couldn't load PayMongo outcomes", message: err.message });
+  }
+}
