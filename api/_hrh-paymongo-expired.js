@@ -155,10 +155,21 @@ export async function handlePaymongoExpired(req, res) {
       const piRows = await (
         await client.query({
           query: `
-            SELECT order_number, argMax(payment_gateway_reference_code, _airbyte_extracted_at) AS pi
-            FROM cms.orders WHERE order_number IN ({nums:Array(String)}) GROUP BY order_number
+            WITH m AS (
+              SELECT toString(order_number) AS order_number, any(reference_code) AS ref
+              FROM cms.mart_cms_order_report_detailed
+              WHERE store_name = {store:String} AND toString(order_number) IN ({nums:Array(String)})
+              GROUP BY order_number
+            )
+            SELECT m.order_number, o.pi
+            FROM m
+            LEFT JOIN (
+              SELECT reference_code,
+                     argMaxIf(payment_gateway_reference_code, _airbyte_extracted_at, payment_gateway_reference_code LIKE 'pi_%') AS pi
+              FROM cms.orders WHERE reference_code IN (SELECT ref FROM m) GROUP BY reference_code
+            ) AS o ON o.reference_code = m.ref
           `,
-          query_params: { nums },
+          query_params: { store: HRH_STORE, nums },
           format: "JSONEachRow",
         })
       ).json();
@@ -195,7 +206,8 @@ export async function handlePaymongoExpired(req, res) {
             GROUP BY order_number
           ),
           o AS (
-            SELECT reference_code, argMax(payment_gateway_reference_code, _airbyte_extracted_at) AS pi
+            SELECT reference_code,
+                   argMaxIf(payment_gateway_reference_code, _airbyte_extracted_at, payment_gateway_reference_code LIKE 'pi_%') AS pi
             FROM cms.orders WHERE reference_code IN (SELECT ref FROM m) GROUP BY reference_code
           )
           SELECT m.order_number, m.ref AS reference_code, ifNull(o.pi, '') AS payment_intent_id, m.payment_type,
