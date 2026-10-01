@@ -4,6 +4,7 @@ import { CATEGORY_CLASSIFICATION_SQL } from "./_category.js";
 import { BIDDER_IDENTITY_CTES } from "./_bidderIdentity.js";
 import { STATUS_PRIORITY_SQL, APPROVAL_PRIORITY_SQL } from "./_lotStatus.js";
 import { pickBucketGrain, enumerateBuckets, zeroFillBuckets, normalizeBucketKey } from "./_bucketing.js";
+import { handleAuctionResultEmail } from "./_auction-result-email.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -157,6 +158,8 @@ function buildAuctionResultFilter(query) {
 }
 
 export default async function handler(req, res) {
+  // Automated "Initial Auction Result" email data (n8n) — see api/_auction-result-email.js.
+  if (req.query.type === "auction-result-email") return handleAuctionResultEmail(req, res);
   try {
     const { from, to, store = "", category = "", type = "summary", compareFrom = "", compareTo = "", preset = "" } = req.query;
 
