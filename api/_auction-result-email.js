@@ -36,6 +36,7 @@ const EXCLUDED_BRANCHES = ["HMRDEVZ TEST WAREHOUSE"];
 const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_MIN_AGE_MINUTES = 60;
 const FINAL_AGE_HOURS = 72;
+const PUBLISHED_LOOKBACK_HOURS = 3;
 const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function manilaTs(msAgo = 0) {
@@ -290,7 +291,9 @@ export async function handleAuctionPublishedEmail(req, res) {
     from = `${req.query.date} 00:00:00`;
     to = `${req.query.date} 23:59:59`;
   } else {
-    from = manilaTs(DEFAULT_LOOKBACK_HOURS * 3600 * 1000);
+    // 3 h covers the ~1-1.5 h sync + mart rebuild delay without re-sending
+    // older publications when the workflow is (re)activated.
+    from = manilaTs(PUBLISHED_LOOKBACK_HOURS * 3600 * 1000);
     to = manilaTs(0);
   }
   try {
