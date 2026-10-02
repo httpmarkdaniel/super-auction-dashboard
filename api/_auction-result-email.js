@@ -53,7 +53,12 @@ function resolveWindow(q) {
   }
   if (q.stage === "final")
     return { from: manilaTs((FINAL_AGE_HOURS + DEFAULT_LOOKBACK_HOURS) * 3600 * 1000), to: manilaTs(FINAL_AGE_HOURS * 3600 * 1000) };
-  return { from: manilaTs(DEFAULT_LOOKBACK_HOURS * 3600 * 1000), to: manilaTs(DEFAULT_MIN_AGE_MINUTES * 60 * 1000) };
+  // ?minAgeMinutes= (0-240) overrides the default 60-minute wait, e.g. 0 to
+  // email the Initial result as soon as end_date passes.
+  const minAge = q.minAgeMinutes !== undefined && /^\d{1,3}$/.test(String(q.minAgeMinutes))
+    ? Math.min(240, Number(q.minAgeMinutes))
+    : DEFAULT_MIN_AGE_MINUTES;
+  return { from: manilaTs(DEFAULT_LOOKBACK_HOURS * 3600 * 1000), to: manilaTs(minAge * 60 * 1000) };
 }
 
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
