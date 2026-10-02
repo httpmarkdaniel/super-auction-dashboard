@@ -26,12 +26,16 @@ const client = createClient({
 // "ended" = the auction's latest lot end_date is at or before the cutoff.
 //
 // Window: ?from=&to= ("YYYY-MM-DD HH:MM:SS", Manila) or ?date=YYYY-MM-DD
-// (whole day, for testing). Default: ended between 24h and 60min ago — the
-// 60 minutes lets the warehouse sync; n8n dedupes so overlapping runs never
-// resend.
+// (whole day, for testing). Default (?stage=initial): ended between 24h and
+// 60min ago — the 60 minutes lets the warehouse sync. ?stage=final: ended
+// between 96h and 72h ago, i.e. exactly 3 days after end_date, for the "Final
+// Auction Result" email (fresh statuses after collection). n8n dedupes so
+// overlapping runs never resend. `stage` is echoed back so n8n can tell the
+// two responses apart.
 const EXCLUDED_BRANCHES = ["HMRDEVZ TEST WAREHOUSE"];
 const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_MIN_AGE_MINUTES = 60;
+const FINAL_AGE_HOURS = 72;
 const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function manilaTs(msAgo = 0) {
@@ -47,6 +51,8 @@ function resolveWindow(q) {
     if (!TS.test(q.from || "") || !TS.test(q.to || "")) throw new RangeError("from/to must be 'YYYY-MM-DD HH:MM:SS'");
     return { from: q.from, to: q.to };
   }
+  if (q.stage === "final")
+    return { from: manilaTs((FINAL_AGE_HOURS + DEFAULT_LOOKBACK_HOURS) * 3600 * 1000), to: manilaTs(FINAL_AGE_HOURS * 3600 * 1000) };
   return { from: manilaTs(DEFAULT_LOOKBACK_HOURS * 3600 * 1000), to: manilaTs(DEFAULT_MIN_AGE_MINUTES * 60 * 1000) };
 }
 
@@ -214,7 +220,8 @@ export async function handleAuctionResultEmail(req, res) {
     out.sort((a, b) => a.endDate.localeCompare(b.endDate) || a.vendor.localeCompare(b.vendor));
 
     res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json({ window: window_, count: out.length, groups: out });
+    const stage = req.query.stage === "final" ? "final" : "initial";
+    return res.status(200).json({ stage, window: window_, count: out.length, groups: out });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't build auction result emails", message: err.message });
   }
