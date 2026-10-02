@@ -122,7 +122,7 @@ export async function handleAuctionResultEmail(req, res) {
       })
     ).json();
 
-    const rows = lots.map((r) => ({
+    const allRows = lots.map((r) => ({
       ...r,
       qty: r.qty == null ? null : Number(r.qty),
       bp_percent: r.bp_percent == null ? null : Number(r.bp_percent),
@@ -131,12 +131,17 @@ export async function handleAuctionResultEmail(req, res) {
       reserved_price: Number(r.reserved_price ?? 0),
     }));
 
-    // Each auction's end = its latest lot end_date (same as Top Info).
+    // Each auction's end = its latest lot end_date (same as Top Info) —
+    // computed over ALL lots so the Final's group keys match the Initial's.
     const auctionEnd = new Map();
-    for (const r of rows) {
+    for (const r of allRows) {
       const k = `${r.vendor}\u0000${r.branch}\u0000${r.auction_number}`;
       if (!auctionEnd.has(k) || r.end_date > auctionEnd.get(k)) auctionEnd.set(k, r.end_date);
     }
+
+    // Final Auction Result leaves Unsold lots out entirely (table, Excel,
+    // changes) — an all-Unsold auction then has no Final email at all.
+    const rows = req.query.stage === "final" ? allRows.filter((r) => r.payment_status !== "Unsold") : allRows;
 
     // One email per vendor + branch + auction end time.
     const groups = new Map();
