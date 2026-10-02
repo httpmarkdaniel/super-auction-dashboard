@@ -36,7 +36,7 @@ const EXCLUDED_BRANCHES = ["HMRDEVZ TEST WAREHOUSE"];
 const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_MIN_AGE_MINUTES = 60;
 const FINAL_AGE_HOURS = 72;
-const PUBLISHED_LOOKBACK_HOURS = 3;
+const PUBLISHED_LOOKBACK_HOURS = 8;
 const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function manilaTs(msAgo = 0) {
@@ -65,13 +65,14 @@ function resolveWindow(q) {
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
 
 // The warehouse only sees the live system through an hourly sync (~:41) and
-// mart_auction_vendor_analysis is rebuilt ~20 min after that, so "now" is not
+// mart_auction_vendor_analysis is rebuilt only every 3 h (~02:05, 05:05, 08:05,
+// 11:05, 14:05, 17:05, 20:05, 23:05 Manila) from the latest :41 sync, so "now" is not
 // what the mart knows. dataAsOf = the latest sync (lots/auctions CDC) that the
 // current mart build contains, in Manila wall-clock (same convention as
 // end_date). An Initial email is only built once dataAsOf is past the
 // auction's end, so it always has the final bids/statuses. Fallback: anything
 // that ended more than FRESHNESS_FALLBACK_HOURS ago is sent regardless.
-const FRESHNESS_FALLBACK_HOURS = 3;
+const FRESHNESS_FALLBACK_HOURS = 6;
 async function martDataAsOf() {
   try {
     const [row] = await (
@@ -291,7 +292,7 @@ export async function handleAuctionPublishedEmail(req, res) {
     from = `${req.query.date} 00:00:00`;
     to = `${req.query.date} 23:59:59`;
   } else {
-    // 3 h covers the ~1-1.5 h sync + mart rebuild delay without re-sending
+    // 8 h covers the up-to-~3.5 h sync + 3-hourly mart rebuild delay (n8n dedupes)
     // older publications when the workflow is (re)activated.
     from = manilaTs(PUBLISHED_LOOKBACK_HOURS * 3600 * 1000);
     to = manilaTs(0);
