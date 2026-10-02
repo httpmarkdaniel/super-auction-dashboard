@@ -63,12 +63,48 @@ function resolveWindow(q) {
 
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
 
+// The warehouse only sees the live system through an hourly sync (~:41) and
+// mart_auction_vendor_analysis is rebuilt ~20 min after that, so "now" is not
+// what the mart knows. dataAsOf = the latest sync (lots/auctions CDC) that the
+// current mart build contains, in Manila wall-clock (same convention as
+// end_date). An Initial email is only built once dataAsOf is past the
+// auction's end, so it always has the final bids/statuses. Fallback: anything
+// that ended more than FRESHNESS_FALLBACK_HOURS ago is sent regardless.
+const FRESHNESS_FALLBACK_HOURS = 3;
+async function martDataAsOf() {
+  try {
+    const [row] = await (
+      await client.query({
+        query: `
+          WITH (SELECT max(metadata_modification_time) FROM system.tables WHERE database = 'xv3' AND name = 'mart_auction_vendor_analysis') AS rebuilt
+          SELECT formatDateTime(greatest(
+            (SELECT max(_airbyte_extracted_at) FROM xv3.lots WHERE _airbyte_extracted_at <= rebuilt),
+            (SELECT max(_airbyte_extracted_at) FROM xv3.auctions WHERE _airbyte_extracted_at <= rebuilt)
+          ) + INTERVAL 8 HOUR, '%Y-%m-%d %H:%i:%S') AS as_of
+        `,
+        format: "JSONEachRow",
+      })
+    ).json();
+    return row && TS.test(row.as_of) ? row.as_of : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleAuctionResultEmail(req, res) {
   let window_;
   try {
     window_ = resolveWindow(req.query);
   } catch (err) {
     return res.status(400).json({ error: err.message });
+  }
+  // Scheduled Initial runs: never past what the mart actually contains.
+  let dataAsOf = null;
+  if (req.query.stage !== "final" && !req.query.date && !req.query.from) {
+    dataAsOf = await martDataAsOf();
+    const fallbackTo = manilaTs(FRESHNESS_FALLBACK_HOURS * 3600 * 1000);
+    const freshTo = dataAsOf && dataAsOf < window_.to ? dataAsOf : window_.to;
+    window_ = { ...window_, to: freshTo > fallbackTo ? freshTo : fallbackTo > window_.to ? window_.to : fallbackTo };
   }
 
   try {
@@ -231,8 +267,89 @@ export async function handleAuctionResultEmail(req, res) {
 
     res.setHeader("Cache-Control", "no-store");
     const stage = req.query.stage === "final" ? "final" : "initial";
-    return res.status(200).json({ stage, window: window_, count: out.length, groups: out });
+    return res.status(200).json({ stage, window: window_, dataAsOf, count: out.length, groups: out });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't build auction result emails", message: err.message });
+  }
+}
+
+// =====================================================================
+// ?type=auction-published-email — auctions whose published_date falls in the
+// window (default: last 24 h, Manila wall-clock like published_date itself;
+// ?date=YYYY-MM-DD for a whole day), one row each for the "Auction Published"
+// email: Branch code, Vendor(s), Auction Number, Name, Count of Lots, Start,
+// End, hmr.ph link. Lot counts/vendors come from the mart, so an auction only
+// appears once the mart has its lots (the next run picks it up otherwise);
+// n8n sends each auction number once.
+// =====================================================================
+export async function handleAuctionPublishedEmail(req, res) {
+  let from;
+  let to;
+  if (req.query.date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    from = `${req.query.date} 00:00:00`;
+    to = `${req.query.date} 23:59:59`;
+  } else {
+    from = manilaTs(DEFAULT_LOOKBACK_HOURS * 3600 * 1000);
+    to = manilaTs(0);
+  }
+  try {
+    const rows = await (
+      await client.query({
+        query: `
+          WITH a AS (
+            SELECT auction_number,
+                   argMax(hmr_auction_id, _airbyte_extracted_at) AS hmr_id,
+                   argMax(name, _airbyte_extracted_at) AS auction_name,
+                   argMax(store_id, _airbyte_extracted_at) AS store_id,
+                   argMax(published_date, _airbyte_extracted_at) AS published_date,
+                   argMax(starting_time, _airbyte_extracted_at) AS starting_time,
+                   argMax(ending_time, _airbyte_extracted_at) AS ending_time,
+                   argMax(deleted_at, _airbyte_extracted_at) AS deleted_at
+            FROM xv3.auctions
+            WHERE auction_number IS NOT NULL AND auction_number != ''
+            GROUP BY auction_number
+          ),
+          s AS (SELECT id, any(code) AS code, any(store_name) AS store_name FROM xv3.stores GROUP BY id),
+          v AS (
+            SELECT auction_number, any(branch) AS branch, uniqExact(lot_number) AS lots, arraySort(groupUniqArray(vendor)) AS vendors
+            FROM xv3.mart_auction_vendor_analysis
+            WHERE auction_number IN (SELECT auction_number FROM a WHERE published_date > toDateTime64({from:String}, 3) AND published_date <= toDateTime64({to:String}, 3))
+            GROUP BY auction_number
+          )
+          SELECT a.auction_number AS auction_number, a.hmr_id AS hmr_id, a.auction_name AS auction_name,
+                 ifNull(s.code, '') AS branch_code, ifNull(s.store_name, '') AS store_name, v.branch AS branch,
+                 v.lots AS lots, v.vendors AS vendors,
+                 formatDateTime(a.published_date, '%Y-%m-%d %H:%i:%S') AS published_date,
+                 formatDateTime(a.starting_time, '%Y-%m-%d %H:%i:%S') AS start_date,
+                 formatDateTime(a.ending_time, '%Y-%m-%d %H:%i:%S') AS end_date
+          FROM a
+          INNER JOIN v ON v.auction_number = a.auction_number
+          LEFT JOIN s ON s.id = a.store_id
+          WHERE a.deleted_at IS NULL
+            AND a.published_date > toDateTime64({from:String}, 3) AND a.published_date <= toDateTime64({to:String}, 3)
+            AND ifNull(v.branch, '') NOT IN {excluded:Array(String)}
+          ORDER BY a.published_date, a.auction_number
+        `,
+        query_params: { from, to, excluded: EXCLUDED_BRANCHES },
+        format: "JSONEachRow",
+      })
+    ).json();
+    const auctions = rows.map((r) => ({
+      auctionNumber: r.auction_number,
+      auctionName: r.auction_name || "",
+      branchCode: r.branch_code || r.branch || "",
+      branch: r.branch || r.store_name || "",
+      vendors: r.vendors || [],
+      lots: Number(r.lots || 0),
+      publishedDate: r.published_date,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      link: r.hmr_id ? `https://hmr.ph/auctions/${r.hmr_id}/details#` : "",
+    }));
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).json({ window: { from, to }, count: auctions.length, auctions });
+  } catch (err) {
+    return res.status(500).json({ error: "Couldn't load published auctions", message: err.message });
   }
 }
