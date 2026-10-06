@@ -294,7 +294,7 @@ export async function handleAuctionPublishedEmail(req, res) {
   } else {
     // 8 h covers the up-to-~3.5 h sync + 3-hourly mart rebuild delay (n8n dedupes)
     // older publications when the workflow is (re)activated. ?hours= widens it
-    // for the once-a-day 5 PM email, which collates everything since the last one.
+    // for the once-a-day Published email, which collates everything since the last one.
     const hours = req.query.hours === undefined ? PUBLISHED_LOOKBACK_HOURS : Number(req.query.hours);
     if (!(hours > 0 && hours <= 168)) return res.status(400).json({ error: "hours must be between 1 and 168" });
     from = manilaTs(hours * 3600 * 1000);
