@@ -277,8 +277,8 @@ export async function handleAuctionResultEmail(req, res) {
 
 // =====================================================================
 // ?type=auction-published-email — auctions whose published_date falls in the
-// window (default: last 24 h, Manila wall-clock like published_date itself;
-// ?date=YYYY-MM-DD for a whole day), one row each for the "Auction Published"
+// window (default: last 8 h, or ?hours=N; Manila wall-clock like published_date
+// itself; ?date=YYYY-MM-DD for a whole day), one row each for the "Auction Published"
 // email: Branch code, Vendor(s), Auction Number, Name, Count of Lots, Start,
 // End, hmr.ph link. Lot counts/vendors come from the mart, so an auction only
 // appears once the mart has its lots (the next run picks it up otherwise);
@@ -293,8 +293,11 @@ export async function handleAuctionPublishedEmail(req, res) {
     to = `${req.query.date} 23:59:59`;
   } else {
     // 8 h covers the up-to-~3.5 h sync + 3-hourly mart rebuild delay (n8n dedupes)
-    // older publications when the workflow is (re)activated.
-    from = manilaTs(PUBLISHED_LOOKBACK_HOURS * 3600 * 1000);
+    // older publications when the workflow is (re)activated. ?hours= widens it
+    // for the once-a-day 5 PM email, which collates everything since the last one.
+    const hours = req.query.hours === undefined ? PUBLISHED_LOOKBACK_HOURS : Number(req.query.hours);
+    if (!(hours > 0 && hours <= 168)) return res.status(400).json({ error: "hours must be between 1 and 168" });
+    from = manilaTs(hours * 3600 * 1000);
     to = manilaTs(0);
   }
   try {
