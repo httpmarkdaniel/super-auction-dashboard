@@ -305,14 +305,15 @@ export async function handleAuctionPublishedEmail(req, res) {
       await client.query({
         query: `
           WITH a AS (
+            -- One whole row per auction: the latest CDC change (extract time, then binlog
+            -- cursor — one sync can carry several changes with the same extract time).
+            -- Per-column argMax mixed rows on ties and skipped NULLs, so a rescheduled +
+            -- republished auction showed its old start/end dates.
             SELECT auction_number,
-                   argMax(hmr_auction_id, _airbyte_extracted_at) AS hmr_id,
-                   argMax(name, _airbyte_extracted_at) AS auction_name,
-                   argMax(store_id, _airbyte_extracted_at) AS store_id,
-                   argMax(published_date, _airbyte_extracted_at) AS published_date,
-                   argMax(starting_time, _airbyte_extracted_at) AS starting_time,
-                   argMax(ending_time, _airbyte_extracted_at) AS ending_time,
-                   argMax(deleted_at, _airbyte_extracted_at) AS deleted_at
+                   argMax(tuple(hmr_auction_id, name, store_id, published_date, starting_time, ending_time, deleted_at),
+                          (_airbyte_extracted_at, ifNull(_ab_cdc_cursor, 0))) AS t,
+                   t.1 AS hmr_id, t.2 AS auction_name, t.3 AS store_id, t.4 AS published_date,
+                   t.5 AS starting_time, t.6 AS ending_time, t.7 AS deleted_at
             FROM xv3.auctions
             WHERE auction_number IS NOT NULL AND auction_number != ''
             GROUP BY auction_number
