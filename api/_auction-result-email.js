@@ -284,6 +284,18 @@ export async function handleAuctionResultEmail(req, res) {
 // appears once the mart has its lots (the next run picks it up otherwise);
 // n8n sends each auction number once.
 // =====================================================================
+// Why a Published row must not be emailed yet ([] = fine). All values are
+// 'YYYY-MM-DD HH:MM:SS' Manila wall-clock strings, so string order = time order.
+export function publishedRowProblems(r) {
+  const out = [];
+  if (!r.start_date || !r.end_date || !r.published_date) return ["missing start/end/published date"];
+  if (r.start_date !== r.mart_start || r.end_date !== r.mart_end)
+    out.push(`dates disagree with the mart (auction ${r.start_date} – ${r.end_date}, mart ${r.mart_start} – ${r.mart_end})`);
+  if (r.end_date <= r.start_date) out.push("ends before it starts");
+  if (r.end_date <= r.published_date) out.push("already ended when published");
+  return out;
+}
+
 export async function handleAuctionPublishedEmail(req, res) {
   let from;
   let to;
@@ -332,14 +344,16 @@ export async function handleAuctionPublishedEmail(req, res) {
           ),
           s AS (SELECT id, any(code) AS code, any(store_name) AS store_name FROM xv3.stores GROUP BY id),
           v AS (
-            SELECT auction_number, any(branch) AS branch, uniqExact(lot_number) AS lots, arraySort(groupUniqArray(vendor)) AS vendors
+            SELECT auction_number, any(branch) AS branch, uniqExact(lot_number) AS lots, arraySort(groupUniqArray(vendor)) AS vendors,
+                   formatDateTime(min(start_date), '%Y-%m-%d %H:%i:%S') AS mart_start,
+                   formatDateTime(max(end_date), '%Y-%m-%d %H:%i:%S') AS mart_end
             FROM xv3.mart_auction_vendor_analysis
             WHERE auction_number IN (SELECT auction_number FROM a WHERE published_date > toDateTime64({from:String}, 3) AND published_date <= toDateTime64({to:String}, 3))
             GROUP BY auction_number
           )
           SELECT a.auction_number AS auction_number, a.hmr_id AS hmr_id, a.auction_name AS auction_name,
                  ifNull(s.code, '') AS branch_code, ifNull(s.store_name, '') AS store_name, v.branch AS branch,
-                 v.lots AS lots, v.vendors AS vendors,
+                 v.lots AS lots, v.vendors AS vendors, v.mart_start AS mart_start, v.mart_end AS mart_end,
                  formatDateTime(a.published_date, '%Y-%m-%d %H:%i:%S') AS published_date,
                  formatDateTime(a.starting_time, '%Y-%m-%d %H:%i:%S') AS start_date,
                  formatDateTime(a.ending_time, '%Y-%m-%d %H:%i:%S') AS end_date
@@ -357,20 +371,31 @@ export async function handleAuctionPublishedEmail(req, res) {
         format: "JSONEachRow",
       })
     ).json();
-    const auctions = rows.map((r) => ({
-      auctionNumber: r.auction_number,
-      auctionName: r.auction_name || "",
-      branchCode: r.branch_code || r.branch || "",
-      branch: r.branch || r.store_name || "",
-      vendors: r.vendors || [],
-      lots: Number(r.lots || 0),
-      publishedDate: r.published_date,
-      startDate: r.start_date,
-      endDate: r.end_date,
-      link: r.hmr_id ? `https://hmr.ph/auctions/${r.hmr_id}/details#` : "",
-    }));
+    // Safety check before anything is emailed: the auction's own start/end must agree
+    // with the mart (what the dashboard and the Initial/Final emails use) and make
+    // sense. Anything that fails is held back — listed under `held` with the reason,
+    // never sent — and goes out on a later run once the data agrees (n8n dedupes).
+    const auctions = [];
+    const held = [];
+    for (const r of rows) {
+      const reasons = publishedRowProblems(r);
+      const item = {
+        auctionNumber: r.auction_number,
+        auctionName: r.auction_name || "",
+        branchCode: r.branch_code || r.branch || "",
+        branch: r.branch || r.store_name || "",
+        vendors: r.vendors || [],
+        lots: Number(r.lots || 0),
+        publishedDate: r.published_date,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        link: r.hmr_id ? `https://hmr.ph/auctions/${r.hmr_id}/details#` : "",
+      };
+      if (reasons.length) held.push({ ...item, martStart: r.mart_start, martEnd: r.mart_end, reasons });
+      else auctions.push(item);
+    }
     res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json({ window: { from, to }, count: auctions.length, auctions });
+    return res.status(200).json({ window: { from, to }, count: auctions.length, auctions, held });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't load published auctions", message: err.message });
   }
