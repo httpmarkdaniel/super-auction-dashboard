@@ -54,7 +54,7 @@ for (let i = 0; i < days; i++) {
   }
 
   // Each stage twice: as live today (days before LEGACY_GROUPING_BEFORE keep the
-  // old vendor + branch + end time groups) and with the per-vendor-day grouping
+  // old vendor + branch + end time groups) and with the per-vendor-branch-day grouping
   // forced on every day (legacyBefore=2000-01-01), so it's exercised on history.
   for (const stage of ["initial", "final"]) {
     for (const legacyBefore of [undefined, "2000-01-01"]) {
@@ -69,8 +69,10 @@ for (let i = 0; i < days; i++) {
       if (legacyBefore || date >= "2026-10-15") {
         const seen = new Set();
         for (const g of r.body.groups) {
-          if (seen.has(g.vendor)) problems.push(`${mode} ${date}: vendor ${g.vendor} split into several emails`);
-          seen.add(g.vendor);
+          const vb = `${g.vendor} @ ${g.branch}`;
+          if (g.branches.length !== 1) problems.push(`${mode} ${date}: group ${g.key} spans ${g.branches.length} branches`);
+          if (seen.has(vb)) problems.push(`${mode} ${date}: ${vb} split into several emails`);
+          seen.add(vb);
         }
         if (stage === "final") vendorDayFinals.push(...r.body.groups.map((g) => ({ ...g, date })));
       }
@@ -137,7 +139,7 @@ if (vendorDayFinals.length) {
   const truth = await (
     await client.query({
       query: `
-        SELECT vendor, toString(toDate(e)) AS day, sum(n) AS lots
+        SELECT vendor, branch, toString(toDate(e)) AS day, sum(n) AS lots
         FROM (
           SELECT vendor, auction_number, branch, max(end_date) AS e, uniqExact(lot_number) AS n
           FROM xv3.mart_auction_vendor_analysis
@@ -145,15 +147,15 @@ if (vendorDayFinals.length) {
             AND end_date >= toDateTime64({from:String}, 3, 'UTC') - INTERVAL 1 DAY
           GROUP BY vendor, auction_number, branch
         )
-        GROUP BY vendor, day`,
+        GROUP BY vendor, branch, day`,
       query_params: { from: `${manilaDate(days)} 00:00:00` },
       format: "JSONEachRow",
     })
   ).json();
-  const lots = new Map(truth.map((t) => [`${t.vendor}|${t.day}`, Number(t.lots)]));
+  const lots = new Map(truth.map((t) => [`${t.vendor}|${t.branch}|${t.day}`, Number(t.lots)]));
   let unsoldGroups = 0;
   for (const g of vendorDayFinals) {
-    const want = lots.get(`${g.vendor}|${g.date}`);
+    const want = lots.get(`${g.vendor}|${g.branch}|${g.date}`);
     if (g.totals.count_of_lot !== want) problems.push(`final/vendor-day ${g.date}: ${g.vendor} has ${g.totals.count_of_lot} lots, mart says ${want}`);
     if (g.summaryRows.some((r) => r.payment_status === "Unsold")) unsoldGroups++;
   }
