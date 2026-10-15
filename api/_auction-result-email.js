@@ -14,7 +14,7 @@ const client = createClient({
 //
 // Data for the automated "Initial Auction Result" email (n8n workflow
 // "automated auction email summary"): every auction that has ENDED in the
-// window, grouped one email per vendor + branch + auction end time, each
+// window, grouped one email per vendor + end day (all branches), each
 // with the Sales Summary rows and the exact same 3-sheet Excel file as the
 // Auction Result tab's Export button (shared builder in
 // src/utils/auctionResultWorkbook.js). Recipients/HTML live in n8n.
@@ -37,6 +37,9 @@ const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_MIN_AGE_MINUTES = 60;
 const FINAL_AGE_HOURS = 72;
 const PUBLISHED_LOOKBACK_HOURS = 8;
+// Auctions ending on/after this day (Manila) are grouped one email per vendor +
+// day; earlier ones keep vendor + branch + end time (their Initials went out so).
+const LEGACY_GROUPING_BEFORE = "2026-10-15";
 const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function manilaTs(msAgo = 0) {
@@ -100,6 +103,8 @@ export async function handleAuctionResultEmail(req, res) {
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
+  // ?legacyBefore=YYYY-MM-DD: tests only (npm run check:emails) — n8n never sets it.
+  const legacyBefore = /^\d{4}-\d{2}-\d{2}$/.test(req.query.legacyBefore || "") ? req.query.legacyBefore : LEGACY_GROUPING_BEFORE;
   // Scheduled Initial runs: never past what the mart actually contains.
   let dataAsOf = null;
   if (req.query.stage !== "final" && !req.query.date && !req.query.from) {
@@ -114,14 +119,26 @@ export async function handleAuctionResultEmail(req, res) {
     // every lot of each vendor's auctions that ended in the window.
     const lots = await (
       await client.query({
+        // An auction is in when its vendor's whole day has ended in the window
+        // (the vendor's latest auction end that day, across branches) — so one
+        // email per vendor + day never goes out before all its auctions are in.
+        // Days before LEGACY_GROUPING_BEFORE keep the per-auction end.
         query: `
-          WITH ended AS (
-            SELECT v.vendor AS vendor, v.branch AS branch, v.auction_number AS auction_number
+          WITH per_auction AS (
+            SELECT v.vendor AS vendor, v.branch AS branch, v.auction_number AS auction_number,
+                   max(v.end_date) AS auction_end, toDate(max(v.end_date)) AS end_day
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.end_date IS NOT NULL AND v.branch NOT IN {excluded:Array(String)}
             GROUP BY v.vendor, v.branch, v.auction_number
-            HAVING max(v.end_date) > toDateTime64({from:String}, 3, 'UTC')
-               AND max(v.end_date) <= toDateTime64({to:String}, 3, 'UTC')
+          ),
+          ended AS (
+            SELECT a.vendor AS vendor, a.branch AS branch, a.auction_number AS auction_number
+            FROM per_auction a
+            INNER JOIN (
+              SELECT vendor AS dv, end_day AS dd, max(auction_end) AS day_end FROM per_auction GROUP BY vendor, end_day
+            ) d ON d.dv = a.vendor AND d.dd = a.end_day
+            WHERE if(a.end_day < toDate({legacyBefore:String}), a.auction_end, d.day_end) > toDateTime64({from:String}, 3, 'UTC')
+              AND if(a.end_day < toDate({legacyBefore:String}), a.auction_end, d.day_end) <= toDateTime64({to:String}, 3, 'UTC')
           )
           SELECT
             toStartOfDay(toDateTime(v.dr_received)) AS dr_received,
@@ -155,7 +172,7 @@ export async function handleAuctionResultEmail(req, res) {
             v.for_approval_status
           ORDER BY bid_amount DESC
         `,
-        query_params: { ...window_, excluded: EXCLUDED_BRANCHES },
+        query_params: { ...window_, excluded: EXCLUDED_BRANCHES, legacyBefore },
         format: "JSONEachRow",
       })
     ).json();
@@ -177,17 +194,23 @@ export async function handleAuctionResultEmail(req, res) {
       if (!auctionEnd.has(k) || r.end_date > auctionEnd.get(k)) auctionEnd.set(k, r.end_date);
     }
 
-    // Final Auction Result leaves Unsold lots out entirely (table, Excel,
-    // changes) — an all-Unsold auction then has no Final email at all.
-    const rows = req.query.stage === "final" ? allRows.filter((r) => r.payment_status !== "Unsold") : allRows;
+    // Unsold lots are included in both the Initial and the Final result.
+    const rows = allRows;
 
-    // One email per vendor + branch + auction end time.
+    // One email per vendor + end day, all its auctions across branches. Days
+    // before LEGACY_GROUPING_BEFORE keep the old vendor + branch + end time
+    // groups, so their Finals still match (and thread under) the Initials sent.
     const groups = new Map();
     for (const r of rows) {
       const end = auctionEnd.get(`${r.vendor}\u0000${r.branch}\u0000${r.auction_number}`);
-      const key = `${r.vendor} | ${r.branch} | ${end}`;
-      if (!groups.has(key)) groups.set(key, { key, vendor: r.vendor, branch: r.branch, endDate: end, rows: [] });
-      groups.get(key).rows.push(r);
+      const day = String(end).slice(0, 10);
+      const key = day < legacyBefore ? `${r.vendor} | ${r.branch} | ${end}` : `${r.vendor} | ${day}`;
+      if (!groups.has(key)) groups.set(key, { key, vendor: r.vendor, branches: new Set(), ends: new Set(), endDate: end, rows: [] });
+      const g = groups.get(key);
+      g.branches.add(r.branch);
+      g.ends.add(end);
+      if (end > g.endDate) g.endDate = end;
+      g.rows.push(r);
     }
 
     const out = [...groups.values()].map((g) => {
@@ -254,8 +277,10 @@ export async function handleAuctionResultEmail(req, res) {
       return {
         key: g.key,
         vendor: g.vendor,
-        branch: g.branch,
+        branch: [...g.branches].sort().join(", "),
+        branches: [...g.branches].sort(),
         endDate: String(g.endDate).slice(0, 19),
+        endDates: [...g.ends].map((e) => String(e).slice(0, 19)).sort(),
         auctionNumbers: [...new Set(g.rows.map((r) => r.auction_number))].sort(),
         accountExecutives: [...new Set(g.rows.map((r) => r.account_executive).filter(Boolean))].sort(),
         summaryRows,

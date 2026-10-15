@@ -35,6 +35,7 @@ function manilaDate(daysAgo) {
   return new Date(Date.now() + 8 * 3600 * 1000 - daysAgo * 86400 * 1000).toISOString().slice(0, 10);
 }
 
+const vendorDayFinals = []; // Final groups under per-vendor-day grouping
 const publishedBy = new Map(); // auction number → dates it appeared in the Published email
 for (let i = 0; i < days; i++) {
   const date = manilaDate(i);
@@ -52,12 +53,27 @@ for (let i = 0; i < days; i++) {
     for (const h of pub.body.held || []) notes.push(`Published ${date}: held ${h.auctionNumber} — ${h.reasons.join("; ")}`);
   }
 
+  // Each stage twice: as live today (days before LEGACY_GROUPING_BEFORE keep the
+  // old vendor + branch + end time groups) and with the per-vendor-day grouping
+  // forced on every day (legacyBefore=2000-01-01), so it's exercised on history.
   for (const stage of ["initial", "final"]) {
-    const r = await call(handleAuctionResultEmail, { date, stage });
-    if (r.status !== 200) { problems.push(`${stage} ${date}: HTTP ${r.status} ${r.body.message || r.body.error}`); continue; }
-    for (const g of r.body.groups) {
-      if (g.endDate.slice(0, 10) !== date) problems.push(`${stage} ${date}: group ${g.key} has end date ${g.endDate}`);
-      if (!g.auctionNumbers.length) problems.push(`${stage} ${date}: group ${g.key} has no auction numbers`);
+    for (const legacyBefore of [undefined, "2000-01-01"]) {
+      const mode = legacyBefore ? `${stage}/vendor-day` : stage;
+      const r = await call(handleAuctionResultEmail, { date, stage, ...(legacyBefore ? { legacyBefore } : {}) });
+      if (r.status !== 200) { problems.push(`${mode} ${date}: HTTP ${r.status} ${r.body.message || r.body.error}`); continue; }
+      for (const g of r.body.groups) {
+        if (g.endDate.slice(0, 10) !== date) problems.push(`${mode} ${date}: group ${g.key} has end date ${g.endDate}`);
+        if (!g.auctionNumbers.length) problems.push(`${mode} ${date}: group ${g.key} has no auction numbers`);
+        if (!g.branches || !g.branches.length) problems.push(`${mode} ${date}: group ${g.key} has no branches`);
+      }
+      if (legacyBefore || date >= "2026-10-15") {
+        const seen = new Set();
+        for (const g of r.body.groups) {
+          if (seen.has(g.vendor)) problems.push(`${mode} ${date}: vendor ${g.vendor} split into several emails`);
+          seen.add(g.vendor);
+        }
+        if (stage === "final") vendorDayFinals.push(...r.body.groups.map((g) => ({ ...g, date })));
+      }
     }
   }
   process.stdout.write(".");
@@ -100,6 +116,33 @@ if (emailed.length) {
     if (t.first_pub && t.first_pub.slice(0, 10) < a.date)
       problems.push(`Published ${a.date}: ${a.auctionNumber} was already published ${t.first_pub} — re-publish`);
   }
+}
+// Final = every lot of the vendor's auctions that day, Unsold included.
+if (vendorDayFinals.length) {
+  const truth = await (
+    await client.query({
+      query: `
+        SELECT vendor, toString(toDate(e)) AS day, sum(n) AS lots
+        FROM (
+          SELECT vendor, auction_number, branch, max(end_date) AS e, uniqExact(lot_number) AS n
+          FROM xv3.mart_auction_vendor_analysis
+          WHERE end_date IS NOT NULL AND branch != 'HMRDEVZ TEST WAREHOUSE'
+            AND end_date >= toDateTime64({from:String}, 3, 'UTC') - INTERVAL 1 DAY
+          GROUP BY vendor, auction_number, branch
+        )
+        GROUP BY vendor, day`,
+      query_params: { from: `${manilaDate(days)} 00:00:00` },
+      format: "JSONEachRow",
+    })
+  ).json();
+  const lots = new Map(truth.map((t) => [`${t.vendor}|${t.day}`, Number(t.lots)]));
+  let unsoldGroups = 0;
+  for (const g of vendorDayFinals) {
+    const want = lots.get(`${g.vendor}|${g.date}`);
+    if (g.totals.count_of_lot !== want) problems.push(`final/vendor-day ${g.date}: ${g.vendor} has ${g.totals.count_of_lot} lots, mart says ${want}`);
+    if (g.summaryRows.some((r) => r.payment_status === "Unsold")) unsoldGroups++;
+  }
+  notes.push(`${vendorDayFinals.length} vendor-day Finals checked against the mart; ${unsoldGroups} include Unsold lots`);
 }
 await client.close();
 
