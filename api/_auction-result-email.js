@@ -324,7 +324,15 @@ export function publishedRowProblems(r) {
 export async function handleAuctionPublishedEmail(req, res) {
   let from;
   let to;
-  if (req.query.date) {
+  // ?open=1: every published auction that hasn't ended yet, whenever it was
+  // published — n8n's live Published email uses it with its own "already
+  // announced to the real list" memory, so nothing announced only in pilot (or
+  // missed while the workflow was off) is skipped at go-live.
+  const openOnly = req.query.open === "1" ? 1 : 0;
+  if (openOnly) {
+    from = "2000-01-01 00:00:00";
+    to = manilaTs(0);
+  } else if (req.query.date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
     from = `${req.query.date} 00:00:00`;
     to = `${req.query.date} 23:59:59`;
@@ -373,7 +381,8 @@ export async function handleAuctionPublishedEmail(req, res) {
                    formatDateTime(min(start_date), '%Y-%m-%d %H:%i:%S') AS mart_start,
                    formatDateTime(max(end_date), '%Y-%m-%d %H:%i:%S') AS mart_end
             FROM xv3.mart_auction_vendor_analysis
-            WHERE auction_number IN (SELECT auction_number FROM a WHERE published_date > toDateTime64({from:String}, 3) AND published_date <= toDateTime64({to:String}, 3))
+            WHERE auction_number IN (SELECT auction_number FROM a WHERE published_date > toDateTime64({from:String}, 3) AND published_date <= toDateTime64({to:String}, 3)
+                                       AND ({openOnly:UInt8} = 0 OR ending_time > toDateTime64({to:String}, 3)))
             GROUP BY auction_number
           )
           SELECT a.auction_number AS auction_number, a.hmr_id AS hmr_id, a.auction_name AS auction_name,
@@ -389,10 +398,11 @@ export async function handleAuctionPublishedEmail(req, res) {
           WHERE a.deleted_at IS NULL
             AND a.published_date > toDateTime64({from:String}, 3) AND a.published_date <= toDateTime64({to:String}, 3)
             AND ifNull(p.first_pub, a.published_date) > toDateTime64({from:String}, 3)
+            AND ({openOnly:UInt8} = 0 OR a.ending_time > toDateTime64({to:String}, 3))
             AND ifNull(v.branch, '') NOT IN {excluded:Array(String)}
           ORDER BY a.published_date, a.auction_number
         `,
-        query_params: { from, to, excluded: EXCLUDED_BRANCHES },
+        query_params: { from, to, excluded: EXCLUDED_BRANCHES, openOnly },
         format: "JSONEachRow",
       })
     ).json();
@@ -420,7 +430,7 @@ export async function handleAuctionPublishedEmail(req, res) {
       else auctions.push(item);
     }
     res.setHeader("Cache-Control", "no-store");
-    return res.status(200).json({ window: { from, to }, count: auctions.length, auctions, held });
+    return res.status(200).json({ window: { from, to }, open: !!openOnly, count: auctions.length, auctions, held });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't load published auctions", message: err.message });
   }

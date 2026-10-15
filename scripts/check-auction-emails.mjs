@@ -80,6 +80,21 @@ for (let i = 0; i < days; i++) {
 }
 console.log();
 
+// ?open=1 (live Published email): every published auction still open, none ended.
+{
+  const open = await call(handleAuctionPublishedEmail, { open: "1" });
+  if (open.status !== 200) problems.push(`Published open=1: HTTP ${open.status} ${open.body.message || open.body.error}`);
+  else {
+    const now = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ");
+    for (const a of open.body.auctions) {
+      if (a.endDate <= now) problems.push(`Published open=1: ${a.auctionNumber} already ended ${a.endDate}`);
+      if (!a.lots) problems.push(`Published open=1: ${a.auctionNumber} has 0 lots`);
+    }
+    for (const h of open.body.held || []) notes.push(`Published open=1: held ${h.auctionNumber} — ${h.reasons.join("; ")}`);
+    notes.push(`Published open=1: ${open.body.count} open published auctions`);
+  }
+}
+
 for (const [num, dates] of publishedBy)
   if (dates.length > 1) problems.push(`Published: ${num} appears on several days (${dates.join(", ")}) — a re-publish slipped through`);
 
