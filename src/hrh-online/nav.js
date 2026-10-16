@@ -21,6 +21,7 @@ export const NAV_GROUPS = [
     label: "Operations",
     items: [
       { key: "returnsCancellation", label: "Returns and Cancellation" },
+      { key: "pickers", label: "Pickers" },
     ],
   },
   {

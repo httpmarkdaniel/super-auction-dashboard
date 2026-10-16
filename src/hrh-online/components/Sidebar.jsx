@@ -12,6 +12,7 @@ const ICONS = {
   productAnalytics: "▤",
   barcodeAnalytics: "⬡",
   returnsCancellation: "⊗",
+  pickers: "⛟",
   weeklyBusinessReview: "▥",
   campaignCalendar: "◷",
 };

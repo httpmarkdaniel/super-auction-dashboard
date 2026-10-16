@@ -13,6 +13,7 @@ import { handleSearchKeywords } from "./_hrh-search-keywords.js";
 import { handleInsights } from "./_hrh-insights.js";
 import { handleCampaignSheet } from "./_hrh-campaign-sheet.js";
 import { handlePaymongoExpired } from "./_hrh-paymongo-expired.js";
+import { handlePickers } from "./_hrh-pickers.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -243,6 +244,7 @@ export default async function handler(req, res) {
   if (req.query.report === "insights") return handleInsights(req, res);
   if (req.query.report === "campaignSheet") return handleCampaignSheet(req, res);
   if (req.query.report === "paymongoExpired") return handlePaymongoExpired(req, res);
+  if (req.query.report === "pickers") return handlePickers(req, res);
   try {
     const { channel = "All Channels", from = "", to = "" } = req.query;
     const range = req.query.range || (from && to ? "custom" : "wtd");

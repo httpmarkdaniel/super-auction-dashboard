@@ -14,6 +14,7 @@ import CustomerSuccess from "./pages/CustomerSuccess";
 import WeeklyBusinessReview from "./pages/WeeklyBusinessReview";
 import CampaignCalendar from "./pages/CampaignCalendar";
 import ActionItems from "./pages/ActionItems";
+import Pickers from "./pages/Pickers";
 import { NAV_GROUPS } from "./nav";
 import { defaultDateRange } from "./dateRange";
 import "../uniform.css";
@@ -31,6 +32,7 @@ const PAGES = {
   weeklyBusinessReview: WeeklyBusinessReview,
   campaignCalendar: CampaignCalendar,
   actionItems: ActionItems,
+  pickers: Pickers,
 };
 
 // Page header copy for the "LIVE DASHBOARD UNIFORM FORMAT" shell (same as
@@ -45,6 +47,7 @@ const PAGE_META = {
   productAnalytics: { title: "Product Analytics", lead: "Product performance — best sellers, categories and repeat sellers." },
   barcodeAnalytics: { title: "Stocks", lead: "Stock on hand and how it moves." },
   returnsCancellation: { title: "Returns and Cancellation", lead: "Returned and cancelled orders, and why." },
+  pickers: { title: "Pickers", lead: "HMR MART picking — how fast orders get picked, by channel and by picker." },
   weeklyBusinessReview: { title: "Weekly Business Review", lead: "Platform and SKU performance summary for the selected period." },
   campaignCalendar: { title: "Interactive Calendar", lead: "HRH Online campaign schedule across HMR Online, Shopee and TikTok." },
   actionItems: { title: "Action Items", lead: "Item, owner, due date, action steps and status for each follow-up." },
@@ -74,7 +77,7 @@ export default function HrhOnlineApp() {
   const filters = { channel, dateRange };
   const meta = PAGE_META[page] || { title: page, lead: "" };
   const eyebrow = meta.eyebrow || GROUP_BY_KEY[page] || "HRH Online";
-  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar" || page === "actionItems";
+  const hideChannelFilter = page === "traffic" || page === "customerSuccess" || page === "barcodeAnalytics" || page === "weeklyBusinessReview" || page === "campaignCalendar" || page === "actionItems" || page === "pickers";
   const hideDateRange = page === "campaignCalendar";
 
   return (
