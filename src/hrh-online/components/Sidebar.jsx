@@ -1,4 +1,4 @@
-import { NAV_GROUPS, OPERATIONAL_FLAGS_KEY } from "../nav";
+import { NAV_GROUPS } from "../nav";
 
 // HRH Online sidebar — "LIVE DASHBOARD UNIFORM FORMAT" layout (see
 // src/uniform.css), same as the Auction sidebar: brand block, uppercase
@@ -11,11 +11,9 @@ const ICONS = {
   customers: "◉",
   productAnalytics: "▤",
   barcodeAnalytics: "⬡",
-  fulfillment: "▱",
   returnsCancellation: "⊗",
   weeklyBusinessReview: "▥",
   campaignCalendar: "◷",
-  [OPERATIONAL_FLAGS_KEY]: "⚠",
 };
 
 function NavItem({ itemKey, label, active, onClick }) {
@@ -48,16 +46,6 @@ export default function Sidebar({ active, onNavigate, channel }) {
           </nav>
         </div>
       ))}
-
-      <div className="uf-nav-title">Monitoring</div>
-      <nav className="uf-nav">
-        <NavItem
-          itemKey={OPERATIONAL_FLAGS_KEY}
-          label="Operational Flags"
-          active={active === OPERATIONAL_FLAGS_KEY}
-          onClick={() => onNavigate(OPERATIONAL_FLAGS_KEY)}
-        />
-      </nav>
 
       <div className="uf-nav-title">HMR Analytics</div>
       <nav className="uf-nav">
