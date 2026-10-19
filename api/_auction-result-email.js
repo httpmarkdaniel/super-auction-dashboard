@@ -177,8 +177,11 @@ export async function handleAuctionResultEmail(req, res) {
       })
     ).json();
 
+    // Unsold lots carry no For Approval status in the emails (user 2026-10-19):
+    // not in the table, the For Approval note, or the attached Excel.
     const allRows = lots.map((r) => ({
       ...r,
+      for_approval_status: r.payment_status === "Unsold" ? null : r.for_approval_status,
       qty: r.qty == null ? null : Number(r.qty),
       bp_percent: r.bp_percent == null ? null : Number(r.bp_percent),
       sf_percent: r.sf_percent == null ? null : Number(r.sf_percent),
