@@ -71,6 +71,15 @@ for (let i = 0; i < days; i++) {
         if (g.endDate.slice(0, 10) !== date) problems.push(`${mode} ${date}: group ${g.key} has end date ${g.endDate}`);
         if (!g.auctionNumbers.length) problems.push(`${mode} ${date}: group ${g.key} has no auction numbers`);
         if (!g.branches || !g.branches.length) problems.push(`${mode} ${date}: group ${g.key} has no branches`);
+        // One table per branch in the email: together they must equal the whole.
+        const lotSum = (rows) => rows.reduce((n, x) => n + x.count_of_lot, 0);
+        const bidSum = (rows) => rows.reduce((n, x) => n + x.bid_amount, 0);
+        const bs = g.branchSummaries || [];
+        if (bs.map((b) => b.branch).join("|") !== g.branches.join("|")) problems.push(`${mode} ${date}: group ${g.key} branch tables don't match its branches`);
+        if (bs.reduce((n, b) => n + lotSum(b.emailSummaryRows), 0) !== lotSum(g.emailSummaryRows))
+          problems.push(`${mode} ${date}: group ${g.key} branch tables' lots don't add up to the total`);
+        if (Math.abs(bs.reduce((n, b) => n + bidSum(b.emailSummaryRows), 0) - bidSum(g.emailSummaryRows)) > 0.01)
+          problems.push(`${mode} ${date}: group ${g.key} branch tables' bids don't add up to the total`);
       }
       const vendorDay = m.name === "/vendor-day" || (!m.name && date >= "2026-10-20");
       const vendorBranchDay = m.name === "/vendor-branch-day" || (!m.name && date >= "2026-10-15" && date < "2026-10-20");

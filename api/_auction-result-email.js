@@ -258,19 +258,33 @@ export async function handleAuctionResultEmail(req, res) {
       // row (distinct lots across both, so a lot under each isn't counted
       // twice). The Excel keeps the dashboard's own separate rows.
       const emailStatus = (v) => (v === "Paid" || v === "Released" ? "Paid/Released" : cleanStatus(v));
-      const byEmailStatus = new Map();
-      for (const r of g.rows) {
-        const ek = `${emailStatus(r.payment_status)} ${cleanStatus(r.for_approval_status)}`;
-        if (!byEmailStatus.has(ek))
-          byEmailStatus.set(ek, { payment_status: emailStatus(r.payment_status), for_approval_status: cleanStatus(r.for_approval_status), lots: new Set(), reserved_price: 0, bid_amount: 0 });
-        const e = byEmailStatus.get(ek);
-        e.lots.add(`${r.auction_number} ${r.lot_number}`);
-        e.reserved_price += r.reserved_price;
-        e.bid_amount += r.bid_amount;
-      }
-      const emailSummaryRows = [...byEmailStatus.values()]
-        .map((e) => ({ payment_status: e.payment_status, for_approval_status: e.for_approval_status, count_of_lot: e.lots.size, reserved_price: e.reserved_price, bid_amount: e.bid_amount }))
-        .sort((a, b) => b.count_of_lot - a.count_of_lot);
+      const emailSummary = (rows) => {
+        const byEmailStatus = new Map();
+        for (const r of rows) {
+          const ek = `${emailStatus(r.payment_status)} ${cleanStatus(r.for_approval_status)}`;
+          if (!byEmailStatus.has(ek))
+            byEmailStatus.set(ek, { payment_status: emailStatus(r.payment_status), for_approval_status: cleanStatus(r.for_approval_status), lots: new Set(), reserved_price: 0, bid_amount: 0 });
+          const e = byEmailStatus.get(ek);
+          e.lots.add(`${r.auction_number} ${r.lot_number}`);
+          e.reserved_price += r.reserved_price;
+          e.bid_amount += r.bid_amount;
+        }
+        return [...byEmailStatus.values()]
+          .map((e) => ({ payment_status: e.payment_status, for_approval_status: e.for_approval_status, count_of_lot: e.lots.size, reserved_price: e.reserved_price, bid_amount: e.bid_amount }))
+          .sort((a, b) => b.count_of_lot - a.count_of_lot);
+      };
+      const emailSummaryRows = emailSummary(g.rows);
+      // One table per branch in the email body (user 2026-10-20: one email per
+      // vendor, every branch's own table).
+      const branchSummaries = [...g.branches].sort().map((branch) => {
+        const rows = g.rows.filter((r) => r.branch === branch);
+        return {
+          branch,
+          auctionNumbers: [...new Set(rows.map((r) => r.auction_number))].sort(),
+          accountExecutives: [...new Set(rows.map((r) => r.account_executive).filter(Boolean))].sort(),
+          emailSummaryRows: emailSummary(rows),
+        };
+      });
 
       const topInfoMap = new Map();
       for (const r of g.rows) {
@@ -300,6 +314,7 @@ export async function handleAuctionResultEmail(req, res) {
         accountExecutives: [...new Set(g.rows.map((r) => r.account_executive).filter(Boolean))].sort(),
         summaryRows,
         emailSummaryRows,
+        branchSummaries,
         totals,
         fileName: excelFileName({ vendor: g.vendor, from: day, to: day }),
         xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
