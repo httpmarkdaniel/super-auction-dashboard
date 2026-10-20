@@ -53,29 +53,41 @@ for (let i = 0; i < days; i++) {
     for (const h of pub.body.held || []) notes.push(`Published ${date}: held ${h.auctionNumber} — ${h.reasons.join("; ")}`);
   }
 
-  // Each stage twice: as live today (days before LEGACY_GROUPING_BEFORE keep the
-  // old vendor + branch + end time groups) and with the per-vendor-branch-day grouping
-  // forced on every day (legacyBefore=2000-01-01), so it's exercised on history.
+  // Each stage three times: as live today (each day keeps the grouping its
+  // Initials went out with), and with the vendor + branch + day and the
+  // vendor + day (all branches) grouping forced on every day, so both are
+  // exercised on history.
+  const MODES = [
+    { name: "", params: {} },
+    { name: "/vendor-branch-day", params: { legacyBefore: "2000-01-01", vendorDayFrom: "2100-01-01" } },
+    { name: "/vendor-day", params: { legacyBefore: "2000-01-01", vendorDayFrom: "2000-01-01" } },
+  ];
   for (const stage of ["initial", "final"]) {
-    for (const legacyBefore of [undefined, "2000-01-01"]) {
-      const mode = legacyBefore ? `${stage}/vendor-day` : stage;
-      const r = await call(handleAuctionResultEmail, { date, stage, ...(legacyBefore ? { legacyBefore } : {}) });
+    for (const m of MODES) {
+      const mode = stage + m.name;
+      const r = await call(handleAuctionResultEmail, { date, stage, ...m.params });
       if (r.status !== 200) { problems.push(`${mode} ${date}: HTTP ${r.status} ${r.body.message || r.body.error}`); continue; }
       for (const g of r.body.groups) {
         if (g.endDate.slice(0, 10) !== date) problems.push(`${mode} ${date}: group ${g.key} has end date ${g.endDate}`);
         if (!g.auctionNumbers.length) problems.push(`${mode} ${date}: group ${g.key} has no auction numbers`);
         if (!g.branches || !g.branches.length) problems.push(`${mode} ${date}: group ${g.key} has no branches`);
       }
-      if (legacyBefore || date >= "2026-10-15") {
-        const seen = new Set();
-        for (const g of r.body.groups) {
+      const vendorDay = m.name === "/vendor-day" || (!m.name && date >= "2026-10-20");
+      const vendorBranchDay = m.name === "/vendor-branch-day" || (!m.name && date >= "2026-10-15" && date < "2026-10-20");
+      const seen = new Set();
+      for (const g of r.body.groups) {
+        if (vendorBranchDay) {
           const vb = `${g.vendor} @ ${g.branch}`;
           if (g.branches.length !== 1) problems.push(`${mode} ${date}: group ${g.key} spans ${g.branches.length} branches`);
           if (seen.has(vb)) problems.push(`${mode} ${date}: ${vb} split into several emails`);
           seen.add(vb);
         }
-        if (stage === "final") vendorDayFinals.push(...r.body.groups.map((g) => ({ ...g, date })));
+        if (vendorDay) {
+          if (seen.has(g.vendor)) problems.push(`${mode} ${date}: ${g.vendor} split into several emails`);
+          seen.add(g.vendor);
+        }
       }
+      if (stage === "final" && m.name === "/vendor-day") vendorDayFinals.push(...r.body.groups.map((g) => ({ ...g, date })));
     }
   }
   process.stdout.write(".");
@@ -134,12 +146,12 @@ if (emailed.length) {
       problems.push(`Published ${a.date}: ${a.auctionNumber} was already published ${t.first_pub} — re-publish`);
   }
 }
-// Final = every lot of the vendor's auctions that day, Unsold included.
+// Final = every lot of the vendor's auctions that day (all branches), Unsold included.
 if (vendorDayFinals.length) {
   const truth = await (
     await client.query({
       query: `
-        SELECT vendor, branch, toString(toDate(e)) AS day, sum(n) AS lots
+        SELECT vendor, toString(toDate(e)) AS day, sum(n) AS lots
         FROM (
           SELECT vendor, auction_number, branch, max(end_date) AS e, uniqExact(lot_number) AS n
           FROM xv3.mart_auction_vendor_analysis
@@ -147,19 +159,21 @@ if (vendorDayFinals.length) {
             AND end_date >= toDateTime64({from:String}, 3, 'UTC') - INTERVAL 1 DAY
           GROUP BY vendor, auction_number, branch
         )
-        GROUP BY vendor, branch, day`,
+        GROUP BY vendor, day`,
       query_params: { from: `${manilaDate(days)} 00:00:00` },
       format: "JSONEachRow",
     })
   ).json();
-  const lots = new Map(truth.map((t) => [`${t.vendor}|${t.branch}|${t.day}`, Number(t.lots)]));
+  const lots = new Map(truth.map((t) => [`${t.vendor}|${t.day}`, Number(t.lots)]));
   let unsoldGroups = 0;
+  let multiBranch = 0;
   for (const g of vendorDayFinals) {
-    const want = lots.get(`${g.vendor}|${g.branch}|${g.date}`);
+    if (g.branches.length > 1) multiBranch++;
+    const want = lots.get(`${g.vendor}|${g.date}`);
     if (g.totals.count_of_lot !== want) problems.push(`final/vendor-day ${g.date}: ${g.vendor} has ${g.totals.count_of_lot} lots, mart says ${want}`);
     if (g.summaryRows.some((r) => r.payment_status === "Unsold")) unsoldGroups++;
   }
-  notes.push(`${vendorDayFinals.length} vendor-day Finals checked against the mart; ${unsoldGroups} include Unsold lots`);
+  notes.push(`${vendorDayFinals.length} vendor-day Finals checked against the mart; ${multiBranch} span several branches; ${unsoldGroups} include Unsold lots`);
 }
 await client.close();
 

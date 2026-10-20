@@ -14,7 +14,7 @@ const client = createClient({
 //
 // Data for the automated "Initial Auction Result" email (n8n workflow
 // "automated auction email summary"): every auction that has ENDED in the
-// window, grouped one email per vendor + branch + end day, each
+// window, grouped one email per vendor + end day (all branches), each
 // with the Sales Summary rows and the exact same 3-sheet Excel file as the
 // Auction Result tab's Export button (shared builder in
 // src/utils/auctionResultWorkbook.js). Recipients/HTML live in n8n.
@@ -37,9 +37,12 @@ const DEFAULT_LOOKBACK_HOURS = 24;
 const DEFAULT_MIN_AGE_MINUTES = 60;
 const FINAL_AGE_HOURS = 72;
 const PUBLISHED_LOOKBACK_HOURS = 8;
-// Auctions ending on/after this day (Manila) are grouped one email per vendor +
-// branch + day; earlier ones keep vendor + branch + end time (their Initials went out so).
+// Grouping by end day (Manila), so Finals always match the Initials sent:
+//   before LEGACY_GROUPING_BEFORE      vendor + branch + end time
+//   before VENDOR_DAY_FROM             vendor + branch + day
+//   from VENDOR_DAY_FROM (user 10-20)  vendor + day, all branches in one email
 const LEGACY_GROUPING_BEFORE = "2026-10-15";
+const VENDOR_DAY_FROM = "2026-10-20";
 const TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
 function manilaTs(msAgo = 0) {
@@ -105,6 +108,8 @@ export async function handleAuctionResultEmail(req, res) {
   }
   // ?legacyBefore=YYYY-MM-DD: tests only (npm run check:emails) — n8n never sets it.
   const legacyBefore = /^\d{4}-\d{2}-\d{2}$/.test(req.query.legacyBefore || "") ? req.query.legacyBefore : LEGACY_GROUPING_BEFORE;
+  // ?vendorDayFrom=YYYY-MM-DD: tests only, same as legacyBefore.
+  const vendorDayFrom = /^\d{4}-\d{2}-\d{2}$/.test(req.query.vendorDayFrom || "") ? req.query.vendorDayFrom : VENDOR_DAY_FROM;
   // Scheduled Initial runs: never past what the mart actually contains.
   let dataAsOf = null;
   if (req.query.stage !== "final" && !req.query.date && !req.query.from) {
@@ -119,10 +124,11 @@ export async function handleAuctionResultEmail(req, res) {
     // every lot of each vendor's auctions that ended in the window.
     const lots = await (
       await client.query({
-        // An auction is in when its vendor's whole day at that branch has ended in
-        // the window (the latest end of the vendor's auctions there that day) — so
-        // one email per vendor + branch + day never goes out before all are in.
-        // Days before LEGACY_GROUPING_BEFORE keep the per-auction end.
+        // An auction is in when its whole group has ended in the window: the
+        // vendor's latest auction end that day (across branches from
+        // VENDOR_DAY_FROM, at that branch before) — so a group's email never goes
+        // out before all its auctions are in. Days before LEGACY_GROUPING_BEFORE
+        // keep the per-auction end.
         query: `
           WITH per_auction AS (
             SELECT v.vendor AS vendor, v.branch AS branch, v.auction_number AS auction_number,
@@ -137,8 +143,11 @@ export async function handleAuctionResultEmail(req, res) {
             INNER JOIN (
               SELECT vendor AS dv, branch AS db, end_day AS dd, max(auction_end) AS day_end FROM per_auction GROUP BY vendor, branch, end_day
             ) d ON d.dv = a.vendor AND d.db = a.branch AND d.dd = a.end_day
-            WHERE if(a.end_day < toDate({legacyBefore:String}), a.auction_end, d.day_end) > toDateTime64({from:String}, 3, 'UTC')
-              AND if(a.end_day < toDate({legacyBefore:String}), a.auction_end, d.day_end) <= toDateTime64({to:String}, 3, 'UTC')
+            INNER JOIN (
+              SELECT vendor AS vv, end_day AS vd, max(auction_end) AS vendor_day_end FROM per_auction GROUP BY vendor, end_day
+            ) vd ON vd.vv = a.vendor AND vd.vd = a.end_day
+            WHERE multiIf(a.end_day < toDate({legacyBefore:String}), a.auction_end, a.end_day < toDate({vendorDayFrom:String}), d.day_end, vd.vendor_day_end) > toDateTime64({from:String}, 3, 'UTC')
+              AND multiIf(a.end_day < toDate({legacyBefore:String}), a.auction_end, a.end_day < toDate({vendorDayFrom:String}), d.day_end, vd.vendor_day_end) <= toDateTime64({to:String}, 3, 'UTC')
           )
           SELECT
             toStartOfDay(toDateTime(v.dr_received)) AS dr_received,
@@ -172,7 +181,7 @@ export async function handleAuctionResultEmail(req, res) {
             v.for_approval_status
           ORDER BY bid_amount DESC
         `,
-        query_params: { ...window_, excluded: EXCLUDED_BRANCHES, legacyBefore },
+        query_params: { ...window_, excluded: EXCLUDED_BRANCHES, legacyBefore, vendorDayFrom },
         format: "JSONEachRow",
       })
     ).json();
@@ -200,14 +209,17 @@ export async function handleAuctionResultEmail(req, res) {
     // Unsold lots are included in both the Initial and the Final result.
     const rows = allRows;
 
-    // One email per vendor + branch + end day (all its auctions there that day).
-    // Days before LEGACY_GROUPING_BEFORE keep the old vendor + branch + end time
-    // groups, so their Finals still match (and thread under) the Initials sent.
+    // One email per vendor + end day, all its auctions across branches. Earlier
+    // days keep the grouping their Initials went out with (see VENDOR_DAY_FROM),
+    // so their Finals still match (and thread under) them.
     const groups = new Map();
     for (const r of rows) {
       const end = auctionEnd.get(`${r.vendor}\u0000${r.branch}\u0000${r.auction_number}`);
       const day = String(end).slice(0, 10);
-      const key = day < legacyBefore ? `${r.vendor} | ${r.branch} | ${end}` : `${r.vendor} | ${r.branch} | ${day}`;
+      const key =
+        day < legacyBefore ? `${r.vendor} | ${r.branch} | ${end}`
+        : day < vendorDayFrom ? `${r.vendor} | ${r.branch} | ${day}`
+        : `${r.vendor} | ${day}`;
       if (!groups.has(key)) groups.set(key, { key, vendor: r.vendor, branches: new Set(), ends: new Set(), endDate: end, rows: [] });
       const g = groups.get(key);
       g.branches.add(r.branch);
