@@ -110,9 +110,10 @@ export async function handleAuctionResultEmail(req, res) {
   const legacyBefore = /^\d{4}-\d{2}-\d{2}$/.test(req.query.legacyBefore || "") ? req.query.legacyBefore : LEGACY_GROUPING_BEFORE;
   // ?vendorDayFrom=YYYY-MM-DD: tests only, same as legacyBefore.
   const vendorDayFrom = /^\d{4}-\d{2}-\d{2}$/.test(req.query.vendorDayFrom || "") ? req.query.vendorDayFrom : VENDOR_DAY_FROM;
+  const followup = req.query.stage === "followup";
   // Scheduled Initial runs: never past what the mart actually contains.
   let dataAsOf = null;
-  if (req.query.stage !== "final" && !req.query.date && !req.query.from) {
+  if (req.query.stage !== "final" && !followup && !req.query.date && !req.query.from) {
     dataAsOf = await martDataAsOf();
     const fallbackTo = manilaTs(FRESHNESS_FALLBACK_HOURS * 3600 * 1000);
     const freshTo = dataAsOf && dataAsOf < window_.to ? dataAsOf : window_.to;
@@ -286,6 +287,42 @@ export async function handleAuctionResultEmail(req, res) {
         };
       });
 
+      // ?stage=followup (For Approval follow-ups, Day 1–3 at 8:30 AM): only the
+      // lots still For Approval, one row per lot, and an Excel of just those.
+      if (followup) {
+        const pending = new Map();
+        for (const r of g.rows) {
+          if (r.for_approval_status !== "For Approval") continue;
+          const k = `${r.auction_number}\u0000${r.lot_number}`;
+          if (!pending.has(k))
+            pending.set(k, { branch: r.branch, auction_number: r.auction_number, lot_number: r.lot_number, description: r.description, payment_status: cleanStatus(r.payment_status), reserved_price: 0, bid_amount: 0 });
+          const p = pending.get(k);
+          p.reserved_price += r.reserved_price;
+          p.bid_amount += r.bid_amount;
+        }
+        const approvalLots = [...pending.values()].sort((a, b) =>
+          a.auction_number.localeCompare(b.auction_number) || String(a.lot_number).localeCompare(String(b.lot_number), undefined, { numeric: true }));
+        if (!approvalLots.length) return null;
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(approvalLots.map((l) => ({
+          Branch: l.branch, "Auction No.": l.auction_number, "Lot No.": l.lot_number, Description: l.description,
+          "Payment Status": l.payment_status, "Approval Status": "For Approval", "Reserved Price": l.reserved_price, "Bid Amount": l.bid_amount,
+        }))), "For Approval");
+        const auctionNumbers = [...new Set(g.rows.map((r) => r.auction_number))].sort();
+        return {
+          key: g.key,
+          vendor: g.vendor,
+          branch: [...g.branches].sort().join(", "),
+          branches: [...g.branches].sort(),
+          endDate: String(g.endDate).slice(0, 19),
+          auctionNumbers,
+          accountExecutives: [...new Set(g.rows.map((r) => r.account_executive).filter(Boolean))].sort(),
+          approvalLots,
+          fileName: `For Approval lots - ${g.vendor} - ${auctionNumbers.join(", ")}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"),
+          xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
+        };
+      }
+
       const topInfoMap = new Map();
       for (const r of g.rows) {
         const k = `${r.vendor}\u0000${r.account_executive}\u0000${r.branch}\u0000${r.auction_number}`;
@@ -319,11 +356,11 @@ export async function handleAuctionResultEmail(req, res) {
         fileName: excelFileName({ vendor: g.vendor, from: day, to: day }),
         xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
       };
-    });
+    }).filter(Boolean);
     out.sort((a, b) => a.endDate.localeCompare(b.endDate) || a.vendor.localeCompare(b.vendor));
 
     res.setHeader("Cache-Control", "no-store");
-    const stage = req.query.stage === "final" ? "final" : "initial";
+    const stage = followup ? "followup" : req.query.stage === "final" ? "final" : "initial";
     return res.status(200).json({ stage, window: window_, dataAsOf, count: out.length, groups: out });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't build auction result emails", message: err.message });
