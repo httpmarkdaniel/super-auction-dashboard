@@ -230,6 +230,61 @@ export async function handleAuctionResultEmail(req, res) {
       g.rows.push(r);
     }
 
+    // Safety check (user 2026-10-26): an Initial / Final is held while any of its
+    // lots has bids in the CMS bid history but still reads Unsold in the mart —
+    // the lot was never finalized, so the email would report a sold lot as
+    // unsold. Held groups are left out of `groups` (the next run retries) and
+    // listed in `held` with the lots, for n8n's alert. A posted bid that differs
+    // from the CMS highest bid is only reported (`warnings`), never held.
+    // ?check=0 skips it (manual re-sends).
+    const held = [];
+    if (!followup && req.query.check !== "0" && groups.size) {
+      const auctions = [...new Set(rows.map((r) => r.auction_number))];
+      const cms = await (
+        await client.query({
+          query: `
+            SELECT auction_number AS an, lot_number AS ln, max(bid_amount) AS top_bid, count() AS bids
+            FROM cms.mart_cms_bid_history_report
+            WHERE auction_number IN {auctions:Array(String)}
+            GROUP BY auction_number, lot_number
+          `,
+          query_params: { auctions },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const topBid = new Map(cms.map((c) => [`${c.an}\u0000${c.ln}`, { top: Number(c.top_bid ?? 0), bids: Number(c.bids) }]));
+      for (const g of groups.values()) {
+        const lotState = new Map();
+        for (const r of g.rows) {
+          const k = `${r.auction_number}\u0000${r.lot_number}`;
+          const s = lotState.get(k) || { auction: r.auction_number, lot: r.lot_number, sold: false, bid: 0 };
+          if (r.payment_status !== "Unsold") s.sold = true;
+          s.bid += r.bid_amount;
+          lotState.set(k, s);
+        }
+        const problems = [];
+        const warnings = [];
+        for (const [k, s] of lotState) {
+          const c = topBid.get(k);
+          if (!c || !(c.top > 0)) continue;
+          if (!s.sold) problems.push({ auction: s.auction, lot: s.lot, issue: "has bids but reads Unsold (not finalized)", cmsTopBid: c.top, bids: c.bids });
+          else if (Math.abs(s.bid - c.top) > 0.5) warnings.push({ auction: s.auction, lot: s.lot, issue: "posted bid differs from the CMS highest bid", postedBid: s.bid, cmsTopBid: c.top });
+        }
+        g.warnings = warnings;
+        if (problems.length) {
+          held.push({
+            key: g.key,
+            vendor: g.vendor,
+            branches: [...g.branches].sort(),
+            endDate: String(g.endDate).slice(0, 19),
+            auctionNumbers: [...new Set(g.rows.map((r) => r.auction_number))].sort(),
+            problems: problems.sort((a, b) => a.auction.localeCompare(b.auction) || String(a.lot).localeCompare(String(b.lot), undefined, { numeric: true })),
+          });
+          groups.delete(g.key);
+        }
+      }
+    }
+
     const out = [...groups.values()].map((g) => {
       // Sales Summary — same arithmetic as type=auction-result: lots are
       // distinct (auction_number, lot_number) pairs; totals are their own
@@ -354,6 +409,7 @@ export async function handleAuctionResultEmail(req, res) {
         emailSummaryRows,
         branchSummaries,
         totals,
+        warnings: g.warnings || [],
         fileName: excelFileName({ vendor: g.vendor, from: day, to: day }),
         xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
       };
@@ -362,7 +418,7 @@ export async function handleAuctionResultEmail(req, res) {
 
     res.setHeader("Cache-Control", "no-store");
     const stage = followup ? "followup" : req.query.stage === "final" ? "final" : "initial";
-    return res.status(200).json({ stage, window: window_, dataAsOf, count: out.length, groups: out });
+    return res.status(200).json({ stage, window: window_, dataAsOf, count: out.length, groups: out, held });
   } catch (err) {
     return res.status(500).json({ error: "Couldn't build auction result emails", message: err.message });
   }
