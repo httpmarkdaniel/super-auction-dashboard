@@ -70,6 +70,19 @@ function resolveWindow(q) {
 
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
 
+// Lot descriptions come from a rich-text editor ("<p>2025 Honda Click…</p>"):
+// strip tags, decode the common entities, collapse whitespace.
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " };
+export function plainText(v) {
+  if (v == null) return v;
+  return String(v)
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ENTITIES[e])
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // The warehouse only sees the live system through an hourly sync (~:41) and
 // mart_auction_vendor_analysis is rebuilt only every 3 h (~02:05, 05:05, 08:05,
 // 11:05, 14:05, 17:05, 20:05, 23:05 Manila) from the latest :41 sync, so "now" is not
@@ -191,6 +204,7 @@ export async function handleAuctionResultEmail(req, res) {
     // not in the table, the For Approval note, or the attached Excel.
     const allRows = lots.map((r) => ({
       ...r,
+      description: plainText(r.description),
       for_approval_status: r.payment_status === "Unsold" ? null : r.for_approval_status,
       qty: r.qty == null ? null : Number(r.qty),
       bp_percent: r.bp_percent == null ? null : Number(r.bp_percent),
