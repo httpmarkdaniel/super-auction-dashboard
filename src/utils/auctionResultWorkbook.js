@@ -25,6 +25,20 @@ export function dash(value) {
   return value && String(value).trim() ? value : "—";
 }
 
+// Lot descriptions come from a rich-text editor ("<p>2025 Honda Click…</p>"):
+// strip tags, decode the common entities, collapse whitespace. Used by the
+// Description column below (Excel + PDF export) and the auction-result emails.
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " };
+export function plainText(v) {
+  if (v == null) return v;
+  return String(v)
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ENTITIES[e])
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function numOrBlank(value) {
   return value == null ? "" : value;
 }
@@ -83,7 +97,7 @@ export const DETAILED_COLUMNS = [
   ["Auction Number", (r) => dash(r.auction_number)],
   ["End Date", (r) => endDateOnly(r.end_date)],
   ["Lot Number", (r) => dash(r.lot_number)],
-  ["Description", (r) => dash(r.description)],
+  ["Description", (r) => dash(plainText(r.description))],
   ["Reserved Price", (r) => r.reserved_price ?? 0],
   ["Bid Amount", (r) => r.bid_amount ?? 0],
   ["BP %", (r) => numOrBlank(r.bp_percent)],

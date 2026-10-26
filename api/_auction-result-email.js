@@ -1,6 +1,6 @@
 import { createClient } from "@clickhouse/client";
 import XLSX from "xlsx-js-style";
-import { buildAuctionResultWorkbook, excelFileName } from "../src/utils/auctionResultWorkbook.js";
+import { buildAuctionResultWorkbook, excelFileName, plainText } from "../src/utils/auctionResultWorkbook.js";
 
 const client = createClient({
   url: process.env.CLICKHOUSE_HOST,
@@ -69,19 +69,6 @@ function resolveWindow(q) {
 }
 
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
-
-// Lot descriptions come from a rich-text editor ("<p>2025 Honda Click…</p>"):
-// strip tags, decode the common entities, collapse whitespace.
-const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " };
-export function plainText(v) {
-  if (v == null) return v;
-  return String(v)
-    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, " ")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, e) => ENTITIES[e])
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 // The warehouse only sees the live system through an hourly sync (~:41) and
 // mart_auction_vendor_analysis is rebuilt only every 3 h (~02:05, 05:05, 08:05,
