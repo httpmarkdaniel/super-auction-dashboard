@@ -153,6 +153,8 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
     const addr = XLSX.utils.encode_cell({ r, c });
     if (ws[addr]) ws[addr].s = { ...ws[addr].s, ...style };
   };
+  // Amounts without the peso sign (user 2026-10-27), same as the email tables.
+  const AMOUNT_FMT = "#,##0.00";
   const setFormat = (ws, r, c, fmt) => {
     const addr = XLSX.utils.encode_cell({ r, c });
     if (ws[addr]) ws[addr].z = fmt;
@@ -163,13 +165,13 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
   for (let i = 0; i < rows.length; i++) {
     const r = dataStartRow + i;
     setFormat(ws1, r, 2, "#,##0");
-    setFormat(ws1, r, 3, '"₱"#,##0.00');
-    setFormat(ws1, r, 4, '"₱"#,##0.00');
+    setFormat(ws1, r, 3, AMOUNT_FMT);
+    setFormat(ws1, r, 4, AMOUNT_FMT);
   }
   setStyle(ws1, totalRowIdx, 0, labelStyle);
   setFormat(ws1, totalRowIdx, 2, "#,##0");
-  setFormat(ws1, totalRowIdx, 3, '"₱"#,##0.00');
-  setFormat(ws1, totalRowIdx, 4, '"₱"#,##0.00');
+  setFormat(ws1, totalRowIdx, 3, AMOUNT_FMT);
+  setFormat(ws1, totalRowIdx, 4, AMOUNT_FMT);
   for (let c = 0; c < 5; c++) setStyle(ws1, totalRowIdx, c, { font: { bold: true } });
 
   ws1["!cols"] = [{ wch: 22 }, { wch: 20 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
@@ -209,8 +211,8 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
       setFormat(ws3, r, QTY_COL, "#,##0");
       setFormat(ws3, r, BP_COL, '0.00"%"');
       setFormat(ws3, r, SF_COL, '0.00"%"');
-      setFormat(ws3, r, BID_COL, '"₱"#,##0.00');
-      setFormat(ws3, r, RESERVED_COL, '"₱"#,##0.00');
+      setFormat(ws3, r, BID_COL, AMOUNT_FMT);
+      setFormat(ws3, r, RESERVED_COL, AMOUNT_FMT);
     }
 
     ws3["!cols"] = DETAILED_COLUMNS.map(([label], i) => ({ wch: i === DESCRIPTION_COL ? 44 : Math.max(14, label.length + 2) }));
