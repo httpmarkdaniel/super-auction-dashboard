@@ -189,8 +189,12 @@ export async function handleAuctionResultEmail(req, res) {
 
     // Unsold lots carry no For Approval status in the emails (user 2026-10-19):
     // not in the table, the For Approval note, or the attached Excel.
+    // Final: a lot still Outstanding is shown as "Unpaid" (user 2026-10-28) —
+    // email table and Excel; the Initial and follow-ups keep "Outstanding".
+    const final = req.query.stage === "final";
     const allRows = lots.map((r) => ({
       ...r,
+      payment_status: final && r.payment_status === "Outstanding" ? "Unpaid" : r.payment_status,
       description: plainText(r.description),
       for_approval_status: r.payment_status === "Unsold" ? null : r.for_approval_status,
       qty: r.qty == null ? null : Number(r.qty),
