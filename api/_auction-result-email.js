@@ -285,15 +285,15 @@ export async function handleAuctionResultEmail(req, res) {
       }
     }
 
-    const out = [...groups.values()].map((g) => {
-      // Sales Summary — same arithmetic as type=auction-result: lots are
-      // distinct (auction_number, lot_number) pairs; totals are their own
-      // distinct count, never a sum of the grouped rows.
+    // Sales Summary — same arithmetic as type=auction-result: lots are
+    // distinct (auction_number, lot_number) pairs; totals are their own
+    // distinct count, never a sum of the grouped rows.
+    const salesSummary = (rows) => {
       const byStatus = new Map();
       const allLots = new Set();
       let totalReserved = 0;
       let totalBid = 0;
-      for (const r of g.rows) {
+      for (const r of rows) {
         const lotKey = `${r.auction_number}\u0000${r.lot_number}`;
         allLots.add(lotKey);
         totalReserved += r.reserved_price;
@@ -310,6 +310,29 @@ export async function handleAuctionResultEmail(req, res) {
         .map((s) => ({ payment_status: s.payment_status, for_approval_status: s.for_approval_status, count_of_lot: s.lots.size, reserved_price: s.reserved_price, bid_amount: s.bid_amount }))
         .sort((a, b) => b.count_of_lot - a.count_of_lot);
       const totals = { count_of_lot: allLots.size, reserved_price: totalReserved, bid_amount: totalBid };
+      return { summaryRows, totals };
+    };
+    // Same three-sheet workbook as the dashboard's Export button.
+    const resultWorkbook = (rows) => {
+      const { summaryRows, totals } = salesSummary(rows);
+      const topInfoMap = new Map();
+      for (const r of rows) {
+        const k = `${r.vendor}\u0000${r.account_executive}\u0000${r.branch}\u0000${r.auction_number}`;
+        const t = topInfoMap.get(k);
+        if (!t) topInfoMap.set(k, { vendor: r.vendor, account_executive: r.account_executive, branch: r.branch, auction_number: r.auction_number, end_date: r.end_date });
+        else if (r.end_date > t.end_date) t.end_date = r.end_date;
+      }
+      const topInfo = [...topInfoMap.values()].sort((a, b) => String(b.end_date).localeCompare(String(a.end_date)));
+      return buildAuctionResultWorkbook({
+        totals,
+        rows: summaryRows,
+        topInfo,
+        detailed: { rows, truncated: false, truncationNote: null },
+      });
+    };
+
+    const out = [...groups.values()].map((g) => {
+      const { summaryRows, totals } = salesSummary(g.rows);
 
       // Email body table only: Paid and Released shown as one "Paid/Released"
       // row (distinct lots across both, so a lot under each isn't counted
@@ -359,11 +382,9 @@ export async function handleAuctionResultEmail(req, res) {
         const approvalLots = [...pending.values()].sort((a, b) =>
           a.auction_number.localeCompare(b.auction_number) || String(a.lot_number).localeCompare(String(b.lot_number), undefined, { numeric: true }));
         if (!approvalLots.length) return null;
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(approvalLots.map((l) => ({
-          Branch: l.branch, "Auction No.": l.auction_number, "Lot No.": l.lot_number, Description: l.description,
-          "Payment Status": l.payment_status, "Approval Status": "For Approval", "Reserved Price": l.reserved_price, "Bid Amount": l.bid_amount,
-        }))), "For Approval");
+        // Same layout as the Initial/Final Excel (user 2026-10-28), limited to
+        // the For Approval lots.
+        const wb = resultWorkbook(g.rows.filter((r) => r.for_approval_status === "For Approval"));
         const auctionNumbers = [...new Set(g.rows.map((r) => r.auction_number))].sort();
         return {
           key: g.key,
@@ -379,21 +400,7 @@ export async function handleAuctionResultEmail(req, res) {
         };
       }
 
-      const topInfoMap = new Map();
-      for (const r of g.rows) {
-        const k = `${r.vendor}\u0000${r.account_executive}\u0000${r.branch}\u0000${r.auction_number}`;
-        const t = topInfoMap.get(k);
-        if (!t) topInfoMap.set(k, { vendor: r.vendor, account_executive: r.account_executive, branch: r.branch, auction_number: r.auction_number, end_date: r.end_date });
-        else if (r.end_date > t.end_date) t.end_date = r.end_date;
-      }
-      const topInfo = [...topInfoMap.values()].sort((a, b) => String(b.end_date).localeCompare(String(a.end_date)));
-
-      const wb = buildAuctionResultWorkbook({
-        totals,
-        rows: summaryRows,
-        topInfo,
-        detailed: { rows: g.rows, truncated: false, truncationNote: null },
-      });
+      const wb = resultWorkbook(g.rows);
       const day = String(g.endDate).slice(0, 10);
 
       return {
