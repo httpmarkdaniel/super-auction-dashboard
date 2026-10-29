@@ -167,6 +167,9 @@ if (vendorDayFinals.length) {
           WHERE end_date IS NOT NULL AND branch != 'HMRDEVZ TEST WAREHOUSE'
             AND end_date >= toDateTime64({from:String}, 3, 'UTC') - INTERVAL 1 DAY
           GROUP BY vendor, auction_number, branch
+          -- never published + nothing sold = never auctioned, not emailed
+          HAVING countIf(status != 'Unsold') > 0
+              OR auction_number IN (SELECT auction_number FROM xv3.auctions WHERE published_date IS NOT NULL)
         )
         GROUP BY vendor, day`,
       query_params: { from: `${manilaDate(days)} 00:00:00` },

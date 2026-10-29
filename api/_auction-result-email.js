@@ -137,6 +137,11 @@ export async function handleAuctionResultEmail(req, res) {
             FROM xv3.mart_auction_vendor_analysis v
             WHERE v.end_date IS NOT NULL AND v.branch NOT IN {excluded:Array(String)}
             GROUP BY v.vendor, v.branch, v.auction_number
+            -- Never published on hmr.ph and nothing sold = never auctioned (e.g.
+            -- 001HNC, user 2026-10-29): left out. Unpublished negotiated sales
+            -- (5xxO-N, ... - N) have sold lots, so they stay.
+            HAVING countIf(v.status != 'Unsold') > 0
+                OR v.auction_number IN (SELECT auction_number FROM xv3.auctions WHERE published_date IS NOT NULL)
           ),
           ended AS (
             SELECT a.vendor AS vendor, a.branch AS branch, a.auction_number AS auction_number
