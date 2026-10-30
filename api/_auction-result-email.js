@@ -209,6 +209,29 @@ export async function handleAuctionResultEmail(req, res) {
       reserved_price: Number(r.reserved_price ?? 0),
     }));
 
+    // Excel Bidder Number (user 2026-10-30): the bidder of each lot's latest CMS
+    // bid (argMax by time, then amount) — matches the mart's bidder_name on
+    // 376/379 sold lots checked. Sold lots only; Unsold stays blank.
+    if (allRows.length) {
+      const winners = await (
+        await client.query({
+          query: `
+            SELECT auction_number AS an, toString(lot_number) AS ln, argMax(bidder_number, (bid_created_at, bid_amount)) AS bn
+            FROM cms.mart_cms_bid_history_report
+            WHERE auction_number IN {auctions:Array(String)} AND lot_number IS NOT NULL AND bid_created_at IS NOT NULL
+            GROUP BY auction_number, ln
+          `,
+          query_params: { auctions: [...new Set(allRows.map((r) => r.auction_number))] },
+          format: "JSONEachRow",
+        })
+      ).json();
+      const winner = new Map(winners.map((w) => [`${w.an}|${w.ln}`, w.bn]));
+      for (const r of allRows) {
+        const bn = r.payment_status === "Unsold" ? null : winner.get(`${r.auction_number}|${r.lot_number}`);
+        r.bidder_number = Number(bn) > 0 ? Number(bn) : null;
+      }
+    }
+
     // Each auction's end = its latest lot end_date (same as Top Info) —
     // computed over ALL lots so the Final's group keys match the Initial's.
     const auctionEnd = new Map();
@@ -336,7 +359,7 @@ export async function handleAuctionResultEmail(req, res) {
         totals,
         rows: summaryRows,
         topInfo,
-        detailed: { rows, truncated: false, truncationNote: null },
+        detailed: { rows, truncated: false, truncationNote: null, withBidderNumber: true },
       });
     };
 

@@ -113,6 +113,15 @@ export const SF_COL = 17;
 export const DESCRIPTION_COL = 13;
 export const DETAILED_COL_COUNT = DETAILED_COLUMNS.length;
 
+// Auction-result emails only (user 2026-10-30): a Bidder Number column right
+// after Bid Amount — the winning bidder of each sold lot (blank when unsold).
+// The dashboard export keeps DETAILED_COLUMNS as is.
+const BIDDER_NUMBER_COLUMNS = [
+  ...DETAILED_COLUMNS.slice(0, BID_COL + 1),
+  ["Bidder Number", (r) => r.bidder_number ?? ""],
+  ...DETAILED_COLUMNS.slice(BID_COL + 1),
+];
+
 // ============================================================
 // EXCEL — xlsx-js-style (SheetJS fork with cell style support).
 // Three sheets: "Auction Result Summary" (the Sales Summary table itself
@@ -193,31 +202,33 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
   // detailed header row, except for the truncation warning (kept when
   // present — a data-completeness notice, not a decorative summary total).
   if (detailed) {
+    const columns = detailed.withBidderNumber ? BIDDER_NUMBER_COLUMNS : DETAILED_COLUMNS;
+    const col = (label) => columns.findIndex(([l]) => l === label);
     const aoa3 = [];
     if (detailed.truncated) aoa3.push([detailed.truncationNote]);
     const headerRow3 = aoa3.length;
-    aoa3.push(DETAILED_COLUMNS.map(([label]) => label));
+    aoa3.push(columns.map(([label]) => label));
     const dataStartRow3 = aoa3.length;
-    detailed.rows.forEach((r) => aoa3.push(DETAILED_COLUMNS.map(([, get]) => get(r))));
+    detailed.rows.forEach((r) => aoa3.push(columns.map(([, get]) => get(r))));
 
     const ws3 = XLSX.utils.aoa_to_sheet(aoa3);
 
     if (detailed.truncated) setStyle(ws3, 0, 0, { font: { italic: true, color: { rgb: "B00020" } } });
 
-    for (let c = 0; c < DETAILED_COL_COUNT; c++) setStyle(ws3, headerRow3, c, headerStyle);
+    for (let c = 0; c < columns.length; c++) setStyle(ws3, headerRow3, c, headerStyle);
 
     for (let i = 0; i < detailed.rows.length; i++) {
       const r = dataStartRow3 + i;
-      setFormat(ws3, r, QTY_COL, "#,##0");
-      setFormat(ws3, r, BP_COL, '0.00"%"');
-      setFormat(ws3, r, SF_COL, '0.00"%"');
-      setFormat(ws3, r, BID_COL, AMOUNT_FMT);
-      setFormat(ws3, r, RESERVED_COL, AMOUNT_FMT);
+      setFormat(ws3, r, col("Qty"), "#,##0");
+      setFormat(ws3, r, col("BP %"), '0.00"%"');
+      setFormat(ws3, r, col("SF %"), '0.00"%"');
+      setFormat(ws3, r, col("Bid Amount"), AMOUNT_FMT);
+      setFormat(ws3, r, col("Reserved Price"), AMOUNT_FMT);
     }
 
-    ws3["!cols"] = DETAILED_COLUMNS.map(([label], i) => ({ wch: i === DESCRIPTION_COL ? 44 : Math.max(14, label.length + 2) }));
+    ws3["!cols"] = columns.map(([label]) => ({ wch: label === "Description" ? 44 : Math.max(14, label.length + 2) }));
     ws3["!autofilter"] = {
-      ref: XLSX.utils.encode_range({ s: { r: headerRow3, c: 0 }, e: { r: dataStartRow3 + detailed.rows.length - 1, c: DETAILED_COL_COUNT - 1 } }),
+      ref: XLSX.utils.encode_range({ s: { r: headerRow3, c: 0 }, e: { r: dataStartRow3 + detailed.rows.length - 1, c: columns.length - 1 } }),
     };
 
     XLSX.utils.book_append_sheet(wb, ws3, "Detailed Auction Result");
