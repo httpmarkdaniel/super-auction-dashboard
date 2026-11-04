@@ -138,6 +138,8 @@ const BIDDER_NUMBER_COLUMNS = [
 // Excel passes "Client Code" with codes in r.vendor (user 2026-11-04); the
 // dashboard Export keeps "Vendor".
 export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed, vendorLabel = "Vendor" }) {
+  // Client Code (emails): a vendor with no code is a blank cell, not "—" (user 2026-11-04).
+  const vendorCell = (v) => (vendorLabel === "Vendor" ? dash(v) : v || "");
   const wb = XLSX.utils.book_new();
 
   const headerStyle = {
@@ -192,7 +194,7 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed, ve
   // --- Sheet 2: Top Info ---
   const topInfoAoa = [
     [vendorLabel, "Account Executive", "Branch", "Auction Number", "End Date"],
-    ...topInfo.map((t) => [dash(t.vendor), dash(t.account_executive), dash(t.branch), dash(t.auction_number), endDateOnly(t.end_date)]),
+    ...topInfo.map((t) => [vendorCell(t.vendor), dash(t.account_executive), dash(t.branch), dash(t.auction_number), endDateOnly(t.end_date)]),
   ];
   const ws2 = XLSX.utils.aoa_to_sheet(topInfoAoa);
   for (let c = 0; c < 5; c++) setStyle(ws2, 0, c, headerStyle);
@@ -205,7 +207,7 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed, ve
   // detailed header row, except for the truncation warning (kept when
   // present — a data-completeness notice, not a decorative summary total).
   if (detailed) {
-    const columns = (detailed.withBidderNumber ? BIDDER_NUMBER_COLUMNS : DETAILED_COLUMNS).map(([l, g]) => [l === "Vendor" ? vendorLabel : l, g]);
+    const columns = (detailed.withBidderNumber ? BIDDER_NUMBER_COLUMNS : DETAILED_COLUMNS).map(([l, g]) => (l === "Vendor" ? [vendorLabel, (r) => vendorCell(r.vendor)] : [l, g]));
     const col = (label) => columns.findIndex(([l]) => l === label);
     const aoa3 = [];
     if (detailed.truncated) aoa3.push([detailed.truncationNote]);
