@@ -134,7 +134,10 @@ const BIDDER_NUMBER_COLUMNS = [
 // click itself (see useAuctionResult.js's fetchAuctionResultExportData)
 // — never fetched on normal page load.
 // ============================================================
-export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) {
+// vendorLabel: header of the Vendor columns (Top Info, Detailed). The emailed
+// Excel passes "Client Code" with codes in r.vendor (user 2026-11-04); the
+// dashboard Export keeps "Vendor".
+export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed, vendorLabel = "Vendor" }) {
   const wb = XLSX.utils.book_new();
 
   const headerStyle = {
@@ -188,7 +191,7 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
 
   // --- Sheet 2: Top Info ---
   const topInfoAoa = [
-    ["Vendor", "Account Executive", "Branch", "Auction Number", "End Date"],
+    [vendorLabel, "Account Executive", "Branch", "Auction Number", "End Date"],
     ...topInfo.map((t) => [dash(t.vendor), dash(t.account_executive), dash(t.branch), dash(t.auction_number), endDateOnly(t.end_date)]),
   ];
   const ws2 = XLSX.utils.aoa_to_sheet(topInfoAoa);
@@ -202,7 +205,7 @@ export function buildAuctionResultWorkbook({ totals, rows, topInfo, detailed }) 
   // detailed header row, except for the truncation warning (kept when
   // present — a data-completeness notice, not a decorative summary total).
   if (detailed) {
-    const columns = detailed.withBidderNumber ? BIDDER_NUMBER_COLUMNS : DETAILED_COLUMNS;
+    const columns = (detailed.withBidderNumber ? BIDDER_NUMBER_COLUMNS : DETAILED_COLUMNS).map(([l, g]) => [l === "Vendor" ? vendorLabel : l, g]);
     const col = (label) => columns.findIndex(([l]) => l === label);
     const aoa3 = [];
     if (detailed.truncated) aoa3.push([detailed.truncationNote]);

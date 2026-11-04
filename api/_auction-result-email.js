@@ -70,6 +70,35 @@ function resolveWindow(q) {
 
 const cleanStatus = (v) => (v && String(v).trim() ? v : "No Status");
 
+// Client names never appear in any auction email (data privacy, user 2026-11-04):
+// each vendor is shown by its client code (xv3.vendors.vendor_code); a vendor
+// with no code is simply left out — the auction number identifies the event.
+// Matched on the company name as in the mart (trimmed, case ignored); a vendor
+// with several codes (e.g. 2622 / 2622.10) uses the shortest.
+const normVendorName = (v) => String(v ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+async function vendorCodeMap(names) {
+  const wanted = [...new Set(names.map(normVendorName).filter(Boolean))];
+  if (!wanted.length) return new Map();
+  const rows = await (
+    await client.query({
+      query: `
+        SELECT name, argMin(code, (length(code), code)) AS best_code
+        FROM (
+          SELECT upper(replaceRegexpAll(trim(t.1), '\\\\s+', ' ')) AS name, trim(ifNull(t.2, '')) AS code
+          FROM (SELECT vendor_id, argMax(tuple(company_name, vendor_code, deleted_at), (_airbyte_extracted_at, _ab_cdc_cursor)) AS t FROM xv3.vendors GROUP BY vendor_id)
+          WHERE t.3 IS NULL
+        )
+        WHERE code != '' AND name IN {names:Array(String)}
+        GROUP BY name
+      `,
+      query_params: { names: wanted },
+      format: "JSONEachRow",
+    })
+  ).json();
+  return new Map(rows.map((r) => [r.name, r.best_code]));
+}
+const codeFor = (codes, vendor) => codes.get(normVendorName(vendor)) || "";
+
 // The warehouse only sees the live system through an hourly sync (~:41) and
 // mart_auction_vendor_analysis is rebuilt only every 3 h (~02:05, 05:05, 08:05,
 // 11:05, 14:05, 17:05, 20:05, 23:05 Manila) from the latest :41 sync, so "now" is not
@@ -232,6 +261,8 @@ export async function handleAuctionResultEmail(req, res) {
       }
     }
 
+    const vendorCodes = await vendorCodeMap(allRows.map((r) => r.vendor));
+
     // Each auction's end = its latest lot end_date (same as Top Info) —
     // computed over ALL lots so the Final's group keys match the Initial's.
     const auctionEnd = new Map();
@@ -307,6 +338,7 @@ export async function handleAuctionResultEmail(req, res) {
           held.push({
             key: g.key,
             vendor: g.vendor,
+            vendorCode: codeFor(vendorCodes, g.vendor),
             branches: [...g.branches].sort(),
             endDate: String(g.endDate).slice(0, 19),
             auctionNumbers: [...new Set(g.rows.map((r) => r.auction_number))].sort(),
@@ -345,7 +377,9 @@ export async function handleAuctionResultEmail(req, res) {
       return { summaryRows, totals };
     };
     // Same three-sheet workbook as the dashboard's Export button.
-    const resultWorkbook = (rows) => {
+    // Emailed Excel: the Vendor columns carry the client code, never the name.
+    const resultWorkbook = (namedRows) => {
+      const rows = namedRows.map((r) => ({ ...r, vendor: codeFor(vendorCodes, r.vendor) }));
       const { summaryRows, totals } = salesSummary(rows);
       const topInfoMap = new Map();
       for (const r of rows) {
@@ -360,6 +394,7 @@ export async function handleAuctionResultEmail(req, res) {
         rows: summaryRows,
         topInfo,
         detailed: { rows, truncated: false, truncationNote: null, withBidderNumber: true },
+        vendorLabel: "Client Code",
       });
     };
 
@@ -426,8 +461,9 @@ export async function handleAuctionResultEmail(req, res) {
           endDate: String(g.endDate).slice(0, 19),
           auctionNumbers,
           accountExecutives: [...new Set(g.rows.map((r) => r.account_executive).filter(Boolean))].sort(),
+          vendorCode: codeFor(vendorCodes, g.vendor),
           approvalLots,
-          fileName: `For Approval lots - ${g.vendor} - ${auctionNumbers.join(", ")}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"),
+          fileName: `For Approval lots - ${codeFor(vendorCodes, g.vendor) ? codeFor(vendorCodes, g.vendor) + " - " : ""}${auctionNumbers.join(", ")}.xlsx`.replace(/[\\/:*?"<>|]/g, "-"),
           xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
         };
       }
@@ -449,7 +485,8 @@ export async function handleAuctionResultEmail(req, res) {
         branchSummaries,
         totals,
         warnings: g.warnings || [],
-        fileName: excelFileName({ vendor: g.vendor, from: day, to: day }),
+        vendorCode: codeFor(vendorCodes, g.vendor),
+        fileName: codeFor(vendorCodes, g.vendor) ? excelFileName({ vendor: codeFor(vendorCodes, g.vendor), from: day, to: day }) : `Auction Summary(${day}).xlsx`,
         xlsxBase64: XLSX.write(wb, { type: "base64", bookType: "xlsx" }),
       };
     }).filter(Boolean);
@@ -573,6 +610,7 @@ export async function handleAuctionPublishedEmail(req, res) {
     // with the mart (what the dashboard and the Initial/Final emails use) and make
     // sense. Anything that fails is held back — listed under `held` with the reason,
     // never sent — and goes out on a later run once the data agrees (n8n dedupes).
+    const vendorCodes = await vendorCodeMap(rows.flatMap((r) => r.vendors || []));
     const auctions = [];
     const held = [];
     for (const r of rows) {
@@ -582,7 +620,9 @@ export async function handleAuctionPublishedEmail(req, res) {
         auctionName: r.auction_name || "",
         branchCode: r.branch_code || r.branch || "",
         branch: r.branch || r.store_name || "",
-        vendors: r.vendors || [],
+        // Client codes only — never vendor names (user 2026-11-04); vendors without a code are left out.
+        clientCodes: [...new Set((r.vendors || []).map((v) => codeFor(vendorCodes, v)).filter(Boolean))].sort(),
+        vendors: r.vendors || [], // TEMP: removed once Apps Script reads clientCodes
         lots: Number(r.lots || 0),
         publishedDate: r.published_date,
         startDate: r.start_date,
